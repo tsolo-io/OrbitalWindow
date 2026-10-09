@@ -8,6 +8,17 @@
 # Home folders are private to their owner.
 chmod 750 /config
 
-# A Desktop folder for launcher icons.
-mkdir -p /config/Desktop
-chown abc:abc /config/Desktop
+# Launcher icons: every ow-*.desktop that add-ons installed goes on the Desktop; icons of
+# add-ons that are no longer installed are removed. Other files on the Desktop are left alone.
+desktop=/config/Desktop
+mkdir -p "$desktop"
+chown abc:abc "$desktop"
+for src in /usr/share/applications/ow-*.desktop; do
+    [ -e "$src" ] || continue
+    dst="$desktop/$(basename "$src")"
+    install -o abc -g abc -m 755 "$src" "$dst"
+done
+for icon in "$desktop"/ow-*.desktop; do
+    [ -e "$icon" ] || continue
+    [ -e "/usr/share/applications/$(basename "$icon")" ] || rm -f -- "$icon"
+done

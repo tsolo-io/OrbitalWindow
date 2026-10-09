@@ -14,6 +14,7 @@ import logging
 import secrets
 import threading
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -21,6 +22,7 @@ from typing import Any
 import docker
 from docker.types import DeviceRequest, EndpointConfig
 
+from .addons import Addon
 from .config import Settings
 from .db import Database
 
@@ -29,6 +31,7 @@ log = logging.getLogger(__name__)
 LABEL_MANAGED = "ow.managed"
 LABEL_USER = "ow.user"
 LABEL_ROLE = "ow.role"
+LABEL_ADDONS = "ow.addons"
 DESKTOP_PORT = 3000
 
 
@@ -79,7 +82,9 @@ def build_spec(
     settings: Settings,
     gpu_vendor: GpuVendor,
     secret: str,
+    addons: Sequence[Addon] = (),
 ) -> DesktopSpec:
+    """The container for ``user``. Add-on mounts and environment are applied here (no rebuild)."""
     name = user["name"]
     cname = container_name(name)
     net = network_name(name)
@@ -104,6 +109,8 @@ def build_spec(
             f"Basic {basic}"
         ),
         f"traefik.http.services.{router}.loadbalancer.server.port": str(DESKTOP_PORT),
+        # Add-ons active at start; used to find desktops that use a revoked add-on's mounts.
+        LABEL_ADDONS: ",".join(a.key for a in addons),
     }
 
     uid = str(user["uid_gid"])
@@ -125,6 +132,12 @@ def build_spec(
         str(root / "shared" / "scratch"): {"bind": "/scratch", "mode": "rw"},
         str(root / "shared" / "data"): {"bind": "/shared", "mode": "ro"},
     }
+    for addon in addons:
+        for m in addon.spec.mounts:
+            mode = "ro" if m.read_only else "rw"
+            volumes[str(root / m.source)] = {"bind": m.target, "mode": mode}
+        for key, value in addon.spec.env.items():
+            environment.setdefault(key, value)
 
     devices: list[str] = []
     device_requests: list[DeviceRequest] = []
@@ -177,17 +190,6 @@ class Desktops:
     def gpu_vendor(self) -> GpuVendor:
         return GpuVendor(self._db.get_setting("gpu_vendor", GpuVendor.NVIDIA))
 
-    def image_for(self, user: dict[str, Any]) -> str:
-        """The image a start would use. Per-user images (phase 2) take precedence."""
-        if user["image_id"] is None:
-            raise DesktopError("No desktop has been chosen yet.")
-        image = self._db.one("SELECT * FROM images WHERE id = ?", [user["image_id"]])
-        if image is None or not image["enabled"]:
-            raise DesktopError("The chosen desktop is no longer available. Please pick another.")
-        if image["status"] != "ready":
-            raise DesktopError("The chosen desktop is still being prepared. Try again shortly.")
-        return image["image_ref"]
-
     def state(self, user: str) -> DesktopState:
         try:
             container = self._client.containers.get(container_name(user))
@@ -208,15 +210,34 @@ class Desktops:
 
     # --- lifecycle ---------------------------------------------------------------------------
 
-    def start(self, user: dict[str, Any]) -> None:
+    def addons_in_use(self, user: str) -> set[str]:
+        """Keys of the add-ons the running desktop was started with."""
+        try:
+            container = self._client.containers.get(container_name(user))
+        except docker.errors.NotFound:
+            return set()
+        return {k for k in container.labels.get(LABEL_ADDONS, "").split(",") if k}
+
+    def start(self, user: dict[str, Any], image_ref: str, addons: Sequence[Addon] = ()) -> None:
         name = user["name"]
         if user["disabled"]:
             raise DesktopError("This account is disabled.")
+        for addon in addons:
+            for m in addon.spec.mounts:
+                if not (self._settings.root / m.source).is_dir():
+                    raise DesktopError(
+                        f"{addon.spec.label} is not installed on the server yet. "
+                        "Switch it off, or ask your administrator."
+                    )
         with self._locks[name]:
-            image_ref = self.image_for(user)
             self._remove_container(name)
             spec = build_spec(
-                user, image_ref, self._settings, self.gpu_vendor(), secrets.token_urlsafe(32)
+                user,
+                image_ref,
+                self._settings,
+                self.gpu_vendor(),
+                secrets.token_urlsafe(32),
+                addons,
             )
             network = self._ensure_network(name)
             self._connect_traefik(network)

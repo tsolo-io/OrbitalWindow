@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+key: rstudio
+label: R and RStudio
+description: R from Ubuntu and RStudio Desktop from Posit.
+restricted: false
+apt: [r-base, r-base-dev]
+script: install.sh
+launchers: [ow-rstudio.desktop]

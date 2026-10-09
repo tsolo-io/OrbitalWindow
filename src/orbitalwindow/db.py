@@ -67,6 +67,33 @@ MIGRATIONS: list[str] = [
     -- Monotonic allocators (UID/MAC, GID). Never decremented, so numbers are never reused.
     CREATE TABLE counters (name VARCHAR PRIMARY KEY, value INTEGER NOT NULL);
     """,
+    # 2: phase 2 images, add-ons and packages
+    """
+    CREATE TABLE pkg_index (image_id INTEGER NOT NULL, name VARCHAR NOT NULL);
+    CREATE INDEX pkg_index_lookup ON pkg_index (image_id, name);
+    CREATE TABLE user_packages (
+        user_id INTEGER NOT NULL, name VARCHAR NOT NULL, PRIMARY KEY (user_id, name)
+    );
+    CREATE TABLE user_image (
+        user_id INTEGER PRIMARY KEY,
+        image_ref VARCHAR NOT NULL,
+        built_from_image_id INTEGER,
+        pkg_hash VARCHAR,         -- hash of everything that went into the last good build
+        status VARCHAR NOT NULL,  -- queued | building | ready | failed
+        built_at TIMESTAMP,
+        build_id INTEGER          -- latest build (for its log)
+    );
+    CREATE TABLE addon_settings (
+        key VARCHAR PRIMARY KEY,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        restricted_override BOOLEAN   -- NULL = use addon.yaml
+    );
+    CREATE TABLE addon_grants (user_id INTEGER NOT NULL, key VARCHAR NOT NULL,
+                               PRIMARY KEY (user_id, key));
+    CREATE TABLE user_addons (user_id INTEGER NOT NULL, key VARCHAR NOT NULL,
+                              PRIMARY KEY (user_id, key));
+    ALTER TABLE images ADD COLUMN docker_id VARCHAR;  -- image ID of the last good base build
+    """,
 ]
 
 

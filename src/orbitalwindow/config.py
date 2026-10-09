@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     )
     # Folder holding the desktop image build context (deploy/image), mounted read-only.
     image_context: Path = Path("/opt/orbitalwindow/image")
+    # Add-on definitions (addons/), mounted read-only.
+    addons_dir: Path = Path("/opt/orbitalwindow/addons")
     default_desktop: str = "ubuntu-xfce"
     webtop_repo: str = "lscr.io/linuxserver/webtop"
 

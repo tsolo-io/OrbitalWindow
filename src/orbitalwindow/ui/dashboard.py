@@ -11,6 +11,7 @@ from nicegui import run, ui
 from ..desktops import DesktopError, DesktopState, desktop_path
 from ..users import ValidationError
 from .common import PageAuth, authenticate, form_input, frame, guarded, service
+from .software import software_card
 
 STATE_TEXT = {
     DesktopState.STOPPED: ("Stopped", "grey"),
@@ -49,6 +50,7 @@ def dashboard(request: Request, pw: str = "") -> RedirectResponse | None:
         ui.notify(text, type=kind, timeout=8000)
     with ui.column().classes("w-full max-w-3xl mx-auto p-4 gap-4"):
         desktop_card(auth)
+        software_card(auth)
         files_card(auth)
         password_card()
     return None
@@ -67,6 +69,9 @@ def desktop_card(auth: PageAuth) -> None:
         admin_note = ui.label("Your desktop was stopped by an administrator.").classes(
             "text-caption text-grey-8"
         )
+        restart_note = ui.label(
+            "New software is ready. Stop and start your desktop to use it."
+        ).classes("text-caption text-orange-9")
         images = {i["id"]: i["label"] for i in svc.enabled_images()}
         picker = ui.select(images, label="Desktop").classes("w-64")
         ui.label("You can change the desktop while it is stopped.").classes(
@@ -101,6 +106,9 @@ def desktop_card(auth: PageAuth) -> None:
             stop_btn.set_enabled(not busy["value"])
             picker.set_enabled(not running and not busy["value"])
             admin_note.set_visibility(state is DesktopState.STOPPED and user["stopped_by_admin"])
+            restart_note.set_visibility(
+                state is DesktopState.RUNNING and await run.io_bound(svc.restart_needed, user_id)
+            )
             if picker.value != user["image_id"]:
                 picker.set_value(user["image_id"])
 

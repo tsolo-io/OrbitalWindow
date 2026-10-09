@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+[Desktop Entry]
+Type=Application
+Name=MATLAB
+Comment=MATLAB (shared install)
+Exec=/opt/matlab/bin/matlab -desktop
+Icon=/opt/matlab/bin/glnxa64/cef_resources/matlab_icon.png
+Terminal=false
+Categories=Development;Science;Math;

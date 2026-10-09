@@ -62,6 +62,8 @@ def admin_users(request: Request) -> RedirectResponse | None:
             <q-td :props="props">
               <q-btn flat dense no-caps icon="key" label="Reset password"
                      @click="$parent.$emit('reset', props.row)" />
+              <q-btn flat dense no-caps icon="apps" label="Software access"
+                     @click="$parent.$emit('grants', props.row)" />
               <q-btn v-if="props.row.running" flat dense no-caps icon="stop" label="Stop desktop"
                      color="negative" @click="$parent.$emit('stop', props.row)" />
             </q-td>
@@ -101,7 +103,11 @@ def admin_users(request: Request) -> RedirectResponse | None:
             ui.notify(f"Stopped the desktop of {row['name']}.")
             await refresh()
 
+        async def on_grants(e) -> None:
+            grants_dialog(auth, e.args["id"], e.args["name"])
+
         table.on("reset", guarded(auth, on_reset))
+        table.on("grants", guarded(auth, on_grants))
         table.on("stop", guarded(auth, on_stop))
         table.refresh_rows = refresh  # type: ignore[attr-defined]
         ui.timer(5.0, refresh)
@@ -146,4 +152,39 @@ def create_dialog(auth: PageAuth, table: ui.table) -> None:
         with ui.row():
             ui.button("Create", on_click=create).props("no-caps")
             ui.button("Cancel", on_click=dialog.close).props("no-caps flat")
+    dialog.open()
+
+
+def grants_dialog(auth: PageAuth, user_id: int, name: str) -> None:
+    """Grant or revoke restricted add-ons for one user."""
+    svc = service()
+    restricted = [
+        a for a in svc.software.enabled_addons()
+        if svc.software.is_restricted(
+            a, svc.db.one("SELECT * FROM addon_settings WHERE key = ?", [a.key])
+        )
+    ]  # fmt: skip
+    granted = svc.grants(user_id)
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label(f"Software access for {name}").classes("text-h6")
+        if not restricted:
+            ui.label("There are no restricted add-ons.")
+        ui.label(
+            "Restricted add-ons need your permission. Open add-ons are available to everyone."
+        ).classes("text-caption text-grey-7")
+        for addon in restricted:
+            box = ui.checkbox(addon.spec.label, value=addon.key in granted)
+
+            async def toggle(e, key: str = addon.key) -> None:
+                if auth.check() is None:
+                    return
+                if e.value:
+                    await run.io_bound(svc.grant_addon, auth.user.name, user_id, key)
+                    ui.notify("Granted. The user can now switch it on.")
+                else:
+                    result = await run.io_bound(svc.revoke_addon, auth.user.name, user_id, key)
+                    ui.notify(" ".join(["Revoked.", *result.warnings]))
+
+            box.on_value_change(toggle)
+        ui.button("Done", on_click=dialog.close).props("no-caps")
     dialog.open()
