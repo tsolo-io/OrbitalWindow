@@ -32,6 +32,7 @@ LABEL_MANAGED = "ow.managed"
 LABEL_USER = "ow.user"
 LABEL_ROLE = "ow.role"
 LABEL_ADDONS = "ow.addons"
+LABEL_GROUPS = "ow.groups"
 DESKTOP_PORT = 3000
 
 
@@ -83,6 +84,7 @@ def build_spec(
     gpu_vendor: GpuVendor,
     secret: str,
     addons: Sequence[Addon] = (),
+    groups: Sequence[dict[str, Any]] = (),
 ) -> DesktopSpec:
     """The container for ``user``. Add-on mounts and environment are applied here (no rebuild)."""
     name = user["name"]
@@ -132,6 +134,11 @@ def build_spec(
         str(root / "shared" / "scratch"): {"bind": "/scratch", "mode": "rw"},
         str(root / "shared" / "data"): {"bind": "/shared", "mode": "ro"},
     }
+    for g in groups:
+        volumes[str(root / "groups" / g["name"])] = {"bind": f"/groups/{g['name']}", "mode": "rw"}
+    # The init hook creates these groups and adds abc to them (s6 keeps supplementary groups).
+    environment["OW_GROUPS"] = " ".join(f"{g['name']}:{g['gid']}" for g in groups)
+    labels[LABEL_GROUPS] = ",".join(g["name"] for g in groups)
     for addon in addons:
         for m in addon.spec.mounts:
             mode = "ro" if m.read_only else "rw"
@@ -218,7 +225,21 @@ class Desktops:
             return set()
         return {k for k in container.labels.get(LABEL_ADDONS, "").split(",") if k}
 
-    def start(self, user: dict[str, Any], image_ref: str, addons: Sequence[Addon] = ()) -> None:
+    def groups_in_use(self, user: str) -> set[str] | None:
+        """Groups the running desktop was started with; None when it is not running."""
+        try:
+            container = self._client.containers.get(container_name(user))
+        except docker.errors.NotFound:
+            return None
+        return {g for g in container.labels.get(LABEL_GROUPS, "").split(",") if g}
+
+    def start(
+        self,
+        user: dict[str, Any],
+        image_ref: str,
+        addons: Sequence[Addon] = (),
+        groups: Sequence[dict[str, Any]] = (),
+    ) -> None:
         name = user["name"]
         if user["disabled"]:
             raise DesktopError("This account is disabled.")
@@ -238,6 +259,7 @@ class Desktops:
                 self.gpu_vendor(),
                 secrets.token_urlsafe(32),
                 addons,
+                groups,
             )
             network = self._ensure_network(name)
             self._connect_traefik(network)
@@ -306,17 +328,15 @@ class Desktops:
             net.remove()
 
     def ensure_traefik_connected(self) -> int:
-        """Reconnect Traefik to every user network that has a running desktop. Returns fixes."""
+        """Reconnect Traefik to every user network (desktop or file manager) that has a member.
+        Returns the number of networks fixed."""
         fixed = 0
+        traefik = self._settings.traefik_container
         for net in self._client.networks.list(filters={"label": f"{LABEL_MANAGED}=true"}):
             net.reload()
             names = {c.name for c in net.containers}
             user = net.attrs.get("Labels", {}).get(LABEL_USER)
-            if (
-                user
-                and container_name(user) in names
-                and self._settings.traefik_container not in names
-            ):
+            if user and names - {traefik} and traefik not in names:
                 self._connect_traefik(net)
                 fixed += 1
         return fixed

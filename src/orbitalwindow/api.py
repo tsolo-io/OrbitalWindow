@@ -22,7 +22,10 @@ from .users import ValidationError
 
 router = APIRouter()
 
-DESKTOP_URI_RE = re.compile(r"^/desktop/([a-z0-9]+)(?:/|$|\?)")
+OWNER_URI_RE = {
+    "desktop": re.compile(r"^/desktop/([a-z0-9]+)(?:/|$|\?)"),
+    "files": re.compile(r"^/files/([a-z0-9]+)(?:/|$|\?)"),
+}
 # Characters allowed in a post-login target; anything else falls back to the default.
 NEXT_RE = re.compile(r"^/[A-Za-z0-9/_.~%=&?-]*$")
 HOST_RE = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]{1,5})?$|^\[[0-9a-fA-F:]+\](:[0-9]{1,5})?$")
@@ -34,9 +37,12 @@ class Access(IntEnum):
     DENY = 403
 
 
-def desktop_access(user: SessionUser | None, forwarded_uri: str) -> tuple[Access, str | None]:
-    """Decide forwardAuth for ``/desktop/<owner>/…``. Only the owner gets in; admins included."""
-    match = DESKTOP_URI_RE.match(forwarded_uri or "")
+def owner_access(
+    user: SessionUser | None, forwarded_uri: str, kind: str = "desktop"
+) -> tuple[Access, str | None]:
+    """Decide forwardAuth for ``/desktop/<owner>/…`` or ``/files/<owner>/…``. Only the owner
+    gets in; admins included."""
+    match = OWNER_URI_RE[kind].match(forwarded_uri or "")
     if match is None:
         return Access.DENY, None
     if user is None:
@@ -165,7 +171,17 @@ def _login_redirect(request: Request, uri: str) -> Response:
 def auth_desktop(request: Request) -> Response:
     """Traefik forwardAuth for desktop routers. Also used for their WebSocket upgrades."""
     uri = request.headers.get("x-forwarded-uri", "")
-    access, owner = desktop_access(current_user(request), uri)
+    return _owner_response(request, uri, "desktop")
+
+
+@router.get("/auth/files")
+def auth_files(request: Request) -> Response:
+    """Traefik forwardAuth for file manager routers. ``X-OW-User`` logs the owner in there."""
+    return _owner_response(request, request.headers.get("x-forwarded-uri", ""), "files")
+
+
+def _owner_response(request: Request, uri: str, kind: str) -> Response:
+    access, owner = owner_access(current_user(request), uri, kind)
     if access is Access.ALLOW:
         return PlainTextResponse("ok", headers={"X-OW-User": owner or ""})
     if access is Access.LOGIN:

@@ -33,10 +33,20 @@ class Samba:
 
     def write_users(self, db: Database) -> None:
         users = db.all("SELECT name, uid_gid AS uid FROM users ORDER BY name")
+        groups = []
+        for g in db.all("SELECT id, name, gid FROM groups ORDER BY name"):
+            members = db.all(
+                "SELECT u.name FROM group_members m JOIN users u ON u.id = m.user_id "
+                "WHERE m.group_id = ? ORDER BY u.name",
+                [g["id"]],
+            )
+            groups.append(
+                {"name": g["name"], "gid": g["gid"], "members": [m["name"] for m in members]}
+            )
         self._state_dir.mkdir(parents=True, exist_ok=True)
         path = self._state_dir / "users.json"
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"users": users}, indent=2))
+        tmp.write_text(json.dumps({"users": users, "groups": groups}, indent=2))
         os.chmod(tmp, 0o644)
         tmp.replace(path)
 

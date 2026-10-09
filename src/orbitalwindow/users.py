@@ -97,6 +97,8 @@ def insert_user(
     with db.transaction():
         if get_user_by_name(db, name):
             raise ValidationError(f"A user called '{name}' already exists.")
+        if db.scalar("SELECT count(*) FROM groups WHERE name = ?", [name]):
+            raise ValidationError(f"There is already a group called '{name}'.")
         alloc = allocate(db)
         db.execute(
             """INSERT INTO users (name, display_name, pw_hash, is_admin, uid_gid, mac, image_id,

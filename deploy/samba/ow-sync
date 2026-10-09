@@ -3,7 +3,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Make Unix users and [<user>] shares match /etc/ow/users.json, then reload smbd.
+# Make Unix users, groups and shares match /etc/ow/users.json, then reload smbd:
+#   [<user>]   the user's home folder, for that user only
+#   [<group>]  a group/project folder, for its members (files stay group-writable)
+#   [scratch]  the shared scratch folder, for every user (sticky: only owners delete)
 # Usage: ow-sync [--no-reload]
 set -eu
 
@@ -11,19 +14,23 @@ USERS_JSON=/etc/ow/users.json
 SHARES=/etc/samba/ow-shares.conf
 UID_MIN=2000
 UID_MAX=2999
+GID_MIN=3000
+GID_MAX=3999
 
 [ -f "$USERS_JSON" ] || { echo "no $USERS_JSON yet" >&2; : > "$SHARES"; exit 0; }
 
 valid_name() { echo "$1" | grep -Eq '^[a-z][a-z0-9]{1,30}$'; }
+valid_number() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
 
 tmp=$(mktemp)
-wanted=$(mktemp)
-trap 'rm -f "$tmp" "$wanted"' EXIT
+wanted_users=$(mktemp)
+wanted_groups=$(mktemp)
+trap 'rm -f "$tmp" "$wanted_users" "$wanted_groups"' EXIT
 
 jq -r '.users[] | "\(.name) \(.uid)"' "$USERS_JSON" | while read -r name uid; do
-    valid_name "$name" || { echo "skipping invalid name: $name" >&2; continue; }
-    case "$uid" in ''|*[!0-9]*) echo "skipping $name: bad uid" >&2; continue ;; esac
-    echo "$name" >> "$wanted"
+    valid_name "$name" || { echo "skipping invalid user name: $name" >&2; continue; }
+    valid_number "$uid" || { echo "skipping $name: bad uid" >&2; continue; }
+    echo "$name" >> "$wanted_users"
     if ! getent group "$name" >/dev/null; then addgroup -g "$uid" "$name"; fi
     if ! getent passwd "$name" >/dev/null; then
         adduser -D -H -h "/srv/users/$name" -s /sbin/nologin -u "$uid" -G "$name" "$name"
@@ -40,14 +47,59 @@ jq -r '.users[] | "\(.name) \(.uid)"' "$USERS_JSON" | while read -r name uid; do
 SHARE
 done
 
-# Remove Unix users (in our UID range) that are no longer in users.json.
+jq -r '(.groups // [])[] | "\(.name) \(.gid) \(.members | join(","))"' "$USERS_JSON" |
+while read -r name gid members; do
+    valid_name "$name" || { echo "skipping invalid group name: $name" >&2; continue; }
+    valid_number "$gid" || { echo "skipping group $name: bad gid" >&2; continue; }
+    echo "$name" >> "$wanted_groups"
+    if ! getent group "$name" >/dev/null; then addgroup -g "$gid" "$name"; fi
+    # Membership: exactly the listed users.
+    current=$(getent group "$name" | cut -d: -f4 | tr ',' ' ')
+    for u in $current; do
+        case ",$members," in *",$u,"*) ;; *) delgroup "$u" "$name" 2>/dev/null || true ;; esac
+    done
+    for u in $(echo "$members" | tr ',' ' '); do
+        valid_name "$u" && getent passwd "$u" >/dev/null && addgroup "$u" "$name" 2>/dev/null || true
+    done
+    cat >> "$tmp" <<SHARE
+[$name]
+   path = /srv/groups/$name
+   valid users = @$name
+   read only = no
+   browseable = yes
+   force group = $name
+   create mask = 0664
+   directory mask = 2775
+
+SHARE
+done
+
+all_users=$(tr '\n' ' ' < "$wanted_users")
+if [ -n "$all_users" ]; then
+    cat >> "$tmp" <<SHARE
+[scratch]
+   path = /srv/scratch
+   valid users = $all_users
+   read only = no
+   browseable = yes
+   create mask = 0644
+   directory mask = 0755
+
+SHARE
+fi
+
+# Remove Unix users and groups (in our ranges) that are no longer in users.json.
 getent passwd | awk -F: -v lo="$UID_MIN" -v hi="$UID_MAX" '$3 >= lo && $3 <= hi {print $1}' |
 while read -r name; do
-    if ! grep -qx "$name" "$wanted"; then
+    if ! grep -qx "$name" "$wanted_users"; then
         pdbedit -x -u "$name" >/dev/null 2>&1 || true
         deluser "$name" 2>/dev/null || true
         delgroup "$name" 2>/dev/null || true
     fi
+done
+getent group | awk -F: -v lo="$GID_MIN" -v hi="$GID_MAX" '$3 >= lo && $3 <= hi {print $1}' |
+while read -r name; do
+    grep -qx "$name" "$wanted_groups" || delgroup "$name" 2>/dev/null || true
 done
 
 mv "$tmp" "$SHARES"

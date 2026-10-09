@@ -71,6 +71,7 @@ def create_app(settings: Settings | None = None, service: Service | None = None)
 def mount_ui(app: FastAPI, settings: Settings) -> None:
     from .ui import (  # noqa: F401  (registers the pages)
         admin_addons,
+        admin_groups,
         admin_images,
         admin_settings,
         admin_system,

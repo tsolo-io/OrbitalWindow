@@ -17,6 +17,8 @@ from typing import Any
 
 import docker
 
+from . import disk
+from . import groups as groups_mod
 from . import users as users_mod
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
@@ -24,6 +26,9 @@ from .builds import TAG_RE, Builder, desktop_image_ref
 from .config import Settings
 from .db import Database
 from .desktops import DesktopError, Desktops, DesktopState, GpuVendor, container_name
+from .disk import HostSpace
+from .disk import Usage as DiskUsage
+from .files import FileManagers, files_container_name
 from .hostops import HostOps
 from .metrics import ContainerMetrics, GpuMetrics, Usage
 from .reconcile import reconcile
@@ -69,6 +74,7 @@ class Service:
         )
         self.limiter = LoginRateLimiter(settings.login_max_failures, settings.login_window_seconds)
         self.desktops = Desktops(client, self.db, settings)
+        self.files = FileManagers(client, settings)
         self.samba = Samba(client, settings.samba_container, settings.samba_state_dir)
         self.software = Software(self.db, settings.addons_dir)
         self.builder = Builder(
@@ -89,6 +95,13 @@ class Service:
             self.db.set_setting("gpu_vendor", os.environ.get("OW_GPU_VENDOR", GpuVendor.NVIDIA))
         if self.db.get_setting("hostname") is None:
             self.db.set_setting("hostname", self.settings.hostname)
+        # The layout was prepared before the DB was open; write the scratch README with the
+        # configured retention now.
+        try:
+            days = int(self.db.get_setting("scratch_retention_days") or 30)
+            self.hostops.prepare_layout(os.getuid(), days)
+        except docker.errors.DockerException as e:
+            log.warning("could not update the scratch README: %s", e)
         self.builder.start()
         if not self.db.scalar("SELECT count(*) FROM images"):
             try:
@@ -211,6 +224,7 @@ class Service:
         except (SambaError, docker.errors.DockerException) as e:
             log.exception("samba for %s", row["name"])
             result.warnings.append(f"Windows file sharing (Samba) was not updated: {e}")
+        result.warnings += self.ensure_files(row["id"])
         return result
 
     def change_own_password(self, user_id: int, current: str, new: str) -> tuple[int, Result]:
@@ -283,10 +297,12 @@ class Service:
             )
             try:
                 self.desktops.stop(user)
+                self.files.stop(user["name"])
             except docker.errors.DockerException as e:
                 result.warnings.append(f"The desktop could not be stopped: {e}")
         else:
             self.db.execute("UPDATE users SET disabled = false WHERE id = ?", [user_id])
+            result.warnings += self.ensure_files(user_id)
         try:
             self.samba.set_enabled(user["name"], not disabled)
         except (SambaError, docker.errors.DockerException) as e:
@@ -305,11 +321,20 @@ class Service:
         result = Result()
         try:
             self.desktops.stop(user)
+            self.files.remove(name)
+            self.hostops.remove_files_data(name)
         except docker.errors.DockerException as e:
-            result.warnings.append(f"The desktop could not be removed: {e}")
+            result.warnings.append(f"The desktop or file manager could not be removed: {e}")
         self.builder.remove_user_image(name)
         with self.db.transaction():
-            for table in ("user_packages", "user_addons", "addon_grants", "user_image"):
+            self.db.execute("DELETE FROM disk_usage WHERE subject = 'user' AND name = ?", [name])
+            for table in (
+                "user_packages",
+                "user_addons",
+                "addon_grants",
+                "user_image",
+                "group_members",
+            ):
                 self.db.execute(f"DELETE FROM {table} WHERE user_id = ?", [user_id])
             self.db.execute("DELETE FROM users WHERE id = ?", [user_id])
         try:
@@ -345,6 +370,13 @@ class Service:
         )
         self.db.audit(actor, "user.limits", user["name"], f"cpus={cpus_v} mem_gb={mem_v}")
 
+    def set_quota(self, actor: str, user_id: int, quota_gb: Any) -> None:
+        """Soft disk quota for the home folder (empty = none)."""
+        user = self._require_user(user_id)
+        quota = _parse_quota(quota_gb)
+        self.db.execute("UPDATE users SET quota_gb = ? WHERE id = ?", [quota, user_id])
+        self.db.audit(actor, "user.quota", user["name"], str(quota))
+
     def set_display_name(self, actor: str, user_id: int, display_name: str) -> None:
         user = self._require_user(user_id)
         display_name = display_name.strip()
@@ -352,6 +384,148 @@ class Service:
             raise ValidationError("The name must be 1–80 characters.")
         self.db.execute("UPDATE users SET display_name = ? WHERE id = ?", [display_name, user_id])
         self.db.audit(actor, "user.rename", user["name"], display_name)
+
+    # --- file manager ------------------------------------------------------------------------
+
+    def ensure_files(self, user_id: int, *, recreate: bool = False) -> list[str]:
+        """Start (or recreate) the user's file manager. Returns warnings instead of raising."""
+        user = self._require_user(user_id)
+        if user["disabled"]:
+            return []
+        try:
+            if recreate or not self._files_exists(user["name"]):
+                self.hostops.create_files_data(user["name"], user["uid_gid"])
+            self.files.ensure(user, groups_mod.groups_of(self.db, user_id), recreate=recreate)
+        except docker.errors.DockerException as e:
+            log.exception("file manager for %s", user["name"])
+            return [f"The web file manager could not be started: {e}"]
+        return []
+
+    def _files_exists(self, name: str) -> bool:
+        try:
+            self.client.containers.get(files_container_name(name))
+        except docker.errors.NotFound:
+            return False
+        return True
+
+    # --- groups ------------------------------------------------------------------------------
+
+    def list_groups(self) -> list[dict[str, Any]]:
+        return groups_mod.list_groups(self.db)
+
+    def groups_of(self, user_id: int) -> list[dict[str, Any]]:
+        return groups_mod.groups_of(self.db, user_id)
+
+    def group_members(self, group_id: int) -> list[dict[str, Any]]:
+        return groups_mod.members(self.db, group_id)
+
+    def create_group(
+        self, actor: str, name: str, description: str = "", quota_gb: Any = None
+    ) -> Result:
+        quota = _parse_quota(quota_gb)
+        group = groups_mod.insert_group(self.db, name, description, quota)
+        self.db.audit(actor, "group.create", group["name"], f"gid={group['gid']}")
+        result = Result()
+        try:
+            self.hostops.create_group_dir(group["name"], group["gid"])
+        except docker.errors.DockerException as e:
+            result.warnings.append(f"The group folder could not be created: {e}")
+        result.warnings += self._sync_samba()
+        return result
+
+    def set_group_quota(self, actor: str, group_id: int, quota_gb: Any) -> None:
+        group = self._require_group(group_id)
+        quota = _parse_quota(quota_gb)
+        self.db.execute("UPDATE groups SET quota_gb = ? WHERE id = ?", [quota, group_id])
+        self.db.audit(actor, "group.quota", group["name"], str(quota))
+
+    def set_group_members(self, actor: str, group_id: int, user_ids: list[int]) -> Result:
+        """Replace the member list. Samba and file managers follow at once; running desktops
+        see the change after a restart (the dashboard says so)."""
+        group = self._require_group(group_id)
+        before = {m["id"] for m in groups_mod.members(self.db, group_id)}
+        after = set(user_ids)
+        names = {r["id"]: r["name"] for r in self.db.all("SELECT id, name FROM users")}
+        if not after <= set(names):
+            raise ValidationError("Some of those users no longer exist.")
+        with self.db.transaction():
+            self.db.execute("DELETE FROM group_members WHERE group_id = ?", [group_id])
+            for uid in sorted(after):
+                self.db.execute("INSERT INTO group_members VALUES (?, ?)", [group_id, uid])
+        added, removed = after - before, before - after
+        changes = [f"+{names[u]}" for u in sorted(added)]
+        changes += [f"-{names.get(u, u)}" for u in sorted(removed)]
+        self.db.audit(actor, "group.members", group["name"], " ".join(changes))
+        result = Result()
+        result.warnings += self._sync_samba()
+        for uid in sorted(added | removed):
+            result.warnings += self.ensure_files(uid, recreate=True)
+        return result
+
+    def delete_group(self, actor: str, group_id: int, delete_folder: bool = False) -> Result:
+        group = self._require_group(group_id)
+        member_ids = [m["id"] for m in groups_mod.members(self.db, group_id)]
+        with self.db.transaction():
+            self.db.execute("DELETE FROM group_members WHERE group_id = ?", [group_id])
+            self.db.execute("DELETE FROM groups WHERE id = ?", [group_id])
+            self.db.execute(
+                "DELETE FROM disk_usage WHERE subject = 'group' AND name = ?", [group["name"]]
+            )
+        result = Result()
+        result.warnings += self._sync_samba()
+        for uid in member_ids:
+            result.warnings += self.ensure_files(uid, recreate=True)
+        folder = self.settings.groups_dir / group["name"]
+        if delete_folder:
+            try:
+                self.hostops.remove_group_dir(group["name"])
+            except docker.errors.DockerException as e:
+                result.warnings.append(f"The folder {folder} could not be removed: {e}")
+        else:
+            result.warnings.append(f"The group folder was kept: {folder}")
+        detail = "folder deleted" if delete_folder else "folder kept"
+        self.db.audit(actor, "group.delete", group["name"], detail)
+        return result
+
+    def group_restart_needed(self, user_id: int) -> bool:
+        """True when the running desktop was started with other groups than the user has now."""
+        user = self._require_user(user_id)
+        running = self.desktops.groups_in_use(user["name"])
+        if running is None:
+            return False
+        return running != {g["name"] for g in groups_mod.groups_of(self.db, user_id)}
+
+    def _require_group(self, group_id: int) -> dict[str, Any]:
+        group = groups_mod.get_group(self.db, group_id)
+        if group is None:
+            raise ValidationError("That group no longer exists.")
+        return group
+
+    def _sync_samba(self) -> list[str]:
+        try:
+            self.samba.sync(self.db)
+        except (SambaError, docker.errors.DockerException) as e:
+            log.exception("samba sync")
+            return [f"Windows file sharing (Samba) was not updated: {e}"]
+        return []
+
+    # --- disk --------------------------------------------------------------------------------
+
+    def disk_usage_for(self, user_id: int) -> DiskUsage:
+        return disk.usage_for_user(self.db, self._require_user(user_id))
+
+    def disk_overview(self) -> tuple[list[DiskUsage], HostSpace]:
+        return disk.all_usage(self.db), disk.host_space(self.settings.root)
+
+    def measure_disk(self) -> int:
+        return disk.measure(self.db, self.hostops)
+
+    def clean_scratch(self) -> int:
+        days = int(self.db.get_setting("scratch_retention_days") or 30)
+        removed = disk.clean_scratch(self.hostops, days)
+        detail = f"{removed} item(s), older than {days} days"
+        self.db.audit("system", "scratch.clean", detail=detail)
+        return removed
 
     # --- settings ----------------------------------------------------------------------------
 
@@ -389,6 +563,9 @@ class Service:
                 self.db.set_setting(key, value)
         detail = ", ".join(f"{k}={v}" for k, v in clean.items())
         self.db.audit(actor, "settings.update", detail=detail)
+        if "scratch_retention_days" in clean:
+            # Rewrites the scratch README with the new number of days.
+            self.hostops.prepare_layout(os.getuid(), int(clean["scratch_retention_days"]))
 
     # --- audit and metrics -------------------------------------------------------------------
 
@@ -492,7 +669,12 @@ class Service:
 
     def start_desktop(self, actor: str, user_id: int) -> None:
         user = self._require_user(user_id)
-        self.desktops.start(user, self.image_ref_for(user), self.software.active_addons(user_id))
+        self.desktops.start(
+            user,
+            self.image_ref_for(user),
+            self.software.active_addons(user_id),
+            groups_mod.groups_of(self.db, user_id),
+        )
         self.db.audit(actor, "desktop.start", user["name"])
 
     def stop_desktop(self, actor: str, user_id: int, by_admin: bool = False) -> None:
@@ -699,6 +881,16 @@ class Service:
 
 _LABEL = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
 HOSTNAME_RE = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(\.{_LABEL})*$")
+
+
+def _parse_quota(value: Any) -> float | None:
+    try:
+        quota = users_mod.parse_limit(value)
+    except ValueError:
+        raise ValidationError("The quota must be a number of GB (empty for none).") from None
+    if quota is not None and quota < 1:
+        raise ValidationError("The quota must be at least 1 GB (empty for none).")
+    return quota
 
 
 def _int_in(value: Any, low: int, high: int, what: str) -> int:

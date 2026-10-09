@@ -131,6 +131,12 @@ services:
       traefik.http.middlewares.ow-desktop-slash.redirectregex.regex: ^(https?://[^/]+/desktop/[a-z0-9]+)$$
       traefik.http.middlewares.ow-desktop-slash.redirectregex.replacement: $${1}/
       traefik.http.middlewares.ow-desktop-slash.redirectregex.permanent: "true"
+      # Used by every file manager router (labels set by OrbitalWindow on ow-files-<user>).
+      traefik.http.middlewares.ow-auth-files.forwardauth.address: http://orbitalwindow:8000/auth/files
+      traefik.http.middlewares.ow-auth-files.forwardauth.authResponseHeaders: X-OW-User
+      traefik.http.middlewares.ow-files-slash.redirectregex.regex: ^(https?://[^/]+/files/[a-z0-9]+)$$
+      traefik.http.middlewares.ow-files-slash.redirectregex.replacement: $${1}/
+      traefik.http.middlewares.ow-files-slash.redirectregex.permanent: "true"
       # Admin-only tools (cAdvisor, later Dozzle).
       traefik.http.middlewares.ow-auth-admin.forwardauth.address: http://orbitalwindow:8000/auth/admin
       traefik.http.middlewares.ow-auth-admin.forwardauth.authResponseHeaders: Remote-User
@@ -181,6 +187,8 @@ services:
       - "445:445"
     volumes:
       - ${OW_ROOT:-/srv/orbitalwindow}/users:/srv/users
+      - ${OW_ROOT:-/srv/orbitalwindow}/groups:/srv/groups
+      - ${OW_ROOT:-/srv/orbitalwindow}/shared/scratch:/srv/scratch
       - ${OW_ROOT:-/srv/orbitalwindow}/state/samba:/etc/ow:ro
       - samba-lib:/var/lib/samba
     networks: [samba]

@@ -38,7 +38,7 @@ ACTIONS_SLOT = """
           <q-item-section>Reset password</q-item-section></q-item>
         <q-item clickable @click="$parent.$emit('act', {a: 'limits', row: props.row})">
           <q-item-section avatar><q-icon name="speed" /></q-item-section>
-          <q-item-section>CPU and RAM limits</q-item-section></q-item>
+          <q-item-section>CPU, RAM and disk quota</q-item-section></q-item>
         <q-item clickable @click="$parent.$emit('act', {a: 'grants', row: props.row})">
           <q-item-section avatar><q-icon name="apps" /></q-item-section>
           <q-item-section>Software access</q-item-section></q-item>
@@ -138,6 +138,7 @@ def admin_users(request: Request) -> RedirectResponse | None:
                     "limits": _limits(r),
                     "cpus": r["cpus"],
                     "mem_gb": r["mem_gb"],
+                    "quota_gb": r["quota_gb"],
                 }
                 for r in rows
             ]
@@ -310,18 +311,24 @@ def password_dialog(auth: PageAuth, user_id: int, name: str) -> None:
 def limits_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None]]) -> None:
     svc = service()
     with ui.dialog() as dialog, ui.card().classes("w-96"):
-        ui.label(f"CPU and RAM for {row['name']}").classes("text-h6")
+        ui.label(f"Limits for {row['name']}").classes("text-h6")
         cpus = ui.input("CPUs", value=f"{row['cpus']:g}" if row["cpus"] else "")
         mem = ui.input("RAM (GB)", value=f"{row['mem_gb']:g}" if row["mem_gb"] else "")
         ui.label("Empty means unlimited. Changes apply the next time the desktop starts.").classes(
             "text-caption text-grey-7"
         )
+        quota = ui.input(
+            "Disk quota (GB)", value=f"{row['quota_gb']:g}" if row.get("quota_gb") else ""
+        )
+        ui.label("Soft quota: the user is warned at 90%, nothing is blocked. Empty means none.")\
+            .classes("text-caption text-grey-7")  # fmt: skip
 
         async def save() -> None:
             if auth.check() is None:
                 return
             try:
                 await run.io_bound(svc.set_limits, auth.user.name, row["id"], cpus.value, mem.value)
+                await run.io_bound(svc.set_quota, auth.user.name, row["id"], quota.value)
             except ValidationError as e:
                 ui.notify(str(e), type="negative")
                 return

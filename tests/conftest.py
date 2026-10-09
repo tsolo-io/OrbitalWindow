@@ -39,12 +39,62 @@ class FakeSamba:
 class FakeHostOps:
     def __init__(self) -> None:
         self.homes: list[tuple[str, int]] = []
+        self.group_dirs = {}
+        self.removed_group_dirs = []
+        self.files_data = set()
+        self.readme_days = []
+        self.sizes = {}
 
     def create_home(self, name: str, uid: int) -> None:
         self.homes.append((name, uid))
 
     def remove_home(self, name: str) -> None:
         self.homes = [h for h in self.homes if h[0] != name]
+
+    group_dirs: dict[str, int]
+    removed_group_dirs: list[str]
+    files_data: set[str]
+    readme_days: list[int]
+    sizes: dict[str, int]
+
+    def create_group_dir(self, name: str, gid: int) -> None:
+        self.group_dirs[name] = gid
+
+    def remove_group_dir(self, name: str) -> None:
+        self.removed_group_dirs.append(name)
+
+    def create_files_data(self, name: str, uid: int) -> None:
+        self.files_data.add(name)
+
+    def remove_files_data(self, name: str) -> None:
+        self.files_data.discard(name)
+
+    def prepare_layout(self, service_uid: int, scratch_days: int = 30) -> None:
+        self.readme_days.append(scratch_days)
+
+    def disk_usage(self) -> dict[str, int]:
+        return dict(self.sizes)
+
+    def clean_scratch(self, days: int) -> list[str]:
+        return ["./old.dat"]
+
+
+class FakeFiles:
+    def __init__(self) -> None:
+        self.running: dict[str, list[str]] = {}
+        self.recreated: list[str] = []
+
+    def ensure(self, user, groups, *, recreate: bool = False) -> bool:
+        if recreate:
+            self.recreated.append(user["name"])
+        self.running[user["name"]] = [g["name"] for g in groups]
+        return True
+
+    def stop(self, name: str) -> None:
+        self.running.pop(name, None)
+
+    def remove(self, name: str) -> None:
+        self.running.pop(name, None)
 
 
 @pytest.fixture
@@ -63,6 +113,9 @@ def service(settings) -> Service:
     svc = Service(settings, MagicMock(), db=Database(":memory:"), prepare_layout=False)
     svc.samba = FakeSamba()  # type: ignore[assignment]
     svc.hostops = FakeHostOps()  # type: ignore[assignment]
+    svc.files = FakeFiles()  # type: ignore[assignment]
+    # No file manager containers exist yet in tests.
+    svc._files_exists = lambda name: name in svc.files.running  # type: ignore[method-assign]
     svc.db.execute(
         "INSERT INTO images (label, base_tag, image_ref, status, built_at, docker_id) "
         "VALUES ('Ubuntu XFCE', 'ubuntu-xfce', 'ow-desktop:ubuntu-xfce', 'ready', now(), "

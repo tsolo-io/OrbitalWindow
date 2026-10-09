@@ -21,6 +21,14 @@ DESKTOP_COLUMNS = [
     {"name": "mem", "label": "RAM use", "field": "mem", "align": "right"},
     {"name": "mem_limit", "label": "RAM limit", "field": "mem_limit", "align": "right"},
 ]
+DISK_COLUMNS = [
+    {"name": "subject", "label": "Kind", "field": "subject", "align": "left"},
+    {"name": "name", "label": "Name", "field": "name", "align": "left"},
+    {"name": "used", "label": "Used", "field": "used", "align": "right"},
+    {"name": "quota", "label": "Quota", "field": "quota", "align": "right"},
+    {"name": "percent", "label": "Of quota", "field": "percent", "align": "right"},
+    {"name": "measured", "label": "Measured (UTC)", "field": "measured", "align": "right"},
+]
 AUDIT_COLUMNS = [
     {"name": "ts", "label": "Time (UTC)", "field": "ts", "align": "left"},
     {"name": "actor", "label": "Who", "field": "actor", "align": "left"},
@@ -53,6 +61,55 @@ def admin_system(request: Request) -> RedirectResponse | None:
         with ui.card().classes("w-full"):
             ui.label("Desktops").classes("text-h6")
             desktops = ui.table(columns=DESKTOP_COLUMNS, rows=[], row_key="name").classes("w-full")
+
+        with ui.card().classes("w-full"):
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label("Disk usage").classes("text-h6")
+                measure_btn = ui.button("Measure now", icon="refresh").props("no-caps flat")
+            host_label = ui.label("")
+            disk = ui.table(columns=DISK_COLUMNS, rows=[], row_key="key").classes("w-full")
+            disk.props("dense")
+            disk.add_slot(
+                "body-cell-percent",
+                """<q-td :props="props"><span :class="props.row.warning ? 'text-negative' : ''">
+                   {{ props.row.percent }}</span></q-td>""",
+            )
+
+        async def refresh_disk() -> None:
+            usage, host = await run.io_bound(svc.disk_overview)
+            free = fmt_bytes(host.free)
+            text = f"Free on the server: {free} of {fmt_bytes(host.total)}"
+            if host.warning:
+                text += f" — the disk is {host.used_fraction:.0%} full. Free up space soon."
+            host_label.set_text(text)
+            host_label.classes(replace="text-negative" if host.warning else "text-grey-8")
+            disk.rows = [
+                {
+                    "key": f"{u.subject}:{u.name}",
+                    "subject": u.subject,
+                    "name": u.name,
+                    "used": fmt_bytes(u.bytes),
+                    "quota": f"{u.quota_gb:g} GB" if u.quota_gb else "–",
+                    "percent": f"{u.fraction:.0%}" if u.fraction is not None else "–",
+                    "warning": u.warning,
+                    "measured": u.measured_at.strftime("%Y-%m-%d %H:%M") if u.measured_at else "",
+                }
+                for u in usage
+            ]
+            disk.update()
+
+        async def on_measure() -> None:
+            measure_btn.disable()
+            try:
+                await run.io_bound(svc.measure_disk)
+            finally:
+                measure_btn.enable()
+            await refresh_disk()
+            ui.notify("Disk usage measured.")
+
+        measure_btn.on_click(on_measure)
+        ui.timer(0.1, refresh_disk, once=True)
+        ui.timer(60.0, refresh_disk)
 
         with ui.card().classes("w-full"):
             ui.label("GPUs").classes("text-h6")

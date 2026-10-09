@@ -34,6 +34,7 @@ nav = [
     { "0015 Python 3.14, httpx2" = "adr/0015-python-3-14-and-httpx2.md" },
     { "0016 Per-user image builds" = "adr/0016-per-user-image-builds.md" },
     { "0017 Metrics, admin tools" = "adr/0017-metrics-and-admin-tools.md" },
+    { "0018 Files, groups, quotas" = "adr/0018-files-groups-and-quotas.md" },
   ] },
 ]
 
