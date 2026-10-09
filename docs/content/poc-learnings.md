@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Tsolo.io
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # What the proof of concept taught us
 
 A hand-built proof of concept (POC) ran on a test server in October 2026. This page records what we

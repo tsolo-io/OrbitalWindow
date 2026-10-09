@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Tsolo.io
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # OrbitalWindow
 
 Manage GPU-accelerated research/science desktops on Docker. Each user gets their own Linux desktop

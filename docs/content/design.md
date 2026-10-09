@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Tsolo.io
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # OrbitalWindow design
 
 Status: **design, nothing implemented yet**. It was worked out in a proof of concept (see

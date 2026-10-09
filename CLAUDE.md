@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Tsolo.io
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # OrbitalWindow
 
 A Python **FastAPI + NiceGUI** service for managing GPU-accelerated research/science desktop
