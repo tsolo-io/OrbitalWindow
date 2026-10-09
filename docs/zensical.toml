@@ -33,6 +33,7 @@ nav = [
     { "0014 No admin access to desktops" = "adr/0014-admins-never-see-user-desktops.md" },
     { "0015 Python 3.14, httpx2" = "adr/0015-python-3-14-and-httpx2.md" },
     { "0016 Per-user image builds" = "adr/0016-per-user-image-builds.md" },
+    { "0017 Metrics, admin tools" = "adr/0017-metrics-and-admin-tools.md" },
   ] },
 ]
 

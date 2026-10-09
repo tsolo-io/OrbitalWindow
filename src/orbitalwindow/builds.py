@@ -303,7 +303,7 @@ class Builder:
             plan = self._software.plan(user)
             if plan.hash is None:
                 writer.write("No add-ons or packages need an image: using the desktop as is.\n")
-                self._remove_user_image(user["name"])
+                self.remove_user_image(user["name"])
                 self._db.execute("DELETE FROM user_image WHERE user_id = ?", [user_id])
                 ok = True
                 return
@@ -345,7 +345,7 @@ class Builder:
         if ok:
             self._prune()
 
-    def _remove_user_image(self, name: str) -> None:
+    def remove_user_image(self, name: str) -> None:
         try:
             self._client.images.remove(user_image_ref(name), noprune=False)
         except docker.errors.ImageNotFound:

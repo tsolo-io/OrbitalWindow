@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Added by `make start` when OW_GPU_VENDOR=nvidia: OrbitalWindow reads GPU load and memory
+# through NVML, so it gets the NVIDIA "utility" capability only (no compute, no display).
+services:
+  orbitalwindow:
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]

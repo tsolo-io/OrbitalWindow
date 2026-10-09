@@ -53,7 +53,7 @@ services:
       EVENTS: 1
       PING: 1
       VERSION: 1
-      INFO: 0
+      INFO: 1  # cAdvisor reads /info at startup
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -131,6 +131,41 @@ services:
       traefik.http.middlewares.ow-desktop-slash.redirectregex.regex: ^(https?://[^/]+/desktop/[a-z0-9]+)$$
       traefik.http.middlewares.ow-desktop-slash.redirectregex.replacement: $${1}/
       traefik.http.middlewares.ow-desktop-slash.redirectregex.permanent: "true"
+      # Admin-only tools (cAdvisor, later Dozzle).
+      traefik.http.middlewares.ow-auth-admin.forwardauth.address: http://orbitalwindow:8000/auth/admin
+      traefik.http.middlewares.ow-auth-admin.forwardauth.authResponseHeaders: Remote-User
+
+  # Container metrics. Talks to Docker through the read-only proxy (no socket mount).
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    container_name: ow-cadvisor
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - --docker=tcp://socket-proxy-ro:2375
+      - --docker_only=true
+      - --housekeeping_interval=10s
+      - --store_container_labels=false
+      - --whitelisted_container_labels=ow.managed,ow.user,ow.role
+      - --url_base_prefix=/admin/cadvisor
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,process,referenced_memory,resctrl,sched,tcp,udp
+    volumes:
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    # Not privileged: without /dev/kmsg cAdvisor only loses OOM events, which we don't use.
+    networks: [core, proxy-ro]
+    depends_on: [socket-proxy-ro]
+    security_opt: ["no-new-privileges:true"]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ow-core
+      traefik.http.routers.ow-cadvisor.rule: PathPrefix(`/admin/cadvisor`)
+      traefik.http.routers.ow-cadvisor.entrypoints: websecure
+      traefik.http.routers.ow-cadvisor.tls: "true"
+      traefik.http.routers.ow-cadvisor.middlewares: ow-auth-admin@docker
+      traefik.http.services.ow-cadvisor.loadbalancer.server.port: "8080"
 
   samba:
     build: ./samba

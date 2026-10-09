@@ -13,7 +13,9 @@
 #   make logs       follow the OrbitalWindow service log
 #   make status     show the stack's containers
 
-COMPOSE ?= docker compose -f deploy/compose.yaml --env-file deploy/.env
+GPU_VENDOR := $(shell sed -n 's/^OW_GPU_VENDOR=//p' deploy/.env 2>/dev/null)
+COMPOSE_FILES := -f deploy/compose.yaml $(if $(filter nvidia,$(GPU_VENDOR)),-f deploy/compose.nvidia.yaml)
+COMPOSE ?= docker compose $(COMPOSE_FILES) --env-file deploy/.env
 SERVICE ?= orbitalwindow
 .PHONY: test format lint start stop restart logs status
 
