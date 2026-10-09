@@ -7,7 +7,7 @@
 from nicegui import run, ui
 
 from ..users import ValidationError
-from .common import PageAuth, guarded, service
+from .common import PageAuth, guarded, help_icon, service
 
 
 def show_build_log(build_id: int, title: str = "Installation log") -> None:
@@ -48,7 +48,9 @@ def software_card(auth: PageAuth) -> None:
     actor = auth.user.name
 
     with ui.card().classes("w-full"):
-        ui.label("Software").classes("text-h6")
+        with ui.row().classes("items-center gap-1"):
+            ui.label("Software").classes("text-h6")
+            help_icon("software")
         ui.label(
             "Switch on the software you need and add extra Ubuntu packages. Then press Apply: "
             "your desktop is prepared in the background, and the new software appears the next "

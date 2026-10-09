@@ -50,6 +50,11 @@ def admin_system(request: Request) -> RedirectResponse | None:
             ui.label("System").classes("text-h5")
             with ui.row().classes("gap-2"):
                 ui.button(
+                    "Logs",
+                    icon="article",
+                    on_click=lambda: ui.navigate.to("/admin/logs/", new_tab=True),
+                ).props("no-caps outline")
+                ui.button(
                     "cAdvisor",
                     icon="insights",
                     on_click=lambda: ui.navigate.to("/admin/cadvisor/", new_tab=True),

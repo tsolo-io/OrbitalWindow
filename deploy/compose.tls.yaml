@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Added by `make start` when OW_ACME_DNS_PROVIDER is set in deploy/.env: a Let's Encrypt
+# certificate for OW_HOSTNAME via the DNS-01 challenge, so the server never has to be reachable
+# from the internet. Every router on the websecure entrypoint uses it; no label changes needed.
+# Put the DNS provider's credentials (for example CF_DNS_API_TOKEN) in deploy/acme.env (chmod 600),
+# not in deploy/.env, so Traefik doesn't get the other secrets. This file must repeat the
+# full Traefik command from compose.yaml (lists replace, they don't merge): keep them in step.
+services:
+  traefik:
+    command:
+      - --providers.docker=true
+      - --providers.docker.endpoint=tcp://socket-proxy-ro:2375
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=ow-core
+      - --providers.docker.allowEmptyServices=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.tls.certresolver=le
+      - --entrypoints.websecure.http.tls.domains[0].main=${OW_HOSTNAME}
+      - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0
+      - --certificatesresolvers.le.acme.email=${OW_ACME_EMAIL:?set OW_ACME_EMAIL in deploy/.env}
+      - --certificatesresolvers.le.acme.storage=/acme/acme.json
+      - --certificatesresolvers.le.acme.dnschallenge=true
+      - --certificatesresolvers.le.acme.dnschallenge.provider=${OW_ACME_DNS_PROVIDER}
+      - --log.level=INFO
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+    env_file: [acme.env]
+    volumes:
+      - traefik-acme:/acme
+
+volumes:
+  traefik-acme:
+    name: ow-traefik-acme

@@ -115,6 +115,19 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (subject, name)
     );
     """,
+    # 4: phase 5 SSH keys
+    """
+    CREATE SEQUENCE seq_ssh_keys START 1;
+    CREATE TABLE ssh_keys (
+        id INTEGER PRIMARY KEY DEFAULT nextval('seq_ssh_keys'),
+        user_id INTEGER NOT NULL,
+        label VARCHAR NOT NULL,
+        pubkey VARCHAR NOT NULL,
+        fingerprint VARCHAR NOT NULL,
+        added_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        UNIQUE (user_id, fingerprint)
+    );
+    """,
 ]
 
 

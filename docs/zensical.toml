@@ -15,6 +15,13 @@ nav = [
   { "Home" = "index.md" },
   { "Design" = "design.md" },
   { "POC learnings" = "poc-learnings.md" },
+  { "User guide" = [
+    { "Getting started" = "user/01-getting-started.md" },
+    { "Software" = "user/02-software.md" },
+    { "Files" = "user/03-files.md" },
+    { "SSH and SFTP" = "user/04-ssh.md" },
+    { "Problems and questions" = "user/05-help.md" },
+  ] },
   { "Decisions (ADR)" = [
     { "Overview" = "adr/index.md" },
     { "0001 Record decisions" = "adr/0001-record-architecture-decisions.md" },
@@ -35,6 +42,7 @@ nav = [
     { "0016 Per-user image builds" = "adr/0016-per-user-image-builds.md" },
     { "0017 Metrics, admin tools" = "adr/0017-metrics-and-admin-tools.md" },
     { "0018 Files, groups, quotas" = "adr/0018-files-groups-and-quotas.md" },
+    { "0019 SSH, help, logs, TLS" = "adr/0019-ssh-help-logs-and-tls.md" },
   ] },
 ]
 

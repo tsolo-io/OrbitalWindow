@@ -53,7 +53,7 @@ services:
       EVENTS: 1
       PING: 1
       VERSION: 1
-      INFO: 0
+      INFO: 1  # Dozzle reads /info
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -177,6 +177,57 @@ services:
       traefik.http.routers.ow-cadvisor.middlewares: ow-auth-admin@docker
       traefik.http.services.ow-cadvisor.loadbalancer.server.port: "8080"
 
+  # SSH/SFTP gateway: routes `ssh -p 2222 <user>@host` to that user's desktop by container labels.
+  sshpiper:
+    image: farmer1992/sshpiperd:full-v1.6.1
+    container_name: ow-sshpiper
+    restart: unless-stopped
+    logging: *logging
+    # failtoban blocks addresses after repeated failed logins; docker routes by labels.
+    command: ["/sshpiperd/plugins/failtoban", "--", "/sshpiperd/plugins/docker"]
+    environment:
+      DOCKER_HOST: tcp://socket-proxy-ro:2375
+      SSHPIPERD_SERVER_KEY: /keys/ssh_host_ed25519_key
+      SSHPIPERD_SERVER_KEY_GENERATE_MODE: notexist
+    ports:
+      - "2222:2222"
+    volumes:
+      - sshpiper-keys:/keys
+    # OrbitalWindow connects it to ow-net-<user> of desktops with the ssh add-on. "gateway" is an
+    # ordinary bridge: a container on internal networks only cannot publish its port.
+    networks: [proxy-ro, gateway]
+    depends_on: [socket-proxy-ro]
+    # Root in the container only to write its host key volume; no capabilities.
+    user: "0:0"
+    cap_drop: [ALL]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+
+  # Container logs for admins at /admin/logs/. Dozzle trusts Remote-User blindly, so it is only
+  # on ow-core (Traefik, OrbitalWindow, cAdvisor), never on a network desktops can reach.
+  dozzle:
+    image: amir20/dozzle:v11.3.0
+    container_name: ow-dozzle
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      DOCKER_HOST: tcp://socket-proxy-ro:2375
+      DOZZLE_BASE: /admin/logs
+      DOZZLE_AUTH_PROVIDER: forward-proxy
+      DOZZLE_NO_ANALYTICS: "true"
+    networks: [core, proxy-ro]
+    depends_on: [socket-proxy-ro]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ow-core
+      traefik.http.routers.ow-dozzle.rule: PathPrefix(`/admin/logs`)
+      traefik.http.routers.ow-dozzle.entrypoints: websecure
+      traefik.http.routers.ow-dozzle.tls: "true"
+      traefik.http.routers.ow-dozzle.middlewares: ow-auth-admin@docker
+      traefik.http.services.ow-dozzle.loadbalancer.server.port: "8080"
+
   samba:
     build: ./samba
     image: orbitalwindow-samba:latest
@@ -204,7 +255,11 @@ networks:
     internal: true
   samba:
     name: ow-samba
+  gateway:
+    name: ow-gateway
 
 volumes:
   samba-lib:
     name: ow-samba-lib
+  sshpiper-keys:
+    name: ow-sshpiper-keys

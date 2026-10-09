@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Names of the infrastructure containers OrbitalWindow talks to or wires up.
     traefik_container: str = "ow-traefik"
     samba_container: str = "ow-samba"
+    sshpiper_container: str = "ow-sshpiper"
+    ssh_port: int = 2222  # the gateway's published port, shown to users
+    # User help pages (docs/content/user), copied into the service image.
+    help_dir: Path = Path("/opt/orbitalwindow/help")
     # Traefik middlewares defined by the compose stack (on the orbitalwindow service labels).
     auth_middleware: str = "ow-auth-desktop@docker"
     slash_middleware: str = "ow-desktop-slash@docker"

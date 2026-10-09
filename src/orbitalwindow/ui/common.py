@@ -81,6 +81,7 @@ def frame(auth: PageAuth, title: str) -> None:
                 ):
                     ui.link(text, url).classes("text-white no-underline")
         with ui.row().classes("items-center gap-2"):
+            ui.link("Help", "/help").classes("text-white no-underline mr-2")
             ui.label(auth.user.display_name).classes("text-white")
             post_button("Log out", "/auth/logout", icon="logout")
 
@@ -121,3 +122,9 @@ def form_input(
         ui.element("input").props(props).classes(
             "w-full rounded border border-grey-5 px-3 py-2 text-base"
         )
+
+
+def help_icon(slug: str) -> None:
+    """A small "?" that opens the matching user guide page in a new tab."""
+    ui.button(icon="help_outline", on_click=lambda: ui.navigate.to(f"/help/{slug}", new_tab=True))\
+        .props("flat round dense size=sm color=grey-7").tooltip("Help")  # fmt: skip
