@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orbitalwindow"
+dynamic = ["version"]
+description = "Manage GPU-accelerated research/science desktop environments on Docker"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "fastapi>=0.143",
+  "nicegui>=3.18",
+  "duckdb>=1.5",
+  "docker>=7.2",
+  "argon2-cffi>=25.1",
+  "itsdangerous>=2.2",
+  "httpx>=0.28",
+  "nvidia-ml-py",
+  "pyyaml",
+]
+
+[tool.hatch.version]
+path = "src/orbitalwindow/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orbitalwindow"]
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies = ["pytest-asyncio"]
+
+[tool.hatch.envs.lint]
+detached = true
+dependencies = ["ruff"]
+
+[tool.hatch.envs.lint.scripts]
+check = ["ruff check {args:.}", "ruff format --check {args:.}"]
+fmt = ["ruff check --fix {args:.}", "ruff format {args:.}"]
+
+[tool.hatch.envs.docs]
+detached = true
+dependencies = ["zensical"]
+
+[tool.hatch.envs.docs.scripts]
+build = "zensical build -f docs/zensical.toml {args}"
+serve = "zensical serve -f docs/zensical.toml {args}"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
