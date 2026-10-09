@@ -112,6 +112,11 @@ class LoginRateLimiter:
             q.popleft()
         return q
 
+    def _prune(self, now: float) -> None:
+        """Forget keys with no recent failures, so random names don't pile up in memory."""
+        for key in [k for k, q in self._failures.items() if not q or q[-1] <= now - self.window]:
+            del self._failures[key]
+
     def blocked(self, *keys: str) -> bool:
         now = time.monotonic()
         with self._lock:
@@ -120,6 +125,8 @@ class LoginRateLimiter:
     def failure(self, *keys: str) -> None:
         now = time.monotonic()
         with self._lock:
+            if len(self._failures) > 1000:
+                self._prune(now)
             for k in keys:
                 self._recent(k, now).append(now)
 

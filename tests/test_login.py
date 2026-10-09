@@ -120,3 +120,30 @@ def test_security_headers(client):
     r = client.get("/healthz")
     assert r.headers["x-frame-options"] == "DENY"
     assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_logout_ends_all_sessions(client, service, users):
+    first = login(client, "user1")
+    second = login(client, "user1")  # e.g. another device
+    client.cookies.set("ow_session", first)
+    r = client.post("/auth/logout", headers={"Origin": ORIGIN}, follow_redirects=False)
+    assert r.status_code == 303
+    assert service.sessions.resolve(first) is None
+    assert service.sessions.resolve(second) is None
+    assert service.db.one("SELECT * FROM audit WHERE action = 'logout'")["target"] == "user1"
+
+
+def test_cross_site_logout_does_nothing(client, service, users):
+    cookie = login(client, "user1")
+    client.cookies.set("ow_session", cookie)
+    client.post("/auth/logout", headers={"Origin": "https://evil.example"}, follow_redirects=False)
+    assert service.sessions.resolve(cookie) is not None
+
+
+def test_rate_limiter_prunes_old_keys():
+    from orbitalwindow.auth import LoginRateLimiter
+
+    limiter = LoginRateLimiter(max_failures=5, window_seconds=0)
+    for i in range(1100):
+        limiter.failure(f"user:ghost{i}")
+    assert len(limiter._failures) < 200

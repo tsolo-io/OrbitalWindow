@@ -35,6 +35,7 @@ LABEL_ROLE = "ow.role"
 LABEL_ADDONS = "ow.addons"
 LABEL_GROUPS = "ow.groups"
 DESKTOP_PORT = 3000
+DESKTOP_PIDS_LIMIT = 4096
 
 
 class GpuVendor(StrEnum):
@@ -178,6 +179,8 @@ def build_spec(
         "devices": devices,
         "device_requests": device_requests,
         "cap_drop": ["NET_RAW"],
+        # Stops a fork bomb in one desktop from exhausting the host's process table.
+        "pids_limit": DESKTOP_PIDS_LIMIT,
         "shm_size": "2g",
         "restart_policy": {"Name": "unless-stopped"},
     }

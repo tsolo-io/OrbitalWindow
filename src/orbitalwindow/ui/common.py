@@ -30,17 +30,23 @@ def service() -> Service:
 
 
 class PageAuth:
-    """The session a page was opened with. Event handlers call ``check`` before acting, so a
-    password change or a disabled account takes effect without a page reload."""
+    """The session a page was opened with. Event handlers and timers call ``check`` before acting,
+    so logging out, a password change, a disabled account or lost admin rights take effect on open
+    pages without a reload."""
 
-    def __init__(self, token: str, user: SessionUser) -> None:
+    def __init__(self, token: str, user: SessionUser, *, admin: bool = False) -> None:
         self._token = token
         self.user = user
+        self.admin = admin  # the page needs admin rights
 
     def check(self) -> SessionUser | None:
         user = service().sessions.resolve(self._token)
         if user is None:
             ui.navigate.to("/login")
+            return None
+        if self.admin and not user.is_admin:
+            ui.navigate.to("/")
+            return None
         return user
 
 
@@ -51,7 +57,7 @@ def authenticate(request: Request, *, admin: bool = False) -> PageAuth | Redirec
         return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
     if admin and not user.is_admin:
         return RedirectResponse("/", status_code=303)
-    return PageAuth(token, user)
+    return PageAuth(token, user, admin=admin)
 
 
 def post_button(label: str, action: str, *, icon: str | None = None, flat: bool = True) -> None:
@@ -87,21 +93,26 @@ def frame(auth: PageAuth, title: str) -> None:
 
 
 def guarded(auth: PageAuth, fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap an event handler: re-check the session, then run it."""
+    """Wrap an event handler or timer callback: re-check the session (and admin rights on admin
+    pages), then run it. Works for sync and async callbacks."""
+
+    async def call(*args: Any) -> Any:
+        if auth.check() is None:
+            return None
+        result = fn(*args)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
     if inspect.signature(fn).parameters:
         # NiceGUI passes the event only to handlers that declare a parameter.
         async def with_event(e: Any) -> Any:
-            if auth.check() is None:
-                return None
-            return await fn(e)
+            return await call(e)
 
         return with_event
 
     async def without_event() -> Any:
-        if auth.check() is None:
-            return None
-        return await fn()
+        return await call()
 
     return without_event
 

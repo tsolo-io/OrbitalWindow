@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..metrics import fmt_bytes
-from .common import authenticate, frame, service
+from .common import authenticate, frame, guarded, service
 
 DESKTOP_COLUMNS = [
     {"name": "name", "label": "User", "field": "name", "sortable": True, "align": "left"},
@@ -112,9 +112,9 @@ def admin_system(request: Request) -> RedirectResponse | None:
             await refresh_disk()
             ui.notify("Disk usage measured.")
 
-        measure_btn.on_click(on_measure)
-        ui.timer(0.1, refresh_disk, once=True)
-        ui.timer(60.0, refresh_disk)
+        measure_btn.on_click(guarded(auth, on_measure))
+        ui.timer(0.1, guarded(auth, refresh_disk), once=True)
+        ui.timer(60.0, guarded(auth, refresh_disk))
 
         with ui.card().classes("w-full"):
             ui.label("GPUs").classes("text-h6")
@@ -162,11 +162,11 @@ def admin_system(request: Request) -> RedirectResponse | None:
             ]
             audit.update()
 
-        search.on_value_change(refresh_audit)
-        ui.timer(5.0, refresh)
-        ui.timer(0.1, refresh, once=True)
-        ui.timer(0.1, refresh_audit, once=True)
-        ui.timer(30.0, refresh_audit)
+        search.on_value_change(guarded(auth, refresh_audit))
+        ui.timer(5.0, guarded(auth, refresh))
+        ui.timer(0.1, guarded(auth, refresh), once=True)
+        ui.timer(0.1, guarded(auth, refresh_audit), once=True)
+        ui.timer(30.0, guarded(auth, refresh_audit))
     return None
 
 

@@ -88,7 +88,7 @@ def admin_groups(request: Request) -> RedirectResponse | None:
         table.on("members", guarded(auth, on_members))
         table.on("quota", guarded(auth, on_quota))
         table.on("delete", guarded(auth, on_delete))
-        ui.timer(0.1, refresh, once=True)
+        ui.timer(0.1, guarded(auth, refresh), once=True)
     return None
 
 

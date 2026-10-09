@@ -46,7 +46,9 @@ recorded the choices; this record covers how they were built and where they diff
   - The helper container needs `CAP_FSETID`: without it, setting the ACL as root (not a member)
     clears the setgid bit.
 - **Scratch** `$OW_ROOT/shared/scratch` (mode 1777): `/scratch`, the file manager, and `[scratch]` in
-  Samba for all users. A `README-auto-clean.txt` explains the clean-up and is rewritten when the
+  Samba for all users. The sticky bit protects files from other users' normal accounts, but not
+  from `sudo` inside a desktop (root there has `CAP_FOWNER`/`CAP_DAC_OVERRIDE` on the bind mount),
+  so scratch is documented as shared, not private. A `README-auto-clean.txt` explains the clean-up and is rewritten when the
   retention changes. Every night after 02:00 (service time zone) a helper container deletes files
   untouched for N days (setting, default 30) and then empty folders.
 - **Disk usage**: hourly, a helper container runs `du -sxb` over homes, group folders and scratch

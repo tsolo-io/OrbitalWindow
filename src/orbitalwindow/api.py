@@ -122,8 +122,13 @@ def login(
 
 @router.post("/auth/logout")
 def logout(request: Request) -> Response:
+    """Log out everywhere: the session version is bumped, so tokens held by other tabs or
+    devices stop working too (not just this browser's cookie)."""
     response = _redirect("/login")
     if same_origin(request):
+        user = current_user(request)
+        if user is not None:
+            svc(request).logout(user.id)
         response.delete_cookie(COOKIE_NAME, path="/")
     return response
 

@@ -129,7 +129,7 @@ def admin_images(request: Request) -> RedirectResponse | None:
         table.on("enable", guarded(auth, on_enable))
         table.on("rebuild", guarded(auth, on_rebuild))
         table.on("remove", guarded(auth, on_remove))
-        table.on("log", on_log)
-        ui.timer(5.0, refresh)
-        ui.timer(0.1, refresh, once=True)
+        table.on("log", guarded(auth, on_log))
+        ui.timer(5.0, guarded(auth, refresh))
+        ui.timer(0.1, guarded(auth, refresh), once=True)
     return None

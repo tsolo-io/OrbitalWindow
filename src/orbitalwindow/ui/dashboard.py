@@ -171,8 +171,8 @@ def desktop_card(auth: PageAuth) -> None:
         start_btn.on_click(guarded(auth, on_start))
         stop_btn.on_click(guarded(auth, on_stop))
         picker.on_value_change(guarded(auth, on_pick))
-        ui.timer(3.0, refresh)
-        ui.timer(0.1, refresh, once=True)
+        ui.timer(3.0, guarded(auth, refresh))
+        ui.timer(0.1, guarded(auth, refresh), once=True)
 
 
 def files_card(auth: PageAuth) -> None:
@@ -245,8 +245,8 @@ def files_card(auth: PageAuth) -> None:
                 if usage.measured_at is None:
                     ui.label("Disk use is measured every hour.").classes("text-caption text-grey-7")
 
-        ui.timer(0.1, refresh, once=True)
-        ui.timer(60.0, refresh)
+        ui.timer(0.1, guarded(auth, refresh), once=True)
+        ui.timer(60.0, guarded(auth, refresh))
 
 
 def ssh_card(auth: PageAuth) -> None:

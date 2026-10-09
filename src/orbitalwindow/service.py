@@ -81,6 +81,7 @@ class Service:
             self.db, load_or_create_secret(settings.secret_path), settings.session_hours * 3600
         )
         self.limiter = LoginRateLimiter(settings.login_max_failures, settings.login_window_seconds)
+        self._login_slots = threading.BoundedSemaphore(4)
         self.desktops = Desktops(client, self.db, settings)
         self.files = FileManagers(client, settings)
         self.samba = Samba(client, settings.samba_container, settings.samba_state_dir)
@@ -163,7 +164,9 @@ class Service:
         keys = (f"ip:{client_ip}", f"user:{name.strip().lower()}")
         if self.limiter.blocked(*keys):
             raise PermissionError("Too many failed attempts. Please wait a few minutes.")
-        row = auth_authenticate(self.db, name, password)
+        # argon2 needs 64 MB per check; cap how many run at once so a login flood can't exhaust RAM.
+        with self._login_slots:
+            row = auth_authenticate(self.db, name, password)
         if row is None:
             self.limiter.failure(*keys)
             self.db.audit(name.strip().lower()[:64] or "?", "login.failed", detail=client_ip)
@@ -171,6 +174,11 @@ class Service:
         self.limiter.success(*keys)
         self.db.audit(row["name"], "login", detail=client_ip)
         return self.sessions.issue(row["id"], row["session_ver"])
+
+    def logout(self, user_id: int) -> None:
+        user = self._require_user(user_id)
+        self.db.execute("UPDATE users SET session_ver = session_ver + 1 WHERE id = ?", [user_id])
+        self.db.audit(user["name"], "logout", user["name"])
 
     # --- accounts ----------------------------------------------------------------------------
 

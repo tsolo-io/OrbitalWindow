@@ -26,8 +26,9 @@ LABEL ow.managed="true" ow.role="helper-image"
 MNT = "/ow"
 
 SCRATCH_README = (
-    "This is the shared scratch folder. Everyone can add files here, but only the owner of a "
-    "file can delete it.\\n\\nFiles that have not been changed for %s days are deleted "
+    "This is the shared scratch folder. Everyone can add files here; normally only the owner of "
+    "a file can delete it. It is not private: anyone who uses sudo in their desktop can read, "
+    "change or delete any file here.\\n\\nFiles that have not been changed for %s days are deleted "
     "automatically every night. Keep anything important in your home folder or a group folder.\\n"
 )
 

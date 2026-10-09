@@ -210,3 +210,15 @@ def test_clean_scratch_is_audited(service):
 def test_retention_change_rewrites_readme(service):
     service.update_settings("boss", {"scratch_retention_days": "14"})
     assert service.hostops.readme_days == [14]
+
+
+def test_files_spec_hash_covers_every_setting(settings, users, service, monkeypatch):
+    from orbitalwindow import files as files_mod
+
+    user = service.db.one("SELECT * FROM users WHERE name = 'user1'")
+    before = build_files_spec(user, [], settings).spec_hash
+    monkeypatch.setattr(files_mod, "FILES_IMAGE", "gtstef/filebrowser:other")
+    assert build_files_spec(user, [], settings).spec_hash != before
+    monkeypatch.undo()
+    spec = build_files_spec(user, [], settings)
+    assert spec.kwargs["pids_limit"] == 256 and spec.spec_hash == before

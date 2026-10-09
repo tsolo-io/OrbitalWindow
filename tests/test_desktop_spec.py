@@ -27,6 +27,7 @@ def test_spec_snapshot(settings):
     k = spec.kwargs
     assert k["hostname"] == "ow-user1"
     assert k["cap_drop"] == ["NET_RAW"]
+    assert k["pids_limit"] == 4096
     assert k["shm_size"] == "2g"
     assert k["nano_cpus"] == 4_000_000_000
     assert k["mem_limit"] == 16 * 1024**3

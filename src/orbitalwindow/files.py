@@ -166,6 +166,7 @@ def build_files_spec(
         "read_only": True,
         "tmpfs": {"/tmp": ""},
         "mem_limit": 512 * 1024**2,
+        "pids_limit": 256,
         # The image's own check assumes port 80 and "/"; we run unprivileged on 8080 under
         # /files/<user>/. Traefik only routes to healthy containers.
         "healthcheck": {
@@ -189,12 +190,12 @@ def build_files_spec(
         repr(
             (
                 FILES_IMAGE,
-                sorted(volumes.items()),
-                kwargs["group_add"],
+                # The whole container spec and labels, so any change (mounts, limits, health
+                # check…) recreates the container.
+                sorted((k, repr(v)) for k, v in kwargs.items()),
                 labels,
-                # The generated config (without its random password): a change recreates.
+                # The generated config (without its random password).
                 files_config(name, [g["name"] for g in groups], ""),
-                kwargs["healthcheck"],
             )
         ).encode()
     ).hexdigest()[:16]
@@ -216,7 +217,9 @@ class FileManagers:
         text = yaml.safe_dump(config, sort_keys=False)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(text)
-        tmp.chmod(0o644)  # read by the user's UID inside the container; holds no user secret
+        # Read by the user's UID inside the container. It holds FileBrowser's admin password, which
+        # is random and useless (password login is off); state/ itself is mode 700.
+        tmp.chmod(0o644)
         tmp.replace(path)
 
     def ensure(

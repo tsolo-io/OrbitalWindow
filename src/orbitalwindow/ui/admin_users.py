@@ -206,8 +206,8 @@ def admin_users(request: Request) -> RedirectResponse | None:
 
         add_btn.on_click(guarded(auth, lambda: _open_create(auth, refresh)))
         table.on("act", guarded(auth, on_action))
-        ui.timer(5.0, refresh)
-        ui.timer(0.1, refresh, once=True)
+        ui.timer(5.0, guarded(auth, refresh))
+        ui.timer(0.1, guarded(auth, refresh), once=True)
     return None
 
 
