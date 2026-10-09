@@ -95,7 +95,8 @@ def desktop_card(auth: PageAuth) -> None:
             usage_box.clear()
             with usage_box:
                 if use:
-                    limit = fmt_bytes(use.mem_limit)
+                    mem_gb = svc.db.scalar("SELECT mem_gb FROM users WHERE id = ?", [user_id])
+                    limit = f"{mem_gb:g} GB" if mem_gb else "none"
                     ui.label(
                         f"Your desktop uses {use.cpu_cores:.1f} CPU cores and "
                         f"{fmt_bytes(use.mem_bytes)} of RAM (limit: {limit})."

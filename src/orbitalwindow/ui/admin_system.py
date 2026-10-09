@@ -43,7 +43,7 @@ def admin_system(request: Request) -> RedirectResponse | None:
             with ui.row().classes("gap-2"):
                 ui.button(
                     "cAdvisor",
-                    icon="monitoring",
+                    icon="insights",
                     on_click=lambda: ui.navigate.to("/admin/cadvisor/", new_tab=True),
                 ).props("no-caps outline")
         cadvisor_note = ui.label(

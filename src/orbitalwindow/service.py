@@ -400,13 +400,26 @@ class Service:
             [like, like, like, like, like, limit],
         )
 
+    def _managed_ids(self) -> dict[str, str]:
+        """Full container ID → name of every OrbitalWindow container (one Docker call)."""
+        containers = self.client.containers.list(filters={"label": "ow.managed=true"}, sparse=True)
+        return {c.id: c.attrs.get("Names", [c.id])[0].lstrip("/") for c in containers}
+
+    def usage_all(self) -> dict[str, Usage]:
+        """CPU/RAM per container name (empty if cAdvisor is unreachable)."""
+        return self.metrics.usage(self._managed_ids())
+
     def usage_for(self, name: str) -> Usage | None:
-        return self.metrics.usage().get(container_name(name))
+        try:
+            cid = self.client.containers.get(container_name(name)).id
+        except docker.errors.NotFound:
+            return None
+        return self.metrics.usage({cid: container_name(name)}).get(container_name(name))
 
     def system_overview(self) -> list[dict[str, Any]]:
         """One row per user: desktop state, image, CPU/RAM use and limits."""
         states = self.desktops.states()
-        usage = self.metrics.usage()
+        usage = self.usage_all()
         rows = []
         for u in self.list_users():
             use = usage.get(container_name(u["name"]))

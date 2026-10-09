@@ -6,23 +6,12 @@ import httpx2
 
 from orbitalwindow.metrics import ContainerMetrics, GpuMetrics, fmt_bytes
 
-SPEC = {
-    "/system.slice/docker-a.scope": {
-        "aliases": ["ow-user1", "a"],
-        "labels": {"ow.managed": "true", "ow.user": "user1"},
-        "memory": {"limit": 16 * 1024**3},
-    },
-    "/system.slice/docker-b.scope": {
-        "aliases": ["ow-user2", "b"],
-        "labels": {"ow.managed": "true"},
-        "memory": {"limit": 18446744073709551615},
-    },
-    "/system.slice/docker-c.scope": {"aliases": ["someone-else", "c"], "labels": {}},
-}
+A, B, C = "a" * 64, "b" * 64, "c" * 64
 SUMMARY = {
-    "/system.slice/docker-a.scope": {"latest_usage": {"cpu": 1500, "memory": 2 * 1024**3}},
-    "/system.slice/docker-b.scope": {"latest_usage": {"cpu": 0, "memory": 100 * 1024**2}},
-    "/system.slice/docker-c.scope": {"latest_usage": {"cpu": 9000, "memory": 1}},
+    "/": {"latest_usage": {"cpu": 9000, "memory": 1}},
+    f"/system.slice/docker-{A}.scope": {"latest_usage": {"cpu": 1500, "memory": 2 * 1024**3}},
+    f"/docker/{B}": {"latest_usage": {"cpu": 0, "memory": 100 * 1024**2}},  # cgroupfs driver
+    f"/system.slice/docker-{C}.scope": {"latest_usage": {"cpu": 1, "memory": 1}},
 }
 
 
@@ -33,27 +22,27 @@ def make(handler):
     return ContainerMetrics(base, client)
 
 
-def test_usage_from_cadvisor():
+def test_usage_from_cadvisor_cgroups():
     calls = []
 
     def handler(request):
-        calls.append(request.url.path)
-        data = SPEC if request.url.path.endswith("/spec") else SUMMARY
-        return httpx2.Response(200, json=data)
+        calls.append(str(request.url))
+        return httpx2.Response(200, json=SUMMARY)
 
     m = make(handler)
-    usage = m.usage()
-    assert set(usage) == {"ow-user1", "ow-user2"}  # only OrbitalWindow's containers
+    usage = m.usage({A: "ow-user1", B: "ow-user2", "d" * 64: "ow-gone"})
+    assert set(usage) == {"ow-user1", "ow-user2"}  # only the containers asked for, if known
     assert usage["ow-user1"].cpu_cores == 1.5
-    assert usage["ow-user1"].mem_limit == 16 * 1024**3
-    assert usage["ow-user2"].mem_limit is None
-    m.usage()  # cached
-    assert calls == ["/admin/cadvisor/api/v2.0/spec", "/admin/cadvisor/api/v2.0/summary"]
+    assert usage["ow-user1"].mem_bytes == 2 * 1024**3
+    m.usage({A: "ow-user1"})  # cached
+    assert calls == [
+        "http://cadvisor:8080/admin/cadvisor/api/v2.0/summary/?type=name&recursive=true"
+    ]
 
 
 def test_cadvisor_down_gives_empty_usage():
     m = make(lambda request: httpx2.Response(503))
-    assert m.usage() == {}
+    assert m.usage({A: "ow-user1"}) == {}
     assert not m.available
 
 

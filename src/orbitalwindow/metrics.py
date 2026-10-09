@@ -2,13 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resource metrics: per-container CPU/RAM from cAdvisor, GPU totals from NVML.
+"""Resource metrics: per-container CPU/RAM from cAdvisor (cgroups), GPU totals from NVML.
 
 Both are read on demand and cached for a few seconds, so many open dashboards cost one request.
 Either source may be missing (no cAdvisor yet, no NVIDIA GPU); callers then get empty results.
 """
 
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -19,15 +20,14 @@ import httpx2
 log = logging.getLogger(__name__)
 
 CACHE_SECONDS = 5.0
-SPEC_CACHE_SECONDS = 60.0
-NO_LIMIT = 1 << 62  # cAdvisor reports "no memory limit" as a huge number
+# systemd driver: /system.slice/docker-<id>.scope; cgroupfs driver: /docker/<id>
+CGROUP_ID_RE = re.compile(r"(?:docker-|/docker/)([0-9a-f]{64})(?:\.scope)?$")
 
 
 @dataclass(frozen=True)
 class Usage:
     cpu_cores: float  # current CPU use in cores (1.0 = one full core)
     mem_bytes: int
-    mem_limit: int | None  # None = unlimited
 
 
 @dataclass(frozen=True)
@@ -40,64 +40,52 @@ class GpuStat:
 
 
 class ContainerMetrics:
-    """CPU and memory of OrbitalWindow-managed containers, by container name."""
+    """CPU and memory per container, read from cAdvisor's cgroup summary.
+
+    cAdvisor runs without any Docker access, so it only knows cgroups
+    (``/system.slice/docker-<id>.scope``). The caller supplies the IDs and names of the
+    containers it cares about.
+    """
 
     def __init__(self, base_url: str, client: httpx2.Client | None = None) -> None:
         self._client = client or httpx2.Client(base_url=base_url, timeout=4.0)
         self._lock = threading.Lock()
-        self._spec: dict[str, dict[str, Any]] = {}
-        self._spec_at = 0.0
-        self._usage: dict[str, Usage] = {}
-        self._usage_at = 0.0
+        self._by_id: dict[str, Usage] = {}
+        self._at = 0.0
         self.available = True
 
-    def _refresh_spec(self, now: float) -> None:
-        if now - self._spec_at < SPEC_CACHE_SECONDS and self._spec:
-            return
-        r = self._client.get("/api/v2.0/spec", params={"type": "docker", "recursive": "true"})
-        r.raise_for_status()
-        self._spec = {
-            key: spec
-            for key, spec in r.json().items()
-            if (spec.get("labels") or {}).get("ow.managed") == "true" and spec.get("aliases")
-        }
-        self._spec_at = now
-
-    def usage(self) -> dict[str, Usage]:
-        with self._lock:
-            now = time.monotonic()
-            if now - self._usage_at < CACHE_SECONDS:
-                return self._usage
-            try:
-                self._refresh_spec(now)
-                r = self._client.get(
-                    "/api/v2.0/summary", params={"type": "docker", "recursive": "true"}
-                )
-                r.raise_for_status()
-                summary = r.json()
-            except (httpx2.HTTPError, ValueError) as e:
-                if self.available:
-                    log.warning("cAdvisor is not reachable: %s", e)
-                self.available = False
-                self._usage, self._usage_at = {}, now
-                return self._usage
-            self.available = True
-            usage: dict[str, Usage] = {}
-            for key, spec in self._spec.items():
-                latest = (summary.get(key) or {}).get("latest_usage")
-                if latest is None:
-                    continue
-                limit = (spec.get("memory") or {}).get("limit")
-                usage[spec["aliases"][0]] = Usage(
+    def _summary(self) -> dict[str, Usage]:
+        now = time.monotonic()
+        if now - self._at < CACHE_SECONDS:
+            return self._by_id
+        try:
+            r = self._client.get("/api/v2.0/summary/", params={"type": "name", "recursive": "true"})
+            r.raise_for_status()
+            summary = r.json()
+        except (httpx2.HTTPError, ValueError) as e:
+            if self.available:
+                log.warning("cAdvisor is not reachable: %s", e)
+            self.available = False
+            self._by_id, self._at = {}, now
+            return self._by_id
+        self.available = True
+        by_id: dict[str, Usage] = {}
+        for key, value in summary.items():
+            match = CGROUP_ID_RE.search(key)
+            latest = (value or {}).get("latest_usage")
+            if match and latest is not None:
+                by_id[match.group(1)] = Usage(
                     cpu_cores=latest.get("cpu", 0) / 1000.0,
                     mem_bytes=int(latest.get("memory", 0)),
-                    mem_limit=int(limit) if limit and limit < NO_LIMIT else None,
                 )
-            # New containers appear in the summary before the cached spec knows them.
-            if any(k not in self._spec for k in summary):
-                self._spec_at = 0.0
-            self._usage, self._usage_at = usage, now
-            return usage
+        self._by_id, self._at = by_id, now
+        return by_id
+
+    def usage(self, names_by_id: dict[str, str]) -> dict[str, Usage]:
+        """Usage of the given containers (full ID → name), keyed by name."""
+        with self._lock:
+            by_id = self._summary()
+        return {name: by_id[cid] for cid, name in names_by_id.items() if cid in by_id}
 
 
 class GpuMetrics:
