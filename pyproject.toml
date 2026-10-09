@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -41,7 +45,7 @@ fmt = ["ruff check --fix {args:.}", "ruff format {args:.}"]
 
 [tool.hatch.envs.docs]
 detached = true
-dependencies = ["zensical"]
+dependencies = ["zensical", "mkdocstrings-python"]
 
 [tool.hatch.envs.docs.scripts]
 build = "zensical build -f docs/zensical.toml {args}"
@@ -57,3 +61,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.typos.default]
+extend-ignore-re = ["(?s)(#|//)\\s*spellchecker:off.*?\\n\\s*(#|//)\\s*spellchecker:on"]
