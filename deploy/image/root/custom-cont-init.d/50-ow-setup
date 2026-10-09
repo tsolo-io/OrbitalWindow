@@ -1,0 +1,13 @@
+#!/usr/bin/with-contenv bash
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Runs as root at every desktop start (LinuxServer custom-init hook).
+
+# Home folders are private to their owner.
+chmod 750 /config
+
+# A Desktop folder for launcher icons.
+mkdir -p /config/Desktop
+chown abc:abc /config/Desktop

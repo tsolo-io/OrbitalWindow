@@ -1,0 +1,162 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# OrbitalWindow stack. Desktop containers (ow-<user>) are not listed here: OrbitalWindow creates
+# them through the Docker API. Start with `make start` (uses deploy/.env).
+
+name: orbitalwindow
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+services:
+  traefik:
+    image: traefik:v3.7.14
+    container_name: ow-traefik
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - --providers.docker=true
+      - --providers.docker.endpoint=tcp://socket-proxy-ro:2375
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=ow-core
+      # Keep routers of not-yet-healthy containers: users get 503 instead of 404 while the
+      # service restarts or a desktop is still starting.
+      - --providers.docker.allowEmptyServices=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+      # Desktop streams are long-lived WebSockets; don't time them out.
+      - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0
+      - --log.level=INFO
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+    ports:
+      - "80:80"
+      - "443:443"
+    networks: [core, proxy-ro]
+    depends_on: [socket-proxy-ro]
+    security_opt: ["no-new-privileges:true"]
+
+  # Read-only Docker API for Traefik: list/inspect containers and events only.
+  socket-proxy-ro:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: ow-socket-proxy-ro
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      CONTAINERS: 1
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      INFO: 0
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [proxy-ro]
+    read_only: true
+    tmpfs: [/run, /tmp]
+    security_opt: ["no-new-privileges:true"]
+
+  # Read-write Docker API for OrbitalWindow: containers, exec, images, build, networks.
+  socket-proxy-rw:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: ow-socket-proxy-rw
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      CONTAINERS: 1
+      EXEC: 1
+      IMAGES: 1
+      BUILD: 1
+      NETWORKS: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      ALLOW_RESTARTS: 1
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      INFO: 0
+      VOLUMES: 0
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [proxy-rw]
+    read_only: true
+    tmpfs: [/run, /tmp]
+    security_opt: ["no-new-privileges:true"]
+
+  orbitalwindow:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: orbitalwindow:latest
+    container_name: orbitalwindow
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      OW_ROOT: ${OW_ROOT:-/srv/orbitalwindow}
+      OW_HOSTNAME: ${OW_HOSTNAME:?set OW_HOSTNAME in deploy/.env}
+      OW_GPU_VENDOR: ${OW_GPU_VENDOR:-nvidia}
+      OW_DEFAULT_DESKTOP: ${OW_DEFAULT_DESKTOP:-ubuntu-xfce}
+      TZ: ${TZ:-Etc/UTC}
+      CONTROL_ADMIN_PASSWORD: ${CONTROL_ADMIN_PASSWORD:-}
+      DOCKER_HOST: tcp://socket-proxy-rw:2375
+    volumes:
+      # Same path inside and outside, so mount sources we give Docker are valid host paths.
+      - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}
+      - ./image:/opt/orbitalwindow/image:ro
+    networks: [core, proxy-rw]
+    depends_on: [socket-proxy-rw, samba]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ow-core
+      traefik.http.routers.ow-ui.rule: PathPrefix(`/`)
+      traefik.http.routers.ow-ui.priority: "1"
+      traefik.http.routers.ow-ui.entrypoints: websecure
+      traefik.http.routers.ow-ui.tls: "true"
+      traefik.http.services.ow-ui.loadbalancer.server.port: "8000"
+      # Used by every desktop router (labels set by OrbitalWindow on ow-<user>).
+      traefik.http.middlewares.ow-auth-desktop.forwardauth.address: http://orbitalwindow:8000/auth/desktop
+      traefik.http.middlewares.ow-auth-desktop.forwardauth.authResponseHeaders: X-OW-User
+      traefik.http.middlewares.ow-desktop-slash.redirectregex.regex: ^(https?://[^/]+/desktop/[a-z0-9]+)$$
+      traefik.http.middlewares.ow-desktop-slash.redirectregex.replacement: $${1}/
+      traefik.http.middlewares.ow-desktop-slash.redirectregex.permanent: "true"
+
+  samba:
+    build: ./samba
+    image: orbitalwindow-samba:latest
+    container_name: ow-samba
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "445:445"
+    volumes:
+      - ${OW_ROOT:-/srv/orbitalwindow}/users:/srv/users
+      - ${OW_ROOT:-/srv/orbitalwindow}/state/samba:/etc/ow:ro
+      - samba-lib:/var/lib/samba
+    networks: [samba]
+
+networks:
+  core:
+    name: ow-core
+  proxy-ro:
+    name: ow-proxy-ro
+    internal: true
+  proxy-rw:
+    name: ow-proxy-rw
+    internal: true
+  samba:
+    name: ow-samba
+
+volumes:
+  samba-lib:
+    name: ow-samba-lib
