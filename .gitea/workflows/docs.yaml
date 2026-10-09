@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+
+name: Documentation
+run-name: Docs
+on: [push]
+
+jobs:
+  documentation:
+    runs-on: "linux"
+    container:
+      image: gitea.tu.tsolo.net/tsolo/ubuntu:24-ci
+    steps:
+      - name: Check out repository code
+        uses: https://gitea.com/actions/checkout@v4
+      - name: Make docs and upload
+        uses: https://gitea.tu.tsolo.net/Tsolo/make-docs-upload-action@main
+        with:
+          s3_endpoint: ${{ vars.S3_ENDPOINT }}
+          s3_bucket: documentation
+          s3_access_key: ${{ vars.S3_DOC_ACCESS }}
+          s3_secret_key: ${{ secrets.S3_DOC_SECRET }}

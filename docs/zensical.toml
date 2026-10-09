@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+site_name = "Orbitalwindow"
+docs_dir = "content"
+site_dir = "site"
+use_directory_urls = false
+copyright = "Copyright &copy; 2026 Tsolo.io"
+site_author = "Tsolo.io"
+dev_addr = "0.0.0.0:8765"
+site_description = "Manage GPU-accelerated research/science desktop environments on Docker"
+
+[project.theme]
+logo = "images/Tsolo_Logo_black_font.png"
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+inherited_members = true
+show_source = false
+
+[[project.extra.social]]
+icon = "fontawesome/solid/briefcase"
+link = "https://docs.tu.tsolo.net/index/index.html"
