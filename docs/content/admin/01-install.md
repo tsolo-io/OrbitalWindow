@@ -45,8 +45,8 @@ service (`sudo systemctl restart prometheus-node-exporter`).
 If a firewall runs on the host, allow port 9100 from Docker's networks (or only from the
 OrbitalWindow service). Don't expose it to the LAN unless you want to.
 
-Ports used on the host: **80/443** (web), **445** (Windows file sharing) and **2222** (SSH
-gateway). If the host already runs Samba, disable it: `sudo systemctl disable --now smbd nmbd`.
+Ports used on the host: **80/443** (web), **8443** (AI chat), **445** (Windows file sharing)
+and **2222** (SSH gateway). If the host already runs Samba, disable it: `sudo systemctl disable --now smbd nmbd`.
 
 Disk: each desktop image is about 5 GB, and each user's software adds to that. Put Docker's data
 (`/var/lib/docker`) and the OrbitalWindow data folder on a disk with plenty of space.

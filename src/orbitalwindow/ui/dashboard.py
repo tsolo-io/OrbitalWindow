@@ -230,18 +230,32 @@ def ai_card(auth: PageAuth) -> None:
             ui.label("AI model").classes("text-h6")
             badge = ui.badge("")
         text = ui.label()
-        if auth.user.can_manage_ai:
-            ui.link("Manage the AI session", "/ai").classes("text-sm")
+        with ui.row().classes("items-center gap-4"):
+            chat_btn = ui.button("Open chat", icon="chat").props(
+                f'no-caps href="{svc.chat_url()}" target="ow-chat"'
+            )
+            ui.link("How to use it", "/help/ai").classes("text-sm")
+            if auth.user.can_manage_ai:
+                ui.link("Manage the AI session", "/ai").classes("text-sm")
     card.set_visibility(False)
 
     async def refresh() -> None:
         """Show the running model, or hide the card when there is none."""
-        state = (await run.io_bound(svc.ai_session))[0]
+        result = await run.io_bound(svc.ai_session)
+        if result is None:  # None: the page closed or the app is stopping
+            return
+        state = result[0]
         card.set_visibility(state.status in ("starting", "running"))
+        chat_ready = state.status == "running" and await run.io_bound(svc.chat_ready)
+        chat_btn.set_visibility(chat_ready)
         if state.status == "running":
             badge.set_text("ready")
             badge.props("color=positive")
-            text.set_text(f"{state.repo} is running and ready to use.")
+            text.set_text(
+                f"{state.repo} is running and ready to use."
+                if chat_ready
+                else f"{state.repo} is running; the chat is starting."
+            )
         elif state.status == "starting":
             badge.set_text("starting")
             badge.props("color=orange")

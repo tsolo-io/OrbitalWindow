@@ -344,6 +344,43 @@ def auth_admin(request: Request) -> Response:
     return PlainTextResponse("ok", headers={"X-OW-User": user.name, "Remote-User": user.name})
 
 
+CHAT_EMAIL_DOMAIN = "orbitalwindow.local"
+
+
+@router.get("/auth/ai")
+def auth_ai(request: Request) -> Response:
+    """Traefik forwardAuth for the chat (Open WebUI): every logged-in user.
+
+    Open WebUI trusts the headers to sign the user in: ``X-OW-Email`` names the account,
+    ``X-OW-Name`` is the display name (URL-encoded) and ``X-OW-Role`` makes OrbitalWindow admins
+    Open WebUI admins and everyone else a user. All three are always sent, so a client's own copies
+    never reach Open WebUI.
+
+    Args:
+        request: The forwardAuth request from Traefik.
+
+    Returns:
+        200 with the user headers, or a redirect to OrbitalWindow's login page (on the normal
+        HTTPS port, since the chat runs on its own port).
+    """
+    user = current_user(request)
+    if user is None:
+        proto = request.headers.get("x-forwarded-proto", "https")
+        host = request.headers.get("x-forwarded-host", "")
+        if proto not in ("http", "https") or not HOST_RE.fullmatch(host):
+            return PlainTextResponse("Please log in.", status_code=401)
+        hostname = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+        return RedirectResponse(f"{proto}://{hostname}/login?next=/", status_code=302)
+    return PlainTextResponse(
+        "ok",
+        headers={
+            "X-OW-Email": f"{user.name}@{CHAT_EMAIL_DOMAIN}",
+            "X-OW-Name": quote(user.display_name),
+            "X-OW-Role": "admin" if user.is_admin else "user",
+        },
+    )
+
+
 @router.get("/healthz", include_in_schema=False)
 def healthz() -> Response:
     """Report that the server is up.

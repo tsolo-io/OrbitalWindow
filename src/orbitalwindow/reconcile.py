@@ -76,6 +76,7 @@ def reconcile(svc: Service, now: datetime | None = None) -> None:
         svc.ai.ensure_connected()
     except docker.errors.DockerException as exc:
         log.warning("could not reconnect Traefik to the AI session: %s", exc)
+    svc.sync_chat()
 
     fixed = svc.desktops.ensure_traefik_connected()
     if fixed:

@@ -238,6 +238,9 @@ def status_page(request: Request) -> RedirectResponse | None:
                 current = await run.io_bound(svc.node_exporter.read)
             except NodeExporterError as exc:
                 current, error = None, str(exc)
+            else:
+                if current is None:  # None: the page closed or the app is stopping
+                    return
             gpus = await run.io_bound(svc.gpus.stats)
             render(current, error, gpus)
             if current is not None:

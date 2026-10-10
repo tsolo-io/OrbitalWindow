@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     llmfit_image: str = "ghcr.io/alexsjones/llmfit:1.1.15"
     # vLLM image for the AI session (CUDA 13; tens of GB, pulled on first start).
     vllm_image: str = "vllm/vllm-openai:v0.30.0"
+    # Open WebUI image for the AI chat, served on its own port (it can't run under a path).
+    openwebui_image: str = "ghcr.io/open-webui/open-webui:v0.11.4"
+    chat_port: int = 8443
+    chat_entrypoint: str = "ai"
 
     cookie_secure: bool = True
     session_hours: int = 12
@@ -114,6 +118,15 @@ class Settings(BaseSettings):
             ``<state_dir>/ai_api_key``.
         """
         return self.state_dir / "ai_api_key"
+
+    @property
+    def chat_data_dir(self) -> Path:
+        """Return Open WebUI's data folder (its database: users, chats, API keys).
+
+        Returns:
+            ``<state_dir>/openwebui``.
+        """
+        return self.state_dir / "openwebui"
 
     @property
     def models_dir(self) -> Path:

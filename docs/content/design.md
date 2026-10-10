@@ -212,7 +212,10 @@ env: {}                     # extra container environment
 - **Session (#17, ADR 0027):** one vLLM container `ow-ai-model` on internal network `ow-ai`, with an
   API key from `state/ai_api_key`. `/v1` goes through Traefik only when switched on; it is in the
   `ai_sessions` history.
-- **Next tickets:** Open WebUI (#18) and benchmarks (#21).
+- **Chat (#18, ADR 0028):** Open WebUI `ow-openwebui` on port 8443 (Traefik entrypoint `ai`)
+  while the session runs. It signs users in from the forwardAuth headers `X-OW-Email`/`Name`/`Role`
+  and offers per-user API keys (`Bearer sk-…` skips forwardAuth). Its data is in `state/openwebui`.
+- **Next ticket:** benchmarks (#21).
 
 ### Server status (ticket #22, ADR 0025)
 - Page `/status` for every user: host name, uptime, load, CPU, memory, swap, disk space, disk and

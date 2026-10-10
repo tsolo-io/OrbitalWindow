@@ -242,7 +242,10 @@ def ai_page(request: Request) -> RedirectResponse | None:
 
         async def refresh() -> None:
             """Reload storage, downloads and the model list."""
-            library, space, rows = await run.io_bound(svc.model_library)
+            result = await run.io_bound(svc.model_library)
+            if result is None:  # None: the page closed or the app is stopping
+                return
+            library, space, rows = result
             fits = await run.io_bound(lambda: [svc.fit_for_local(model) for model in library])
             space_label.set_text(
                 f"{gb(space.free)} free of {gb(space.total)} "

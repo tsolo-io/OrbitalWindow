@@ -25,6 +25,12 @@ services:
       - --entrypoints.websecure.http.tls.certresolver=le
       - --entrypoints.websecure.http.tls.domains[0].main=${OW_HOSTNAME}
       - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0
+      # The AI chat (Open WebUI) can't run under a path, so it gets its own port.
+      - --entrypoints.ai.address=:8443
+      - --entrypoints.ai.http.tls=true
+      - --entrypoints.ai.http.tls.certresolver=le
+      - --entrypoints.ai.http.tls.domains[0].main=${OW_HOSTNAME}
+      - --entrypoints.ai.transport.respondingtimeouts.readtimeout=0
       - --certificatesresolvers.le.acme.email=${OW_ACME_EMAIL:?set OW_ACME_EMAIL in deploy/.env}
       - --certificatesresolvers.le.acme.storage=/acme/acme.json
       - --certificatesresolvers.le.acme.dnschallenge=true
