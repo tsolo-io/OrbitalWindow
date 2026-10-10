@@ -200,6 +200,15 @@ env: {}                     # extra container environment
 - **Until the provider is known:** keep Traefik's self-signed default. Switching only touches the Traefik flags and adds the token.
 - **Samba and SSH** use the same hostname (`\\desk.<domain>\<user>`, `ssh -p 2222 <user>@desk.<domain>`).
 
+### AI models (ticket #15, ADR 0024)
+- **Role:** `users.is_ai_manager` (admins count too); page `/ai`.
+- **Library:** `$OW_ROOT/shared/models/<org>/<name>`, one plain folder per model
+  (`hf download --local-dir`), owned by the service UID.
+- **Downloads:** one at a time in `ow-model-dl` (image `ow-hf:1`), pinned to the inspected commit,
+  weights in safetensors only. Progress, cancel and resume are on the AI page.
+- **Token:** `$OW_ROOT/state/hf_token` for gated models.
+- **Next tickets:** fit check (#16), one vLLM session (#17) and Open WebUI (#18).
+
 ### UI pages (NiceGUI)
 - **`/login`**
 - **`/` (user dashboard):**

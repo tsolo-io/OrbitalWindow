@@ -35,11 +35,12 @@ SCRATCH_README = (
 # Fixed scripts; user-controlled values arrive as positional parameters ($1, $2, …).
 _LAYOUT = f"""
 set -eu
-mkdir -p /ow/users /ow/groups /ow/shared/data /ow/shared/scratch /ow/state/samba /ow/state/ssh \\
-         /ow/state/files /ow/state/files-config
-chmod 755 /ow/users /ow/groups /ow/shared /ow/shared/data
+mkdir -p /ow/users /ow/groups /ow/shared/data /ow/shared/scratch /ow/shared/models \\
+         /ow/state/samba /ow/state/ssh /ow/state/files /ow/state/files-config
+chmod 755 /ow/users /ow/groups /ow/shared /ow/shared/data /ow/shared/models
 chmod 1777 /ow/shared/scratch
-chown "$1:$1" /ow/state /ow/state/samba /ow/state/ssh /ow/state/files-config
+# Model downloads run as the service's UID, so the service can measure and delete them.
+chown "$1:$1" /ow/state /ow/state/samba /ow/state/ssh /ow/state/files-config /ow/shared/models
 chmod 700 /ow/state /ow/state/ssh
 chmod 755 /ow/state/samba /ow/state/files /ow/state/files-config
 printf '{SCRATCH_README}' "$2" > /ow/shared/scratch/README-auto-clean.txt

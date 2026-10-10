@@ -20,6 +20,7 @@ All six design phases are implemented, one stacked PR per phase for ticket #2 (P
 carried over: no migration, no backward compatibility, no redirects. Decisions and their reasons are recorded as
 ADRs in `docs/content/adr/`; add one for every new architectural decision. Admin guide: `docs/content/admin/`;
 user help pages (also served at `/help`): `docs/content/user/`.
+AI features are tickets #15–#18 (model library, fit check, vLLM session, Open WebUI); see ADR 0024.
 
 ## Project conventions
 - **Build:** hatch / hatchling, src layout (`src/orbitalwindow/`), Python 3.14 (service image `python:3.14-slim`).

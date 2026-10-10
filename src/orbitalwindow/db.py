@@ -147,6 +147,25 @@ MIGRATIONS: list[str] = [
     """
     DROP INDEX IF EXISTS pkg_index_lookup;
     """,
+    # 6: AI manager role and model downloads
+    """
+    ALTER TABLE users ADD COLUMN is_ai_manager BOOLEAN DEFAULT false;
+    UPDATE users SET is_ai_manager = false;
+    CREATE SEQUENCE seq_model_downloads START 1;
+    CREATE TABLE model_downloads (
+        id INTEGER PRIMARY KEY DEFAULT nextval('seq_model_downloads'),
+        repo VARCHAR NOT NULL,          -- Hugging Face repo id, e.g. Qwen/Qwen3-8B
+        revision VARCHAR NOT NULL,      -- commit the download is pinned to
+        status VARCHAR NOT NULL,        -- queued | running | cancelling | done | failed | cancelled
+        bytes_total BIGINT NOT NULL,
+        bytes_done BIGINT NOT NULL DEFAULT 0,
+        error VARCHAR NOT NULL DEFAULT '',
+        requested_by VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        started_at TIMESTAMP,
+        finished_at TIMESTAMP
+    );
+    """,
 ]
 
 

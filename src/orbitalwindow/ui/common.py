@@ -43,26 +43,31 @@ class PageAuth:
     """The session a page was opened with.
 
     Event handlers and timers call ``check`` before acting, so logging out, a password change, a
-    disabled account or lost admin rights take effect on open pages without a reload.
+    disabled account or lost admin (or AI manager) rights take effect on open pages without a
+    reload.
     """
 
-    def __init__(self, token: str, user: SessionUser, *, admin: bool = False) -> None:
+    def __init__(
+        self, token: str, user: SessionUser, *, admin: bool = False, ai: bool = False
+    ) -> None:
         """Remember the session a page was opened with.
 
         Args:
             token: Session token from the request cookie.
             user: The user the token resolved to when the page opened.
             admin: Whether the page needs admin rights.
+            ai: Whether the page needs AI manager rights (admins have them too).
         """
         self._token = token
         self.user = user
         self.admin = admin  # the page needs admin rights
+        self.ai = ai  # the page needs AI manager rights
 
     def check(self) -> SessionUser | None:
         """Re-check the session; navigate away if it is no longer valid for this page.
 
-        Goes to the login page when the session has ended, or to the dashboard when an admin page
-        lost its admin rights.
+        Goes to the login page when the session has ended, or to the dashboard when an admin (or
+        AI) page lost its rights.
 
         Returns:
             The current session user, or None if the page was navigated away.
@@ -71,30 +76,33 @@ class PageAuth:
         if user is None:
             ui.navigate.to("/login")
             return None
-        if self.admin and not user.is_admin:
+        if (self.admin and not user.is_admin) or (self.ai and not user.can_manage_ai):
             ui.navigate.to("/")
             return None
         return user
 
 
-def authenticate(request: Request, *, admin: bool = False) -> PageAuth | RedirectResponse:
+def authenticate(
+    request: Request, *, admin: bool = False, ai: bool = False
+) -> PageAuth | RedirectResponse:
     """Check the session cookie of a page request.
 
     Args:
         request: The incoming page request.
         admin: Whether the page needs admin rights.
+        ai: Whether the page needs AI manager rights (admins have them too).
 
     Returns:
         A ``PageAuth`` for the session, or a redirect to the login page (no valid session) or to
-        the dashboard (not an admin on an admin page).
+        the dashboard (missing admin or AI manager rights).
     """
     token = request.cookies.get(COOKIE_NAME, "")
     user = service().sessions.resolve(token)
     if user is None:
         return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
-    if admin and not user.is_admin:
+    if (admin and not user.is_admin) or (ai and not user.can_manage_ai):
         return RedirectResponse("/", status_code=303)
-    return PageAuth(token, user, admin=admin)
+    return PageAuth(token, user, admin=admin, ai=ai)
 
 
 def post_button(label: str, action: str, *, icon: str | None = None, flat: bool = True) -> None:
@@ -135,6 +143,8 @@ def frame(auth: PageAuth, title: str) -> None:
                     ("System", "/admin/system"),
                 ):
                     ui.link(text, url).classes("text-white no-underline")
+            if auth.user.can_manage_ai:
+                ui.link("AI", "/ai").classes("text-white no-underline")
         with ui.row().classes("items-center gap-2"):
             ui.link("Help", "/help").classes("text-white no-underline mr-2")
             ui.label(auth.user.display_name).classes("text-white")
