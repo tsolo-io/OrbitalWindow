@@ -146,6 +146,7 @@ def frame(auth: PageAuth, title: str) -> None:
             if auth.user.can_manage_ai:
                 ui.link("AI", "/ai").classes("text-white no-underline")
         with ui.row().classes("items-center gap-2"):
+            ui.link("Server status", "/status").classes("text-white no-underline mr-2")
             ui.link("Help", "/help").classes("text-white no-underline mr-2")
             ui.label(auth.user.display_name).classes("text-white")
             post_button("Log out", "/auth/logout", icon="logout")

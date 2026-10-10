@@ -209,6 +209,14 @@ env: {}                     # extra container environment
 - **Token:** `$OW_ROOT/state/hf_token` for gated models.
 - **Next tickets:** fit check (#16), one vLLM session (#17) and Open WebUI (#18).
 
+### Server status (ticket #22, ADR 0025)
+- Page `/status` for every user: host name, uptime, load, CPU, memory, swap, disk space, disk and
+  network traffic, and GPUs (NVML).
+- **Source:** Prometheus node-exporter on the host (admin installs it), at `OW_NODE_EXPORTER_URL`
+  (default `http://host.docker.internal:9100/metrics`, via `extra_hosts: host-gateway`).
+- Read only by an open page, every 5 s; rates come from the page's previous read. Nothing is
+  cached or polled in the background. Without node-exporter, the page shows what to install.
+
 ### UI pages (NiceGUI)
 - **`/login`**
 - **`/` (user dashboard):**

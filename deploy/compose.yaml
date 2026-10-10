@@ -144,6 +144,8 @@ services:
       # The desktop image context, add-ons and help pages are baked into the image. To use your
       # own add-ons, mount a folder over /opt/orbitalwindow/addons (read-only).
     networks: [core, proxy-rw]
+    # The server status page reads Prometheus node-exporter on the host (port 9100).
+    extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [socket-proxy-rw, samba]
     read_only: true
     tmpfs: [/tmp]

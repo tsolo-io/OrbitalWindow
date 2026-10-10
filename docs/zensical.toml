@@ -55,6 +55,7 @@ nav = [
     { "0022 Electron without sandbox" = "adr/0022-electron-apps-without-chromium-sandbox.md" },
     { "0023 Deploy folder, Makefile" = "adr/0023-deploy-folder-is-the-install.md" },
     { "0024 AI role, model library" = "adr/0024-ai-model-library.md" },
+    { "0025 Server status" = "adr/0025-server-status-from-node-exporter.md" },
   ] },
 ]
 

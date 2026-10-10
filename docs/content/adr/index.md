@@ -38,3 +38,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0022](0022-electron-apps-without-chromium-sandbox.md) | Electron apps run without Chromium's sandbox | accepted |
 | [0023](0023-deploy-folder-is-the-install.md) | The deploy folder is the install, with its own Makefile | accepted |
 | [0024](0024-ai-model-library.md) | AI manager role and the model library | accepted |
+| [0025](0025-server-status-from-node-exporter.md) | Server status from node-exporter, read only while the page is open | accepted |

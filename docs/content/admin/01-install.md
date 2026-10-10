@@ -30,6 +30,21 @@ sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart doc
 docker run --rm --gpus all ubuntu nvidia-smi              # must list the GPU(s)
 ```
 
+Prometheus node-exporter, for the **Server status** page (OrbitalWindow reads it from the host's
+port 9100 while someone has the page open; without it the page says so):
+
+```bash
+sudo apt install prometheus-node-exporter    # starts it as a service on port 9100
+```
+
+Ubuntu's package ignores filesystems mounted under `/var/lib`. If Docker's data or the data folder
+is on its own disk mounted there, include it by changing `ignored-mount-points` in
+`/etc/default/prometheus-node-exporter` to `^/(sys|proc|dev|run|tmp)($|/)` and restarting the
+service (`sudo systemctl restart prometheus-node-exporter`).
+
+If a firewall runs on the host, allow port 9100 from Docker's networks (or only from the
+OrbitalWindow service). Don't expose it to the LAN unless you want to.
+
 Ports used on the host: **80/443** (web), **445** (Windows file sharing) and **2222** (SSH
 gateway). If the host already runs Samba, disable it: `sudo systemctl disable --now smbd nmbd`.
 
