@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..desktops import DesktopError, DesktopState, desktop_path
+from ..metrics import fmt_bytes
 from ..users import ValidationError
 from .common import PageAuth, authenticate, form_input, frame, guarded, service
 from .software import software_card
@@ -85,7 +86,26 @@ def desktop_card(auth: PageAuth) -> None:
                 icon="open_in_new",
                 on_click=lambda: ui.navigate.to(open_url, new_tab=True),
             ).props("no-caps color=positive")
+        usage_box = ui.column().classes("w-full gap-1")
         busy = {"value": False}
+
+        async def show_usage(running: bool) -> None:
+            use = await run.io_bound(svc.usage_for, auth.user.name) if running else None
+            gpus = await run.io_bound(svc.gpus.stats)
+            usage_box.clear()
+            with usage_box:
+                if use:
+                    mem_gb = svc.db.scalar("SELECT mem_gb FROM users WHERE id = ?", [user_id])
+                    limit = f"{mem_gb:g} GB" if mem_gb else "none"
+                    ui.label(
+                        f"Your desktop uses {use.cpu_cores:.1f} CPU cores and "
+                        f"{fmt_bytes(use.mem_bytes)} of RAM (limit: {limit})."
+                    ).classes("text-sm text-grey-8")
+                for g in gpus:
+                    ui.label(
+                        f"GPU {g.index} ({g.name}), shared by everyone: {g.util_percent}% busy, "
+                        f"{fmt_bytes(g.mem_used)} of {fmt_bytes(g.mem_total)} memory in use."
+                    ).classes("text-sm text-grey-8")
 
         async def refresh() -> None:
             user = await run.io_bound(svc.db.one, "SELECT * FROM users WHERE id = ?", [user_id])
@@ -109,6 +129,7 @@ def desktop_card(auth: PageAuth) -> None:
             restart_note.set_visibility(
                 state is DesktopState.RUNNING and await run.io_bound(svc.restart_needed, user_id)
             )
+            await show_usage(state is DesktopState.RUNNING)
             if picker.value != user["image_id"]:
                 picker.set_value(user["image_id"])
 
@@ -151,7 +172,7 @@ def desktop_card(auth: PageAuth) -> None:
 
 
 def files_card(auth: PageAuth) -> None:
-    host = service().settings.hostname
+    host = service().public_hostname()
     with ui.card().classes("w-full"):
         ui.label("My files").classes("text-h6")
         ui.label("Your home folder is the same in the desktop and in Windows Explorer.")

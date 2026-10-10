@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     slash_middleware: str = "ow-desktop-slash@docker"
     entrypoint: str = "websecure"
 
+    # cAdvisor serves its UI and API under --url_base_prefix (the path Traefik routes to it).
+    cadvisor_url: str = "http://cadvisor:8080/admin/cadvisor"
+
     cookie_secure: bool = True
     session_hours: int = 12
     min_password_length: int = 10

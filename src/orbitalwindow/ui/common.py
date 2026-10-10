@@ -75,6 +75,8 @@ def frame(auth: PageAuth, title: str) -> None:
                     ("Users", "/admin/users"),
                     ("Desktops", "/admin/images"),
                     ("Add-ons", "/admin/addons"),
+                    ("Settings", "/admin/settings"),
+                    ("System", "/admin/system"),
                 ):
                     ui.link(text, url).classes("text-white no-underline")
         with ui.row().classes("items-center gap-2"):

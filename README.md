@@ -31,7 +31,7 @@ cp deploy/.env.example deploy/.env && chmod 600 deploy/.env   # fill it in
 make start            # https://<OW_HOSTNAME>/, log in as admin with CONTROL_ADMIN_PASSWORD
 ```
 
-Status: phases 1–2 (core, single sign-on, start/stop; desktop images, add-ons and packages) in progress.
+Status: phases 1–3 (core and single sign-on; desktop images, add-ons and packages; account management, admin pages and metrics) in progress.
 
 - Decisions: [docs/content/adr/](docs/content/adr/index.md)
 

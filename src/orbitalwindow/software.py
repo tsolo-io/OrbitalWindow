@@ -82,7 +82,10 @@ class Software:
         return {r["key"]: r for r in self._db.all("SELECT * FROM addon_settings")}
 
     def is_restricted(self, addon: Addon, settings: dict[str, Any] | None = None) -> bool:
-        override = (settings or {}).get("restricted_override")
+        """Restricted per addon.yaml unless an admin overrode it (``settings`` is its row)."""
+        if settings is None:
+            settings = self._settings().get(addon.key, {})
+        override = settings.get("restricted_override")
         return addon.spec.restricted if override is None else bool(override)
 
     def enabled_addons(self) -> list[Addon]:

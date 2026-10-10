@@ -152,6 +152,15 @@ def change_password(
     return response
 
 
+def _login_redirect(request: Request, uri: str) -> Response:
+    # Traefik resolves a relative Location against the auth server, so make it absolute.
+    proto = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("x-forwarded-host", "")
+    if proto not in ("http", "https") or not HOST_RE.fullmatch(host):
+        return PlainTextResponse("Please log in.", status_code=401)
+    return RedirectResponse(f"{proto}://{host}/login?next={quote(safe_next(uri))}", status_code=302)
+
+
 @router.get("/auth/desktop")
 def auth_desktop(request: Request) -> Response:
     """Traefik forwardAuth for desktop routers. Also used for their WebSocket upgrades."""
@@ -160,14 +169,19 @@ def auth_desktop(request: Request) -> Response:
     if access is Access.ALLOW:
         return PlainTextResponse("ok", headers={"X-OW-User": owner or ""})
     if access is Access.LOGIN:
-        # Traefik resolves a relative Location against the auth server, so make it absolute.
-        proto = request.headers.get("x-forwarded-proto", "https")
-        host = request.headers.get("x-forwarded-host", "")
-        if proto not in ("http", "https") or not HOST_RE.fullmatch(host):
-            return PlainTextResponse("Please log in.", status_code=401)
-        login_url = f"{proto}://{host}/login?next={quote(safe_next(uri))}"
-        return RedirectResponse(login_url, status_code=302)
+        return _login_redirect(request, uri)
     return PlainTextResponse("Forbidden", status_code=403)
+
+
+@router.get("/auth/admin")
+def auth_admin(request: Request) -> Response:
+    """Traefik forwardAuth for admin tools (cAdvisor, later Dozzle): admins only."""
+    user = current_user(request)
+    if user is None:
+        return _login_redirect(request, request.headers.get("x-forwarded-uri", ""))
+    if not user.is_admin:
+        return PlainTextResponse("Forbidden", status_code=403)
+    return PlainTextResponse("ok", headers={"X-OW-User": user.name, "Remote-User": user.name})
 
 
 @router.get("/healthz", include_in_schema=False)

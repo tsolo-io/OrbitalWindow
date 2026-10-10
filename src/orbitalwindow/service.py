@@ -10,6 +10,7 @@ and never touch Docker or the DB directly.
 
 import logging
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +25,8 @@ from .config import Settings
 from .db import Database
 from .desktops import DesktopError, Desktops, DesktopState, GpuVendor, container_name
 from .hostops import HostOps
+from .metrics import ContainerMetrics, GpuMetrics, Usage
+from .reconcile import reconcile
 from .samba import Samba, SambaError
 from .software import Software
 from .users import ValidationError, validate_password
@@ -36,6 +39,7 @@ DEFAULT_SETTINGS = {
     "default_quota_gb": "50",
     "scratch_retention_days": "30",
 }
+GPU_VENDORS = tuple(v.value for v in GpuVendor)
 
 
 @dataclass
@@ -71,6 +75,8 @@ class Service:
             client, self.db, self.software, settings.image_context, settings.webtop_repo
         )
         self.builder.on_base_ready = self._rebuild_users_of
+        self.metrics = ContainerMetrics(settings.cadvisor_url)
+        self.gpus = GpuMetrics()
         self._reconcile_stop = threading.Event()
 
     # --- startup -----------------------------------------------------------------------------
@@ -81,6 +87,8 @@ class Service:
                 self.db.set_setting(key, value)
         if self.db.get_setting("gpu_vendor") is None:
             self.db.set_setting("gpu_vendor", os.environ.get("OW_GPU_VENDOR", GpuVendor.NVIDIA))
+        if self.db.get_setting("hostname") is None:
+            self.db.set_setting("hostname", self.settings.hostname)
         self.builder.start()
         if not self.db.scalar("SELECT count(*) FROM images"):
             try:
@@ -121,9 +129,7 @@ class Service:
     def _reconcile_loop(self) -> None:
         while True:
             try:
-                fixed = self.desktops.ensure_traefik_connected()
-                if fixed:
-                    log.info("reconnected Traefik to %d user network(s)", fixed)
+                reconcile(self)
             except Exception:
                 log.exception("reconcile failed")
             if self._reconcile_stop.wait(self.settings.reconcile_seconds):
@@ -172,6 +178,13 @@ class Service:
             password = result.password = generate_password()
         validate_password(password, self.settings.min_password_length)
         defaults = self._defaults()
+        if cpus == "default" and mem_gb == "default":
+            cpus_v, mem_v = defaults["cpus"], defaults["mem_gb"]
+        else:
+            cpus_v, mem_v = _validate_limits(
+                defaults["cpus"] if cpus == "default" else cpus,
+                defaults["mem_gb"] if mem_gb == "default" else mem_gb,
+            )
         if image_id is None:
             image_id = self.db.scalar("SELECT id FROM images WHERE enabled ORDER BY id LIMIT 1")
         row = users_mod.insert_user(
@@ -181,8 +194,8 @@ class Service:
             password=password,
             is_admin=is_admin,
             image_id=image_id,
-            cpus=defaults["cpus"] if cpus == "default" else cpus,  # type: ignore[arg-type]
-            mem_gb=defaults["mem_gb"] if mem_gb == "default" else mem_gb,  # type: ignore[arg-type]
+            cpus=cpus_v,
+            mem_gb=mem_v,
             quota_gb=defaults["quota_gb"],
             allow_reserved=allow_reserved,
         )
@@ -243,6 +256,182 @@ class Service:
             "SELECT u.*, i.label AS image_label FROM users u "
             "LEFT JOIN images i ON i.id = u.image_id ORDER BY u.name"
         )
+
+    def _admins_left_without(self, user_id: int) -> int:
+        return self.db.scalar(
+            "SELECT count(*) FROM users WHERE is_admin AND NOT disabled AND id <> ?", [user_id]
+        )
+
+    def _guard_admin_change(self, actor_id: int | None, user: dict[str, Any], what: str) -> None:
+        """Admins may not lock themselves out, and there must always be an enabled admin."""
+        if actor_id is not None and user["id"] == actor_id:
+            raise ValidationError(f"You cannot {what} your own account.")
+        if user["is_admin"] and not user["disabled"] and not self._admins_left_without(user["id"]):
+            raise ValidationError(f"You cannot {what} the last administrator.")
+
+    def set_disabled(
+        self, actor: str, actor_id: int | None, user_id: int, disabled: bool
+    ) -> Result:
+        """Disable: block login, desktop and Samba, end sessions. Enable: reverse (no desktop)."""
+        user = self._require_user(user_id)
+        result = Result()
+        if disabled:
+            self._guard_admin_change(actor_id, user, "disable")
+            self.db.execute(
+                "UPDATE users SET disabled = true, session_ver = session_ver + 1 WHERE id = ?",
+                [user_id],
+            )
+            try:
+                self.desktops.stop(user)
+            except docker.errors.DockerException as e:
+                result.warnings.append(f"The desktop could not be stopped: {e}")
+        else:
+            self.db.execute("UPDATE users SET disabled = false WHERE id = ?", [user_id])
+        try:
+            self.samba.set_enabled(user["name"], not disabled)
+        except (SambaError, docker.errors.DockerException) as e:
+            result.warnings.append(f"Windows file sharing (Samba) was not updated: {e}")
+        self.db.audit(actor, "user.disable" if disabled else "user.enable", user["name"])
+        return result
+
+    def delete_user(
+        self, actor: str, actor_id: int | None, user_id: int, delete_home: bool = False
+    ) -> Result:
+        """Remove the user and everything OrbitalWindow made for them. The home folder is kept
+        unless ``delete_home``. UID and MAC are never reused. Audit rows are kept."""
+        user = self._require_user(user_id)
+        self._guard_admin_change(actor_id, user, "delete")
+        name = user["name"]
+        result = Result()
+        try:
+            self.desktops.stop(user)
+        except docker.errors.DockerException as e:
+            result.warnings.append(f"The desktop could not be removed: {e}")
+        self.builder.remove_user_image(name)
+        with self.db.transaction():
+            for table in ("user_packages", "user_addons", "addon_grants", "user_image"):
+                self.db.execute(f"DELETE FROM {table} WHERE user_id = ?", [user_id])
+            self.db.execute("DELETE FROM users WHERE id = ?", [user_id])
+        try:
+            self.samba.remove_user(name, self.db)
+        except (SambaError, docker.errors.DockerException) as e:
+            result.warnings.append(f"Windows file sharing (Samba) was not updated: {e}")
+        home = self.settings.users_dir / name
+        if delete_home:
+            try:
+                self.hostops.remove_home(name)
+            except docker.errors.DockerException as e:
+                result.warnings.append(f"The home folder {home} could not be removed: {e}")
+        else:
+            result.warnings.append(f"The home folder was kept: {home}")
+        self.db.audit(actor, "user.delete", name, "home deleted" if delete_home else "home kept")
+        return result
+
+    def set_admin(self, actor: str, actor_id: int | None, user_id: int, is_admin: bool) -> None:
+        user = self._require_user(user_id)
+        if not is_admin:
+            self._guard_admin_change(actor_id, user, "remove administrator rights from")
+        self.db.execute("UPDATE users SET is_admin = ? WHERE id = ?", [is_admin, user_id])
+        self.db.audit(actor, "user.admin" if is_admin else "user.unadmin", user["name"])
+
+    def set_limits(
+        self, actor: str, user_id: int, cpus: float | str | None, mem_gb: float | str | None
+    ) -> None:
+        """CPU and RAM limits (None/empty/0 = unlimited). They apply at the next start."""
+        user = self._require_user(user_id)
+        cpus_v, mem_v = _validate_limits(cpus, mem_gb)
+        self.db.execute(
+            "UPDATE users SET cpus = ?, mem_gb = ? WHERE id = ?", [cpus_v, mem_v, user_id]
+        )
+        self.db.audit(actor, "user.limits", user["name"], f"cpus={cpus_v} mem_gb={mem_v}")
+
+    def set_display_name(self, actor: str, user_id: int, display_name: str) -> None:
+        user = self._require_user(user_id)
+        display_name = display_name.strip()
+        if not display_name or len(display_name) > 80:
+            raise ValidationError("The name must be 1–80 characters.")
+        self.db.execute("UPDATE users SET display_name = ? WHERE id = ?", [display_name, user_id])
+        self.db.audit(actor, "user.rename", user["name"], display_name)
+
+    # --- settings ----------------------------------------------------------------------------
+
+    def get_settings(self) -> dict[str, str]:
+        rows = self.db.all("SELECT key, value FROM settings")
+        return {r["key"]: r["value"] for r in rows}
+
+    def public_hostname(self) -> str:
+        return self.db.get_setting("hostname") or self.settings.hostname
+
+    def update_settings(self, actor: str, values: dict[str, Any]) -> None:
+        """Validate and store admin-editable settings (only the keys given)."""
+        clean: dict[str, str] = {}
+        if "default_cpus" in values or "default_mem_gb" in values:
+            cpus, mem = _validate_limits(values.get("default_cpus"), values.get("default_mem_gb"))
+            clean["default_cpus"] = "" if cpus is None else f"{cpus:g}"
+            clean["default_mem_gb"] = "" if mem is None else f"{mem:g}"
+        if "default_quota_gb" in values:
+            quota = users_mod.parse_limit(values["default_quota_gb"])
+            clean["default_quota_gb"] = "" if quota is None else f"{quota:g}"
+        if "scratch_retention_days" in values:
+            days = _int_in(values["scratch_retention_days"], 1, 3650, "Scratch retention")
+            clean["scratch_retention_days"] = str(days)
+        if "gpu_vendor" in values:
+            if values["gpu_vendor"] not in GPU_VENDORS:
+                raise ValidationError("Unknown GPU vendor.")
+            clean["gpu_vendor"] = values["gpu_vendor"]
+        if "hostname" in values:
+            host = str(values["hostname"]).strip().lower()
+            if not HOSTNAME_RE.fullmatch(host):
+                raise ValidationError("The host name may contain letters, digits, dots and '-'.")
+            clean["hostname"] = host
+        with self.db.transaction():
+            for key, value in clean.items():
+                self.db.set_setting(key, value)
+        detail = ", ".join(f"{k}={v}" for k, v in clean.items())
+        self.db.audit(actor, "settings.update", detail=detail)
+
+    # --- audit and metrics -------------------------------------------------------------------
+
+    def audit_log(self, search: str = "", limit: int = 200) -> list[dict[str, Any]]:
+        like = f"%{search.strip()}%"
+        return self.db.all(
+            "SELECT * FROM audit WHERE ? = '%%' OR actor ILIKE ? OR action ILIKE ? "
+            "OR target ILIKE ? OR detail ILIKE ? ORDER BY ts DESC LIMIT ?",
+            [like, like, like, like, like, limit],
+        )
+
+    def _managed_ids(self) -> dict[str, str]:
+        """Full container ID → name of every OrbitalWindow container (one Docker call)."""
+        containers = self.client.containers.list(filters={"label": "ow.managed=true"}, sparse=True)
+        return {c.id: c.attrs.get("Names", [c.id])[0].lstrip("/") for c in containers}
+
+    def usage_all(self) -> dict[str, Usage]:
+        """CPU/RAM per container name (empty if cAdvisor is unreachable)."""
+        return self.metrics.usage(self._managed_ids())
+
+    def usage_for(self, name: str) -> Usage | None:
+        try:
+            cid = self.client.containers.get(container_name(name)).id
+        except docker.errors.NotFound:
+            return None
+        return self.metrics.usage({cid: container_name(name)}).get(container_name(name))
+
+    def system_overview(self) -> list[dict[str, Any]]:
+        """One row per user: desktop state, image, CPU/RAM use and limits."""
+        states = self.desktops.states()
+        usage = self.usage_all()
+        rows = []
+        for u in self.list_users():
+            use = usage.get(container_name(u["name"]))
+            rows.append(
+                u
+                | {
+                    "state": states.get(u["name"], DesktopState.STOPPED).value,
+                    "cpu_cores": use.cpu_cores if use else None,
+                    "mem_bytes": use.mem_bytes if use else None,
+                }
+            )
+        return rows
 
     # --- desktops ----------------------------------------------------------------------------
 
@@ -506,6 +695,34 @@ class Service:
         if image is None:
             raise ValidationError("That desktop no longer exists.")
         return image
+
+
+_LABEL = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+HOSTNAME_RE = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(\.{_LABEL})*$")
+
+
+def _int_in(value: Any, low: int, high: int, what: str) -> int:
+    try:
+        number = int(str(value).strip())
+    except ValueError:
+        raise ValidationError(f"{what} must be a whole number.") from None
+    if not low <= number <= high:
+        raise ValidationError(f"{what} must be between {low} and {high}.")
+    return number
+
+
+def _validate_limits(cpus: Any, mem_gb: Any) -> tuple[float | None, float | None]:
+    try:
+        cpus_v = users_mod.parse_limit(cpus)
+        mem_v = users_mod.parse_limit(mem_gb)
+    except ValueError:
+        raise ValidationError("Limits must be numbers (leave empty for unlimited).") from None
+    host_cpus = os.cpu_count() or 1
+    if cpus_v is not None and not 0.25 <= cpus_v <= host_cpus:
+        raise ValidationError(f"CPUs must be between 0.25 and {host_cpus} (this server).")
+    if mem_v is not None and mem_v < 2:
+        raise ValidationError("A desktop needs at least 2 GB of RAM.")
+    return cpus_v, mem_v
 
 
 def _label_for(base_tag: str) -> str:

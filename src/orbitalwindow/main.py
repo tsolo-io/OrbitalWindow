@@ -72,6 +72,8 @@ def mount_ui(app: FastAPI, settings: Settings) -> None:
     from .ui import (  # noqa: F401  (registers the pages)
         admin_addons,
         admin_images,
+        admin_settings,
+        admin_system,
         admin_users,
         dashboard,
         login,
