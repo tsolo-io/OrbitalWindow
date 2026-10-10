@@ -75,6 +75,7 @@ def frame(auth: PageAuth, title: str) -> None:
                     ("Users", "/admin/users"),
                     ("Desktops", "/admin/images"),
                     ("Add-ons", "/admin/addons"),
+                    ("Groups", "/admin/groups"),
                     ("Settings", "/admin/settings"),
                     ("System", "/admin/system"),
                 ):

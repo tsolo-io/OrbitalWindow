@@ -157,9 +157,9 @@ def test_admin_forward_auth(client, users):
 def test_reconcile_removes_orphans(service, users):
     from orbitalwindow.reconcile import reconcile
 
-    orphan = MagicMock(labels={"ow.user": "ghost"}, name="ow-ghost")
-    disabled = MagicMock(labels={"ow.user": "user2"}, name="ow-user2")
-    alive = MagicMock(labels={"ow.user": "user1"}, name="ow-user1")
+    orphan = MagicMock(labels={"ow.user": "ghost", "ow.role": "desktop"}, name="ow-ghost")
+    disabled = MagicMock(labels={"ow.user": "user2", "ow.role": "desktop"}, name="ow-user2")
+    alive = MagicMock(labels={"ow.user": "user1", "ow.role": "desktop"}, name="ow-user1")
     service.db.execute("UPDATE users SET disabled = true WHERE name = 'user2'")
 
     def net(user):

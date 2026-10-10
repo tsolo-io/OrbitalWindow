@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..desktops import DesktopError, DesktopState, desktop_path
+from ..files import files_path
 from ..metrics import fmt_bytes
 from ..users import ValidationError
 from .common import PageAuth, authenticate, form_input, frame, guarded, service
@@ -172,16 +173,75 @@ def desktop_card(auth: PageAuth) -> None:
 
 
 def files_card(auth: PageAuth) -> None:
-    host = service().public_hostname()
+    svc = service()
+    host = svc.public_hostname()
+    user_id = auth.user.id
     with ui.card().classes("w-full"):
-        ui.label("My files").classes("text-h6")
-        ui.label("Your home folder is the same in the desktop and in Windows Explorer.")
-        with ui.row().classes("items-center gap-2"):
-            ui.label("Windows Explorer:")
-            ui.code(f"\\\\{host}\\{auth.user.name}", language=None).classes("text-sm")
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("My files").classes("text-h6")
+            ui.button(
+                "Open files",
+                icon="folder_open",
+                on_click=lambda: ui.navigate.to(files_path(auth.user.name), new_tab=True),
+            ).props("no-caps outline")
+        ui.label(
+            "Your files are the same everywhere: in the desktop, in the web file manager "
+            "(Open files) and in Windows Explorer."
+        ).classes("text-sm text-grey-8")
+        usage_box = ui.column().classes("w-full gap-1")
+
+        def place(title: str, desktop: str, share: str, note: str = "") -> None:
+            with ui.row().classes("w-full items-start no-wrap gap-4"):
+                ui.label(title).classes("w-40 font-medium")
+                with ui.column().classes("gap-0"):
+                    ui.label(f"In the desktop: {desktop}").classes("text-sm")
+                    ui.label(f"Windows Explorer: \\\\{host}\\{share}").classes("text-sm")
+                    if note:
+                        ui.label(note).classes("text-caption text-grey-7")
+
+        ui.separator()
+        place("Home folder", "/config (your home)", auth.user.name)
+        groups = svc.groups_of(user_id)
+        for g in groups:
+            note = g["description"] or "Shared with the other members of this group."
+            place(f"Group {g['name']}", f"/groups/{g['name']}", g["name"], note)
+        days = svc.db.get_setting("scratch_retention_days") or "30"
+        place(
+            "Scratch",
+            "/scratch",
+            "scratch",
+            f"Shared with everyone. Files untouched for {days} days are deleted automatically.",
+        )
         ui.label("Use your OrbitalWindow user name and password when Windows asks.").classes(
             "text-caption text-grey-7"
         )
+        group_note = ui.label(
+            "Your groups have changed. Stop and start your desktop to see the new group folders."
+        ).classes("text-caption text-orange-9")
+
+        async def refresh() -> None:
+            usage = await run.io_bound(svc.disk_usage_for, user_id)
+            group_note.set_visibility(await run.io_bound(svc.group_restart_needed, user_id))
+            usage_box.clear()
+            with usage_box:
+                used = fmt_bytes(usage.bytes)
+                if usage.quota_gb:
+                    ui.label(f"Disk use: {used} of {usage.quota_gb:g} GB").classes("text-sm")
+                    ui.linear_progress(min(usage.fraction or 0, 1), show_value=False).props(
+                        f"color={'negative' if usage.warning else 'primary'}"
+                    )
+                else:
+                    ui.label(f"Disk use: {used}").classes("text-sm")
+                if usage.warning:
+                    ui.label(
+                        "Your home folder is nearly full. To free space, empty the Trash and "
+                        "remove ~/proot-apps and ~/.conda/pkgs if you don't need them."
+                    ).classes("text-sm text-negative")
+                if usage.measured_at is None:
+                    ui.label("Disk use is measured every hour.").classes("text-caption text-grey-7")
+
+        ui.timer(0.1, refresh, once=True)
+        ui.timer(60.0, refresh)
 
 
 def password_card() -> None:

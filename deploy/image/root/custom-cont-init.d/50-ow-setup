@@ -8,6 +8,17 @@
 # Home folders are private to their owner.
 chmod 750 /config
 
+# Group/project folders: OW_GROUPS="labx:3001 proj:3002". Create each group with its fixed GID
+# and add abc, so desktop apps can write to /groups/<name> (s6 keeps supplementary groups).
+for entry in ${OW_GROUPS:-}; do
+    name=${entry%%:*}
+    gid=${entry##*:}
+    case "$name" in *[!a-z0-9]*|'') continue ;; esac
+    case "$gid" in *[!0-9]*|'') continue ;; esac
+    getent group "$name" >/dev/null || groupadd -g "$gid" "$name"
+    usermod -aG "$name" abc
+done
+
 # Launcher icons: every ow-*.desktop that add-ons installed goes on the Desktop; icons of
 # add-ons that are no longer installed are removed. Other files on the Desktop are left alone.
 desktop=/config/Desktop

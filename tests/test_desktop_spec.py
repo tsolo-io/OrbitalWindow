@@ -44,6 +44,7 @@ def test_spec_snapshot(settings):
         "PIXELFLUX_WAYLAND": "false",
         "START_DOCKER": "false",
         "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "OW_GROUPS": "",
     }
     assert k["volumes"] == {
         f"{root}/users/user1": {"bind": "/config", "mode": "rw"},

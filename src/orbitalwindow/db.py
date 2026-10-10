@@ -94,6 +94,27 @@ MIGRATIONS: list[str] = [
                               PRIMARY KEY (user_id, key));
     ALTER TABLE images ADD COLUMN docker_id VARCHAR;  -- image ID of the last good base build
     """,
+    # 3: phase 4 groups and disk usage
+    """
+    CREATE SEQUENCE seq_groups START 1;
+    CREATE TABLE groups (
+        id INTEGER PRIMARY KEY DEFAULT nextval('seq_groups'),
+        name VARCHAR NOT NULL UNIQUE,
+        gid INTEGER NOT NULL UNIQUE,
+        description VARCHAR NOT NULL DEFAULT '',
+        quota_gb DOUBLE,      -- NULL = no quota
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+    );
+    CREATE TABLE group_members (group_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                                PRIMARY KEY (group_id, user_id));
+    CREATE TABLE disk_usage (
+        subject VARCHAR NOT NULL,   -- user | group | scratch
+        name VARCHAR NOT NULL,
+        bytes BIGINT NOT NULL,
+        measured_at TIMESTAMP NOT NULL,
+        PRIMARY KEY (subject, name)
+    );
+    """,
 ]
 
 
