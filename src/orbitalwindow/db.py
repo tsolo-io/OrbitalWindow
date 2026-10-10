@@ -7,13 +7,25 @@
 Schema changes are appended to ``MIGRATIONS`` and never edited once released.
 """
 
+import logging
+import os
+import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import duckdb
+
+log = logging.getLogger(__name__)
+
+
+def _exit_process() -> None:
+    logging.shutdown()
+    sys.stderr.flush()
+    os._exit(70)
+
 
 MIGRATIONS: list[str] = [
     # 1: phase 1 core
@@ -128,6 +140,12 @@ MIGRATIONS: list[str] = [
         UNIQUE (user_id, fingerprint)
     );
     """,
+    # 5: drop the secondary index on pkg_index. It went out of step with the table on the test
+    # server, and DuckDB then invalidated the whole database on the next DELETE. A scan of
+    # ~80k rows per desktop is fast enough, so the index is not worth the risk.
+    """
+    DROP INDEX IF EXISTS pkg_index_lookup;
+    """,
 ]
 
 
@@ -140,6 +158,8 @@ class Database:
         self._con.execute("SET TimeZone = 'UTC'")
         self._lock = threading.RLock()
         self._depth = 0
+        # Called on a DuckDB fatal error; tests replace it.
+        self.on_fatal: Callable[[], None] = _exit_process
         self._migrate()
 
     def close(self) -> None:
@@ -168,23 +188,34 @@ class Database:
                 if self._depth > 1:
                     yield
                     return
-                self._con.execute("BEGIN TRANSACTION")
+                self._run("BEGIN TRANSACTION")
                 try:
                     yield
                 except BaseException:
-                    self._con.execute("ROLLBACK")
+                    self._run("ROLLBACK")
                     raise
-                self._con.execute("COMMIT")
+                self._run("COMMIT")
             finally:
                 self._depth -= 1
 
+    def _run(self, sql: str, params: list[Any] | None = None) -> duckdb.DuckDBPyConnection:
+        """Execute one statement. A DuckDB *fatal* error invalidates the database for the rest of
+        the process, so the process exits and Docker restarts it (DuckDB recovers from its WAL)
+        instead of failing every request until someone notices."""
+        try:
+            return self._con.execute(sql, params or [])
+        except duckdb.FatalException:
+            log.critical("DuckDB fatal error; exiting so the service restarts", exc_info=True)
+            self.on_fatal()
+            raise
+
     def execute(self, sql: str, params: list[Any] | None = None) -> None:
         with self._lock:
-            self._con.execute(sql, params or [])
+            self._run(sql, params)
 
     def all(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
         with self._lock:
-            cur = self._con.execute(sql, params or [])
+            cur = self._run(sql, params)
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
 
@@ -194,7 +225,7 @@ class Database:
 
     def scalar(self, sql: str, params: list[Any] | None = None) -> Any:
         with self._lock:
-            row = self._con.execute(sql, params or []).fetchone()
+            row = self._run(sql, params).fetchone()
             return row[0] if row else None
 
     # --- small helpers used across modules -------------------------------------------------

@@ -24,7 +24,8 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
-    "Cross-Origin-Opener-Policy": "same-origin",
+    # allow-popups: "Open desktop" reuses a named tab, which "same-origin" would sever.
+    "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
 }
 
 
@@ -59,6 +60,10 @@ def create_app(settings: Settings | None = None, service: Service | None = None)
     async def security_headers(request: Request, call_next) -> Response:
         response = await call_next(request)
         for key, value in SECURITY_HEADERS.items():
+            # Pages under /desktop/ load in the named desktop tab; COOP there would clear its
+            # name, and "Open desktop" could no longer reuse the tab.
+            if key == "Cross-Origin-Opener-Policy" and request.url.path.startswith("/desktop/"):
+                continue
             response.headers.setdefault(key, value)
         if request.url.path not in ("/healthz", "/auth/desktop"):
             response.headers.setdefault("Cache-Control", "no-store")

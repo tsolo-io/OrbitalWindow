@@ -28,3 +28,25 @@ def test_nested_transaction_joins_outer():
         assert db.next_counter("x") == 1
         assert db.next_counter("x") == 2
     assert db.next_counter("x") == 3
+
+
+def test_fatal_error_exits_the_process(monkeypatch):
+    import duckdb
+
+    db = Database(":memory:")
+    calls = []
+    db.on_fatal = lambda: calls.append("exit")
+
+    class Broken:
+        def execute(self, *args):
+            raise duckdb.FatalException("database has been invalidated")
+
+    db._con = Broken()
+    with pytest.raises(duckdb.FatalException):
+        db.scalar("SELECT 1")
+    assert calls == ["exit"]
+
+
+def test_pkg_index_has_no_secondary_index():
+    db = Database(":memory:")
+    assert db.scalar("SELECT count(*) FROM duckdb_indexes() WHERE table_name = 'pkg_index'") == 0

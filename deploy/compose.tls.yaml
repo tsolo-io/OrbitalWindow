@@ -29,6 +29,9 @@ services:
       - --certificatesresolvers.le.acme.dnschallenge=true
       - --certificatesresolvers.le.acme.dnschallenge.provider=${OW_ACME_DNS_PROVIDER}
       - --log.level=INFO
+      - --accesslog=${OW_TRAEFIK_ACCESS_LOG:-false}
+      - --accesslog.format=json
+      - --accesslog.fields.headers.defaultmode=drop
       - --global.checknewversion=false
       - --global.sendanonymoususage=false
     env_file: [acme.env]

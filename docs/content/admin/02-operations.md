@@ -49,6 +49,20 @@ Background jobs: every 30 s OrbitalWindow repairs drift (file managers running, 
 gateway connected, leftovers of deleted users removed); disk use is measured hourly; scratch files
 older than the retention are removed nightly after 02:00 (service time).
 
+### Traefik access log
+
+For connection problems (pages or desktops that don't load, WebSocket errors), set
+`OW_TRAEFIK_ACCESS_LOG=true` in `deploy/.env` and run `make start`. Traefik then writes one JSON line
+per request (time, client address, path, status, duration; no headers or cookies) to its log:
+
+```bash
+docker logs -f ow-traefik | grep '"RequestPath":"/desktop/'
+```
+
+`DownstreamStatus` 0 on `…/api/websockets` is a working stream connection; 400 or 502 there means
+the desktop's stream server refused it or was not ready. Switch it off again when done: on a busy day
+it grows quickly (Docker rotates it at 3 × 10 MB).
+
 ## Updating OrbitalWindow
 
 ```bash
@@ -101,7 +115,8 @@ Then rebuild the desktops (**Desktops → Rebuild**); users' software images are
 | Symptom | Check |
 |---|---|
 | Web page shows 404/500 for a minute | The service is starting (`make status`, `make logs`). |
-| A desktop stays "Starting…" | `ow-<user>` in Logs; a desktop is *Running* once its web server answers. |
+| A desktop stays "Starting…" | `ow-<user>` in Logs; a desktop is *Running* once its stream server (Selkies) answers, up to a minute after the container starts. |
+| Desktop tab: "websocket disconnected" | The desktop was restarted or switched while the tab was open. Press **Open desktop** again (it reloads that tab). If it persists, turn on the Traefik access log. |
 | "Your software is being installed" | A build is running; see the user's build log or the Desktops page. |
 | Windows says the password is wrong | Reset the password; Windows may cache the old one (*Credential Manager*). |
 | SSH: "Connection closed" | The user's desktop is not running, or the SSH add-on is off. After 5 failed logins the gateway blocks that address for 60 minutes. |

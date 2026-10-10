@@ -85,10 +85,14 @@ def desktop_card(auth: PageAuth) -> None:
         with ui.row().classes("gap-2"):
             start_btn = ui.button("Start", icon="play_arrow").props("no-caps")
             stop_btn = ui.button("Stop", icon="stop").props("no-caps outline")
+            # One named tab per user: pressing it again (e.g. after a restart or a desktop switch)
+            # reloads that tab, instead of leaving a stream page that can't reconnect.
             open_btn = ui.button(
                 "Open desktop",
                 icon="open_in_new",
-                on_click=lambda: ui.navigate.to(open_url, new_tab=True),
+                on_click=lambda: ui.run_javascript(
+                    f"window.open('{open_url}', 'ow-desktop-{auth.user.name}')"
+                ),
             ).props("no-caps color=positive")
         usage_box = ui.column().classes("w-full gap-1")
         busy = {"value": False}
@@ -349,7 +353,19 @@ def desktop_not_running(request: Request, name: str, rest: str = "") -> Redirect
     with ui.column().classes("w-full max-w-3xl mx-auto p-4 gap-4"), ui.card().classes("w-full"):
         if name == auth.user.name:
             ui.label("Your desktop is not running.").classes("text-h6")
-            ui.label("Start it from your dashboard, then press Open desktop.")
+            ui.label(
+                "Start it from your dashboard. This page opens your desktop by itself as soon as "
+                "it is running."
+            )
+            svc = service()
+
+            # A desktop tab left open across a stop/start lands here; bring it back by itself.
+            async def wait_for_desktop() -> None:
+                state = await run.io_bound(svc.desktop_state, auth.user.id)
+                if state is DesktopState.RUNNING:
+                    ui.navigate.to(desktop_path(name))
+
+            ui.timer(3.0, guarded(auth, wait_for_desktop))
         else:
             ui.label("This desktop is not available.").classes("text-h6")
         ui.button("Go to my dashboard", on_click=lambda: ui.navigate.to("/")).props("no-caps")

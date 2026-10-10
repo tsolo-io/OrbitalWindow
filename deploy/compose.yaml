@@ -33,6 +33,10 @@ services:
       # Desktop streams are long-lived WebSockets; don't time them out.
       - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0
       - --log.level=INFO
+      # Access log (JSON, to `docker logs ow-traefik`) for troubleshooting; see deploy/.env.
+      - --accesslog=${OW_TRAEFIK_ACCESS_LOG:-false}
+      - --accesslog.format=json
+      - --accesslog.fields.headers.defaultmode=drop
       - --global.checknewversion=false
       - --global.sendanonymoususage=false
     ports:
