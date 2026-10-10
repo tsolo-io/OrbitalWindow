@@ -63,6 +63,7 @@ Edit `deploy/.env`:
 | `OW_GPU_VENDOR` | `nvidia`, `amd` or `none`. |
 | `OW_DEFAULT_DESKTOP` | LinuxServer webtop tag built on first start, e.g. `ubuntu-xfce` or `ubuntu-kde`. |
 | `CONTROL_ADMIN_PASSWORD` | Password of the first admin (user `admin`). Used only while there are no users. |
+| `COMPOSE_FILE` | Compose files for a plain `docker compose` (see [Start](#3-start)); `make` ignores it. |
 | `OW_ACME_DNS_PROVIDER`, `OW_ACME_EMAIL` | Optional: real certificate, see [TLS](#4-tls-certificate). |
 
 ## 3. Start
@@ -71,8 +72,10 @@ Edit `deploy/.env`:
 make start PROD=1     # pulls the published images and starts; `make status PROD=1`, `make logs`
 ```
 
-Without the repository's Makefile: `cd deploy && docker compose --env-file .env up -d` (add
-`-f compose.yaml -f compose.nvidia.yaml` on NVIDIA servers). For development, `make start` (without
+Without the repository's Makefile: `cd deploy && docker compose up -d`. Compose then takes its
+files from `COMPOSE_FILE` in `.env`: `compose.yaml:compose.nvidia.yaml` on NVIDIA servers (without
+it the admin pages show no GPU numbers), `compose.yaml` on others, plus `:compose.tls.yaml` for a
+real certificate. For development, `make start` (without
 `PROD=1`) builds both images from the checkout instead (`deploy/compose.dev.yaml`).
 
 The first start pulls the images and builds the default desktop (10–20 minutes). Then open
