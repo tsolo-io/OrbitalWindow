@@ -33,5 +33,5 @@ tags `gitea.tu.tsolo.net/<owner>/<repo>:nightly` on every run, plus the branch (
 ## Consequences
 - One stack definition; development differs only where it must (build, live mounts), so the two
   cannot drift apart.
-- Upgrading a server is `OW_VERSION=<tag>` plus `make start PROD=1` (pulls and recreates what changed).
+- Upgrading a server is `OW_VERSION=<tag>` plus `make update` in the deploy folder (ADR 0023).
 - Changing add-ons on a production server means a new image (or an override mount), not a git pull.

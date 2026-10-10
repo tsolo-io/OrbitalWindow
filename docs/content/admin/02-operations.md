@@ -52,7 +52,7 @@ older than the retention are removed nightly after 02:00 (service time).
 ### Traefik access log
 
 For connection problems (pages or desktops that don't load, WebSocket errors), set
-`OW_TRAEFIK_ACCESS_LOG=true` in `deploy/.env` and run `make start`. Traefik then writes one JSON line
+`OW_TRAEFIK_ACCESS_LOG=true` in `.env` and run `make start`. Traefik then writes one JSON line
 per request (time, client address, path, status, duration; no headers or cookies) to its log:
 
 ```bash
@@ -65,33 +65,36 @@ it grows quickly (Docker rotates it at 3 × 10 MB).
 
 ## Updating OrbitalWindow
 
-Set `OW_VERSION` in `deploy/.env` to the new release (or keep `main` for the latest build), then:
+Set `OW_VERSION` in `.env` to the new release (or keep `main` for the latest build), then, in the
+deploy folder:
 
 ```bash
-git pull                 # only needed if the deploy/ files changed in the release
-make start PROD=1        # pulls the images and recreates only what changed
+make update              # pulls the images and recreates only what changed
 ```
 
-On a development checkout, `git pull && make start` rebuilds the images from source instead. Database changes are applied automatically
+If the release changed the deploy files (compose files, `Makefile`, scripts), copy the new
+`deploy/` from a fresh clone over the folder first; `.env` and `acme.env` are not in the repository,
+so they stay as they are.
+On a development checkout, `git pull && make update` rebuilds the images from source instead. Database changes are applied automatically
 at start. Running desktops keep running; the web pages are unavailable for under a minute while the
-service restarts. The same command applies changes to `deploy/.env`. (`make restart` stops the
+service restarts. `make start` applies changes to `.env`. (`make restart` stops the
 whole stack first, which interrupts every service; it is rarely needed.)
 
 ## Backup and restore
 
-`scripts/backup.sh` saves homes, group folders, the state folder (database, keys) and the Samba
+`make backup` saves homes, group folders, the state folder (database, keys) and the Samba
 password database into a dated folder, and removes backups older than N days. Shared software is not
-included (reinstall it with the scripts). The OrbitalWindow service is stopped for a few seconds while
+included (reinstall it with `make install-conda` / `install-matlab`). The OrbitalWindow service is stopped for a few seconds while
 the database is copied; desktops keep running.
 
 ```bash
-OW_ROOT=/srv/orbitalwindow scripts/backup.sh /backup/orbitalwindow 14
+make backup DEST=/backup/orbitalwindow KEEP=14
 ```
 
 Daily at 03:00, as an admin in the `docker` group (`crontab -e`):
 
 ```
-0 3 * * * cd /path/to/orbitalwindow && OW_ROOT=/srv/orbitalwindow scripts/backup.sh /backup/orbitalwindow 14 >> /var/log/ow-backup.log 2>&1
+0 3 * * * make -C /opt/orbitalwindow backup DEST=/backup/orbitalwindow KEEP=14 >> /var/log/ow-backup.log 2>&1
 ```
 
 Copy the backup folder off the server as well. Each backup has a `SHA256SUMS` file
