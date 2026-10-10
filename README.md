@@ -18,11 +18,21 @@ Built with Python, FastAPI + NiceGUI and DuckDB.
 ## Development
 
 ```bash
-hatch test            # pytest
-hatch run lint:check  # ruff (lint:fmt to fix)
-hatch run docs:serve  # zensical docs
+make test             # pytest
+make lint             # ruff (make format to fix)
+make docs-serve       # zensical docs
+make help             # all targets
 ```
 
-Status: design stage, nothing implemented yet.
+Run the stack locally (Docker required):
 
-License: AGPL-3.0.
+```bash
+cp deploy/.env.example deploy/.env && chmod 600 deploy/.env   # fill it in
+make start            # https://<OW_HOSTNAME>/, log in as admin with CONTROL_ADMIN_PASSWORD
+```
+
+Status: phase 1 (core, single sign-on, start/stop) in progress.
+
+- Decisions: [docs/content/adr/](docs/content/adr/index.md)
+
+License: Apache-2.0.

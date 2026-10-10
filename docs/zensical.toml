@@ -11,6 +11,29 @@ copyright = "Copyright &copy; 2026 Tsolo.io"
 site_author = "Tsolo.io"
 dev_addr = "0.0.0.0:8765"
 site_description = "Manage GPU-accelerated research/science desktop environments on Docker"
+nav = [
+  { "Home" = "index.md" },
+  { "Design" = "design.md" },
+  { "POC learnings" = "poc-learnings.md" },
+  { "Decisions (ADR)" = [
+    { "Overview" = "adr/index.md" },
+    { "0001 Record decisions" = "adr/0001-record-architecture-decisions.md" },
+    { "0002 Docker SDK, DuckDB truth" = "adr/0002-plain-docker-engine-via-sdk.md" },
+    { "0003 SSO via forwardAuth" = "adr/0003-sso-forwardauth-internal-secret.md" },
+    { "0004 Per-user networks" = "adr/0004-per-user-networks.md" },
+    { "0005 Socket proxies, non-root" = "adr/0005-docker-access-through-socket-proxies.md" },
+    { "0006 Same-path data root" = "adr/0006-same-path-data-root.md" },
+    { "0007 Configuration" = "adr/0007-configuration.md" },
+    { "0008 Auth forms as POSTs" = "adr/0008-auth-forms-are-plain-posts.md" },
+    { "0009 DuckDB single writer" = "adr/0009-duckdb-single-writer.md" },
+    { "0010 Samba sync" = "adr/0010-samba-sync.md" },
+    { "0011 GPU vendor, limits" = "adr/0011-gpu-vendor-and-unlimited-limits.md" },
+    { "0012 Add-ons, per-user images" = "adr/0012-software-addons-and-per-user-images.md" },
+    { "0013 Files, sharing, access" = "adr/0013-files-sharing-and-remote-access.md" },
+    { "0014 No admin access to desktops" = "adr/0014-admins-never-see-user-desktops.md" },
+    { "0015 Python 3.14, httpx2" = "adr/0015-python-3-14-and-httpx2.md" },
+  ] },
+]
 
 [project.theme]
 logo = "images/Tsolo_Logo_black_font.png"

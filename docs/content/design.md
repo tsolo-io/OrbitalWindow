@@ -258,7 +258,7 @@ tests/                    pytest (fake Docker client for container-spec tests)
 deploy/
   compose.yaml            traefik, orbitalwindow, socket-proxy-rw/-ro, samba, cadvisor, sshpiper, dozzle
   .env.example            OW_ROOT, TZ, hostname, CONTROL_ADMIN_PASSWORD, DNS token
-  Dockerfile              image for the service (python:3.13-slim)
+  Dockerfile              image for the service (python:3.14-slim)
   image/                  desktop base image: Dockerfile + root/ (custom-cont-init.d/50-ow-setup)
   samba/                  Samba image: Dockerfile, smb.conf, entrypoint, ow-sync, ow-passwd
 addons/                   add-on definitions (README.md documents the format)

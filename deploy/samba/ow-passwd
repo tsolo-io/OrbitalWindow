@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Set a user's Samba password. The password is read from stdin (one line), never from argv.
+# Usage: printf '%s\n' "$password" | ow-passwd <user>
+set -eu
+name="${1:?usage: ow-passwd <user>}"
+echo "$name" | grep -Eq '^[a-z][a-z0-9]{1,30}$' || { echo "invalid user name" >&2; exit 2; }
+getent passwd "$name" >/dev/null || { echo "unknown user: $name (run ow-sync first)" >&2; exit 3; }
+IFS= read -r password
+[ -n "$password" ] || { echo "empty password" >&2; exit 4; }
+printf '%s\n%s\n' "$password" "$password" | smbpasswd -s -a "$name" >/dev/null

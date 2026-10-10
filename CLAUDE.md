@@ -16,20 +16,22 @@ start, stop and open their own browser desktop. Admins manage users, desktop ima
   touching desktop images, GPUs, Traefik, Samba or MATLAB. Most "why is it like this" answers are there.
 
 ## Status
-Nothing is implemented yet. Start with **phase 1** in `docs/content/design.md`. The POC is not carried over: no
-migration, no backward compatibility, no redirects. Build clean from the design.
+Built in phases (see `docs/content/design.md`), one stacked PR per phase for ticket #2. The POC is not carried
+over: no migration, no backward compatibility, no redirects. Decisions and their reasons are recorded as ADRs in
+`docs/content/adr/`; add one for every new architectural decision.
 
 ## Project conventions
-- **Build:** hatch / hatchling, src layout (`src/orbitalwindow/`), Python ≥ 3.14.
-- **Hatch environments:**
+- **Build:** hatch / hatchling, src layout (`src/orbitalwindow/`), Python 3.14 (service image `python:3.14-slim`).
+- **Libraries:** pydantic / pydantic-settings for config and validation; `httpx2` (not `httpx`) for HTTP clients.
+- **Hatch environments** (wrapped by the `Makefile`; `make help` lists targets):
   - `make test`: pytest (built-in `hatch-test` env).
-  - `make format` or `hatch run lint:check` / `hatch run lint:fmt`: ruff.
+  - `make format` / `make lint` (or `hatch run lint:fmt` / `hatch run lint:check`): ruff.
+  - `make start` / `stop` / `logs` / `status`: the compose stack in `deploy/` (needs `deploy/.env`).
   - `hatch run docs:build` / `hatch run docs:serve`: zensical, run as `zensical build -f docs/zensical.toml`.
-    The config is empty for now. It needs at least `site_name` and a docs directory/nav, so set it up in phase 1.
 - **Database:** DuckDB, single writer (the service process). Docker access through the Docker SDK (`docker` package)
   via a socket proxy. Never mount the raw socket into anything except the proxies.
 - **Deployment files** live in `deploy/`, add-on definitions in `addons/`, docs in `docs/` (zensical: config `docs/zensical.toml`, pages in `docs/content/`).
-- **License:** AGPL-3.0.
+- **License:** Apache-2.0.
 
 ## Environment facts
 - **Production:** single server, Ubuntu 24.04, mostly NVIDIA GPUs (some AMD), 2–3 users, LAN only.
