@@ -34,6 +34,7 @@ LABEL_USER = "ow.user"
 LABEL_ROLE = "ow.role"
 LABEL_ADDONS = "ow.addons"
 LABEL_GROUPS = "ow.groups"
+LABEL_SESSION = "ow.session"  # start id; part of the desktop's URL path
 DESKTOP_PORT = 3000
 DESKTOP_PIDS_LIMIT = 4096
 
@@ -64,8 +65,17 @@ def network_name(user: str) -> str:
     return f"ow-net-{user}"
 
 
-def desktop_path(user: str) -> str:
-    return f"/desktop/{user}/"
+def desktop_path(user: str, session: str = "") -> str:
+    """``/desktop/<user>/`` (stable; OrbitalWindow redirects it to the running desktop) or, with a
+    start id, ``/desktop/<user>/<session>/`` where one particular container is served.
+
+    Each start gets a new path, so nothing the browser keeps per path (the stream client's
+    settings in localStorage, cached files) carries over to the next container."""
+    return f"/desktop/{user}/{session}/" if session else f"/desktop/{user}/"
+
+
+def new_session_id() -> str:
+    return secrets.token_hex(4)
 
 
 @dataclass(frozen=True)
@@ -96,19 +106,22 @@ def build_spec(
     addons: Sequence[Addon] = (),
     groups: Sequence[dict[str, Any]] = (),
     ssh: SshAccess | None = None,
+    session: str = "",
 ) -> DesktopSpec:
     """The container for ``user``. Add-on mounts and environment are applied here (no rebuild)."""
     name = user["name"]
     cname = container_name(name)
     net = network_name(name)
     router = cname
-    path = desktop_path(name)
+    session = session or new_session_id()
+    path = desktop_path(name, session)
     basic = base64.b64encode(f"{name}:{secret}".encode()).decode()
 
     labels = {
         LABEL_MANAGED: "true",
         LABEL_USER: name,
         LABEL_ROLE: "desktop",
+        LABEL_SESSION: session,
         "traefik.enable": "true",
         "traefik.docker.network": net,
         f"traefik.http.routers.{router}.rule": f"Path(`{path[:-1]}`) || PathPrefix(`{path}`)",
@@ -241,6 +254,15 @@ class Desktops:
         except docker.errors.NotFound:
             return set()
         return {k for k in container.labels.get(LABEL_ADDONS, "").split(",") if k}
+
+    def current_path(self, user: str) -> str | None:
+        """URL path of the user's running desktop (``/desktop/<user>/<session>/``), or None."""
+        try:
+            container = self._client.containers.get(container_name(user))
+        except docker.errors.NotFound:
+            return None
+        session = container.labels.get(LABEL_SESSION)
+        return desktop_path(user, session) if session else None
 
     def groups_in_use(self, user: str) -> set[str] | None:
         """Groups the running desktop was started with; None when it is not running."""

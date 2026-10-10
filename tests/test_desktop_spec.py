@@ -19,7 +19,9 @@ USER = {
 
 
 def test_spec_snapshot(settings):
-    spec = build_spec(USER, "ow-desktop:ubuntu-xfce", settings, GpuVendor.NVIDIA, "s3cret")
+    spec = build_spec(
+        USER, "ow-desktop:ubuntu-xfce", settings, GpuVendor.NVIDIA, "s3cret", session="a1b2c3d4"
+    )
     root = str(settings.root)
     assert spec.name == "ow-user1"
     assert spec.network == "ow-net-user1"
@@ -41,7 +43,7 @@ def test_spec_snapshot(settings):
         "TITLE": "User One – OrbitalWindow",
         "CUSTOM_USER": "user1",
         "PASSWORD": "s3cret",
-        "SUBFOLDER": "/desktop/user1/",
+        "SUBFOLDER": "/desktop/user1/a1b2c3d4/",
         "PIXELFLUX_WAYLAND": "false",
         "START_DOCKER": "false",
         "NVIDIA_DRIVER_CAPABILITIES": "all",
@@ -54,10 +56,11 @@ def test_spec_snapshot(settings):
     }
     labels = k["labels"]
     assert labels["ow.managed"] == "true" and labels["ow.user"] == "user1"
+    assert labels["ow.session"] == "a1b2c3d4"
     assert labels["traefik.docker.network"] == "ow-net-user1"
     assert (
         labels["traefik.http.routers.ow-user1.rule"]
-        == "Path(`/desktop/user1`) || PathPrefix(`/desktop/user1/`)"
+        == "Path(`/desktop/user1/a1b2c3d4`) || PathPrefix(`/desktop/user1/a1b2c3d4/`)"
     )
     assert labels["traefik.http.routers.ow-user1.middlewares"] == (
         "ow-desktop-slash@docker,ow-auth-desktop@docker,ow-user1-basic"
@@ -95,3 +98,14 @@ def test_state_mapping():
     )
     assert _state_of({"Status": "created"}) is DesktopState.STARTING
     assert _state_of({"Status": "exited"}) is DesktopState.ERROR
+
+
+def test_each_start_gets_its_own_path(settings):
+    from orbitalwindow.desktops import desktop_path
+
+    assert desktop_path("user1") == "/desktop/user1/"
+    assert desktop_path("user1", "a1b2c3d4") == "/desktop/user1/a1b2c3d4/"
+    first = build_spec(USER, "img", settings, GpuVendor.NONE, "x").kwargs["environment"]
+    second = build_spec(USER, "img", settings, GpuVendor.NONE, "x").kwargs["environment"]
+    assert first["SUBFOLDER"] != second["SUBFOLDER"]
+    assert first["SUBFOLDER"].startswith("/desktop/user1/")

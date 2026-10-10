@@ -74,3 +74,9 @@ def test_disabled_user_is_signed_out(client, service, users):
     cookie = login(client, "user1")
     service.db.execute("UPDATE users SET disabled = true WHERE name = 'user1'")
     assert check(client, "/desktop/user1/", cookie).status_code == 302
+
+
+def test_session_paths_are_owner_only(client, users):
+    cookie = login(client, "user1")
+    assert check(client, "/desktop/user1/a1b2c3d4/api/websockets", cookie).status_code == 200
+    assert check(client, "/desktop/user2/a1b2c3d4/", cookie).status_code == 403

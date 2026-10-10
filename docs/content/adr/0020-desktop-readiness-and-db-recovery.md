@@ -31,6 +31,14 @@ Testing on the VM showed three problems:
   `/desktop/`, so the name survives.
 - The "Your desktop is not running" page (where a stream page lands while the desktop is stopped)
   checks every 3 s and opens the desktop by itself once it runs again.
+- **Each desktop start gets its own URL path**, `/desktop/<user>/<start id>/` (8 random hex
+  characters, label `ow.session`, `SUBFOLDER` of that container). The stream client keeps its settings
+  in `localStorage` under a key made from the page URL, and the browser caches per path. With a
+  fixed `/desktop/<user>/`, a new container (e.g. after switching MATE → XFCE) inherited state from
+  the previous one and refused the stream connection with 400 until the user cleared the browser
+  (an incognito window worked). Traefik routes only the running container's path;
+  `/desktop/<user>/` and old paths are handled by OrbitalWindow, which redirects to the current
+  path, or waits and then goes there. forwardAuth is unchanged (it checks the `<user>` segment).
 - Migration 5 drops the secondary index on `pkg_index` (a scan of ~80k rows per desktop is fast).
 - On any `duckdb.FatalException`, the service logs it and exits; Docker's restart policy starts it
   again and DuckDB recovers from its WAL, instead of every request failing.
@@ -40,4 +48,5 @@ Testing on the VM showed three problems:
 ## Consequences
 - After a start, the dashboard shows *Starting…* about a minute longer than before, but the stream
   works the first time.
+- Stream settings a user changes in the Selkies sidebar apply to the current start only.
 - A DuckDB fatal error costs a restart of a few seconds instead of an outage until someone notices.

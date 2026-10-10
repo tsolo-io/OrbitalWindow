@@ -344,26 +344,36 @@ def password_card() -> None:
 
 @ui.page("/desktop/{name}")
 @ui.page("/desktop/{name}/{rest:path}")
-def desktop_not_running(request: Request, name: str, rest: str = "") -> RedirectResponse | None:
-    """Reached only when no desktop router matches, i.e. the desktop is not running."""
+def desktop_redirect(request: Request, name: str, rest: str = "") -> RedirectResponse | None:
+    """``/desktop/<user>/`` and old ``/desktop/<user>/<session>/`` addresses.
+
+    Traefik only routes the running desktop's own path (``/desktop/<user>/<session>/``) to the
+    container; anything else lands here. If the user's desktop runs, go to its current path;
+    otherwise wait on this page and go there once it runs (a desktop tab left open across a
+    stop/start or a desktop switch recovers by itself)."""
     auth = authenticate(request)
     if isinstance(auth, RedirectResponse):
         return auth
+    svc = service()
+    own = name == auth.user.name
+    if own and svc.desktop_state(auth.user.id) is DesktopState.RUNNING:
+        path = svc.desktops.current_path(name)
+        if path and not request.url.path.startswith(path):
+            return RedirectResponse(path, status_code=303)
     frame(auth, "Desktop not running")
     with ui.column().classes("w-full max-w-3xl mx-auto p-4 gap-4"), ui.card().classes("w-full"):
-        if name == auth.user.name:
+        if own:
             ui.label("Your desktop is not running.").classes("text-h6")
             ui.label(
                 "Start it from your dashboard. This page opens your desktop by itself as soon as "
                 "it is running."
             )
-            svc = service()
 
-            # A desktop tab left open across a stop/start lands here; bring it back by itself.
             async def wait_for_desktop() -> None:
-                state = await run.io_bound(svc.desktop_state, auth.user.id)
-                if state is DesktopState.RUNNING:
-                    ui.navigate.to(desktop_path(name))
+                if await run.io_bound(svc.desktop_state, auth.user.id) is DesktopState.RUNNING:
+                    path = await run.io_bound(svc.desktops.current_path, name)
+                    if path:
+                        ui.navigate.to(path)
 
             ui.timer(3.0, guarded(auth, wait_for_desktop))
         else:

@@ -132,7 +132,7 @@ services:
       # Used by every desktop router (labels set by OrbitalWindow on ow-<user>).
       traefik.http.middlewares.ow-auth-desktop.forwardauth.address: http://orbitalwindow:8000/auth/desktop
       traefik.http.middlewares.ow-auth-desktop.forwardauth.authResponseHeaders: X-OW-User
-      traefik.http.middlewares.ow-desktop-slash.redirectregex.regex: ^(https?://[^/]+/desktop/[a-z0-9]+)$$
+      traefik.http.middlewares.ow-desktop-slash.redirectregex.regex: ^(https?://[^/]+/desktop/[a-z0-9]+/[0-9a-f]+)$$
       traefik.http.middlewares.ow-desktop-slash.redirectregex.replacement: $${1}/
       traefik.http.middlewares.ow-desktop-slash.redirectregex.permanent: "true"
       # Used by every file manager router (labels set by OrbitalWindow on ow-files-<user>).
