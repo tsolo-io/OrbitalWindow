@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir --prefix=/install .
 
 FROM python:3.14-slim
 COPY --from=build /install /usr/local
+COPY docs/content/user /opt/orbitalwindow/help
 # Runs as an unprivileged user. Root-only file work (home folders) is done by short-lived
 # helper containers; see orbitalwindow/hostops.py.
 RUN useradd --system --uid 10001 --no-create-home --home-dir /nonexistent orbitalwindow

@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+key: ssh
+label: SSH and SFTP access
+description: >-
+  Connect to your running desktop with ssh, sftp, WinSCP or VS Code Remote-SSH, using a key you
+  add on this page. Only works while your desktop is running.
+restricted: false
+apt: [openssh-server, openssh-sftp-server]
+script: install.sh

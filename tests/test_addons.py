@@ -11,7 +11,14 @@ from orbitalwindow.addons import load_addon, load_catalog
 def test_shipped_addons_are_valid():
     catalog = load_catalog(ADDONS_DIR)
     assert catalog.errors == []
-    assert set(catalog.addons) == {"matlab", "python-science", "vscode", "devtools", "rstudio"}
+    assert set(catalog.addons) == {
+        "matlab",
+        "python-science",
+        "vscode",
+        "devtools",
+        "rstudio",
+        "ssh",
+    }
     assert catalog.addons["matlab"].spec.restricted
     assert not catalog.addons["vscode"].spec.restricted
     assert all(a.affects_image for a in catalog.addons.values())

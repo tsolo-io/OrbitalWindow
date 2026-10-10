@@ -14,7 +14,10 @@
 #   make status     show the stack's containers
 
 GPU_VENDOR := $(shell sed -n 's/^OW_GPU_VENDOR=//p' deploy/.env 2>/dev/null)
-COMPOSE_FILES := -f deploy/compose.yaml $(if $(filter nvidia,$(GPU_VENDOR)),-f deploy/compose.nvidia.yaml)
+ACME_PROVIDER := $(shell sed -n 's/^OW_ACME_DNS_PROVIDER=//p' deploy/.env 2>/dev/null)
+COMPOSE_FILES := -f deploy/compose.yaml \
+  $(if $(filter nvidia,$(GPU_VENDOR)),-f deploy/compose.nvidia.yaml) \
+  $(if $(ACME_PROVIDER),-f deploy/compose.tls.yaml)
 COMPOSE ?= docker compose $(COMPOSE_FILES) --env-file deploy/.env
 SERVICE ?= orbitalwindow
 .PHONY: test format lint start stop restart logs status

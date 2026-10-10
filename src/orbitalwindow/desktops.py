@@ -17,6 +17,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 import docker
@@ -67,6 +68,14 @@ def desktop_path(user: str) -> str:
 
 
 @dataclass(frozen=True)
+class SshAccess:
+    """SSH via the gateway: sshpiper labels and the upstream public key file to mount."""
+
+    labels: dict[str, str]
+    upstream_pub: Path
+
+
+@dataclass(frozen=True)
 class DesktopSpec:
     """Everything needed to create a desktop container (pure data, so it can be tested)."""
 
@@ -85,6 +94,7 @@ def build_spec(
     secret: str,
     addons: Sequence[Addon] = (),
     groups: Sequence[dict[str, Any]] = (),
+    ssh: SshAccess | None = None,
 ) -> DesktopSpec:
     """The container for ``user``. Add-on mounts and environment are applied here (no rebuild)."""
     name = user["name"]
@@ -136,6 +146,10 @@ def build_spec(
     }
     for g in groups:
         volumes[str(root / "groups" / g["name"])] = {"bind": f"/groups/{g['name']}", "mode": "rw"}
+    if ssh is not None:
+        # The only key the desktop's sshd accepts; the gateway checks the user's own keys.
+        volumes[str(ssh.upstream_pub)] = {"bind": "/etc/ow/upstream.pub", "mode": "ro"}
+        labels.update(ssh.labels)
     # The init hook creates these groups and adds abc to them (s6 keeps supplementary groups).
     environment["OW_GROUPS"] = " ".join(f"{g['name']}:{g['gid']}" for g in groups)
     labels[LABEL_GROUPS] = ",".join(g["name"] for g in groups)
@@ -239,6 +253,7 @@ class Desktops:
         image_ref: str,
         addons: Sequence[Addon] = (),
         groups: Sequence[dict[str, Any]] = (),
+        ssh: SshAccess | None = None,
     ) -> None:
         name = user["name"]
         if user["disabled"]:
@@ -260,9 +275,12 @@ class Desktops:
                 secrets.token_urlsafe(32),
                 addons,
                 groups,
+                ssh,
             )
             network = self._ensure_network(name)
             self._connect_traefik(network)
+            if ssh is not None:
+                self._connect(network, self._settings.sshpiper_container)
             container = self._client.containers.create(
                 spec.image,
                 network=spec.network,
@@ -305,12 +323,14 @@ class Desktops:
         )
 
     def _connect_traefik(self, network: Any) -> None:
+        self._connect(network, self._settings.traefik_container)
+
+    def _connect(self, network: Any, container: str) -> None:
         network.reload()
-        traefik = self._settings.traefik_container
-        if any(c.name == traefik for c in network.containers):
+        if any(c.name == container for c in network.containers):
             return
         try:
-            network.connect(traefik)
+            network.connect(container)
         except docker.errors.APIError as e:
             if "already exists" not in str(e):
                 raise
@@ -339,4 +359,14 @@ class Desktops:
             if user and names - {traefik} and traefik not in names:
                 self._connect_traefik(net)
                 fixed += 1
+            # sshpiper only on desktop networks whose desktop has SSH access.
+            sshpiper = self._settings.sshpiper_container
+            if user and net.name == network_name(user) and sshpiper not in names:
+                desktop = next((c for c in net.containers if c.name == container_name(user)), None)
+                if desktop is not None and "sshpiper.username" in desktop.labels:
+                    try:
+                        self._connect(net, sshpiper)
+                        fixed += 1
+                    except docker.errors.APIError as e:
+                        log.warning("could not connect %s to %s: %s", sshpiper, net.name, e)
         return fixed

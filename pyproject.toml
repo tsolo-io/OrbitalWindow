@@ -27,6 +27,7 @@ dependencies = [
   "nvidia-ml-py",
   "pyyaml",
   "uvicorn[standard]>=0.54",
+  "cryptography>=50.0",
 ]
 
 [project.scripts]

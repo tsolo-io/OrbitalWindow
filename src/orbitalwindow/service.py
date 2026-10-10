@@ -19,13 +19,21 @@ import docker
 
 from . import disk
 from . import groups as groups_mod
+from . import ssh as ssh_mod
 from . import users as users_mod
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
 from .builds import TAG_RE, Builder, desktop_image_ref
 from .config import Settings
 from .db import Database
-from .desktops import DesktopError, Desktops, DesktopState, GpuVendor, container_name
+from .desktops import (
+    DesktopError,
+    Desktops,
+    DesktopState,
+    GpuVendor,
+    SshAccess,
+    container_name,
+)
 from .disk import HostSpace
 from .disk import Usage as DiskUsage
 from .files import FileManagers, files_container_name
@@ -326,6 +334,7 @@ class Service:
         except docker.errors.DockerException as e:
             result.warnings.append(f"The desktop or file manager could not be removed: {e}")
         self.builder.remove_user_image(name)
+        ssh_mod.remove_upstream_key(self.settings.state_dir, name)
         with self.db.transaction():
             self.db.execute("DELETE FROM disk_usage WHERE subject = 'user' AND name = ?", [name])
             for table in (
@@ -334,6 +343,7 @@ class Service:
                 "addon_grants",
                 "user_image",
                 "group_members",
+                "ssh_keys",
             ):
                 self.db.execute(f"DELETE FROM {table} WHERE user_id = ?", [user_id])
             self.db.execute("DELETE FROM users WHERE id = ?", [user_id])
@@ -407,6 +417,68 @@ class Service:
         except docker.errors.NotFound:
             return False
         return True
+
+    # --- SSH keys ----------------------------------------------------------------------------
+
+    def ssh_keys(self, user_id: int) -> list[dict[str, Any]]:
+        return self.db.all(
+            "SELECT id, label, fingerprint, pubkey, added_at FROM ssh_keys "
+            "WHERE user_id = ? ORDER BY added_at",
+            [user_id],
+        )
+
+    def add_ssh_key(self, actor: str, user_id: int, label: str, text: str) -> dict[str, Any]:
+        user = self._require_user(user_id)
+        key = ssh_mod.parse_public_key(text)
+        label = ssh_mod.validate_label(label, key)
+        with self.db.transaction():
+            if len(self.ssh_keys(user_id)) >= ssh_mod.MAX_KEYS:
+                raise ValidationError(f"You can add at most {ssh_mod.MAX_KEYS} keys.")
+            if self.db.scalar(
+                "SELECT count(*) FROM ssh_keys WHERE user_id = ? AND fingerprint = ?",
+                [user_id, key.fingerprint],
+            ):
+                raise ValidationError("You have already added this key.")
+            self.db.execute(
+                "INSERT INTO ssh_keys (user_id, label, pubkey, fingerprint) VALUES (?, ?, ?, ?)",
+                [user_id, label, key.line, key.fingerprint],
+            )
+        self.db.audit(actor, "ssh.key.add", user["name"], f"{label} {key.fingerprint}")
+        return {"label": label, "fingerprint": key.fingerprint}
+
+    def remove_ssh_key(self, actor: str, user_id: int, key_id: int) -> None:
+        user = self._require_user(user_id)
+        row = self.db.one("SELECT * FROM ssh_keys WHERE id = ? AND user_id = ?", [key_id, user_id])
+        if row is None:
+            raise ValidationError("That key no longer exists.")
+        self.db.execute("DELETE FROM ssh_keys WHERE id = ?", [key_id])
+        detail = f"{row['label']} {row['fingerprint']}"
+        self.db.audit(actor, "ssh.key.remove", user["name"], detail)
+
+    def _ssh_access(self, user: dict[str, Any]) -> SshAccess:
+        private, _ = ssh_mod.ensure_upstream_key(self.settings.state_dir, user["name"])
+        keys = [k["pubkey"] for k in self.ssh_keys(user["id"])]
+        return SshAccess(
+            ssh_mod.sshpiper_labels(user["name"], keys, private),
+            self.settings.state_dir / "ssh" / f"{user['name']}.pub",
+        )
+
+    def ssh_restart_needed(self, user_id: int) -> bool:
+        """True when the running desktop has other SSH keys than the user has now."""
+        user = self._require_user(user_id)
+        try:
+            container = self.client.containers.get(container_name(user["name"]))
+        except docker.errors.NotFound:
+            return False
+        running = container.labels.get("sshpiper.authorized_keys")
+        if running is None:
+            return False
+        keys = [k["pubkey"] for k in self.ssh_keys(user_id)]
+        wanted = ssh_mod.sshpiper_labels(user["name"], keys, "")["sshpiper.authorized_keys"]
+        return running != wanted
+
+    def ssh_command(self, user_name: str) -> str:
+        return f"ssh -p {self.settings.ssh_port} {user_name}@{self.public_hostname()}"
 
     # --- groups ------------------------------------------------------------------------------
 
@@ -669,11 +741,13 @@ class Service:
 
     def start_desktop(self, actor: str, user_id: int) -> None:
         user = self._require_user(user_id)
+        addons = self.software.active_addons(user_id)
         self.desktops.start(
             user,
             self.image_ref_for(user),
-            self.software.active_addons(user_id),
+            addons,
             groups_mod.groups_of(self.db, user_id),
+            self._ssh_access(user) if any(a.key == ssh_mod.SSH_ADDON for a in addons) else None,
         )
         self.db.audit(actor, "desktop.start", user["name"])
 
