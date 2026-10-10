@@ -41,15 +41,22 @@ The admin account that runs OrbitalWindow needs to be in the `docker` group
 
 ## 2. Get OrbitalWindow and configure it
 
+A server runs the published images (`gitea.tu.tsolo.net/kuat/orbitalwindow` and
+`…/orbitalwindow-samba`, built by CI); it only needs the `deploy/` folder of the repository: the
+production compose file `compose.yaml`, `traefik/`, the optional `compose.nvidia.yaml` and
+`compose.tls.yaml`, and `.env.example`.
+
 ```bash
-git clone <repository> orbitalwindow && cd orbitalwindow
+git clone <repository> orbitalwindow && cd orbitalwindow     # or copy just deploy/
 cp deploy/.env.example deploy/.env && chmod 600 deploy/.env
+docker login gitea.tu.tsolo.net                                # if the registry needs it
 ```
 
 Edit `deploy/.env`:
 
 | Setting | Meaning |
 |---|---|
+| `OW_VERSION` | Image version: a release tag such as `v1.0.0`, or `main` for the latest build of the main branch. |
 | `OW_ROOT` | Data folder for homes, groups, shared software and state (default `/srv/orbitalwindow`). Back it up. |
 | `OW_HOSTNAME` | The name (or IP) users type: `desk.example.org`. Also used for `\\host\user` and SSH. |
 | `TZ` | Time zone, e.g. `Africa/Johannesburg`. |
@@ -61,8 +68,12 @@ Edit `deploy/.env`:
 ## 3. Start
 
 ```bash
-make start      # builds and starts everything; `make status`, `make logs`, `make stop`
+make start PROD=1     # pulls the published images and starts; `make status PROD=1`, `make logs`
 ```
+
+Without the repository's Makefile: `cd deploy && docker compose --env-file .env up -d` (add
+`-f compose.yaml -f compose.nvidia.yaml` on NVIDIA servers). For development, `make start` (without
+`PROD=1`) builds both images from the checkout instead (`deploy/compose.dev.yaml`).
 
 The first start pulls the images and builds the default desktop (10–20 minutes). Then open
 `https://<OW_HOSTNAME>/`, log in as `admin` with `CONTROL_ADMIN_PASSWORD`, and:
@@ -85,7 +96,7 @@ fine) and Traefik must be able to create DNS records:
    `OW_ACME_EMAIL=<admin e-mail>`.
 2. Create `deploy/acme.env` (`chmod 600`) with that provider's credentials, e.g.
    `CF_DNS_API_TOKEN=…`. See the Traefik/lego documentation for each provider's variables.
-3. `make restart`. The certificate is requested with a DNS-01 challenge; the server does not need to
+3. `make start PROD=1`. The certificate is requested with a DNS-01 challenge; the server does not need to
    be reachable from the internet.
 
 ## 5. Shared software

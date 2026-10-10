@@ -24,12 +24,15 @@ make docs-serve       # zensical docs
 make help             # all targets
 ```
 
-Run the stack locally (Docker required):
+Run the stack locally, built from this checkout (Docker required):
 
 ```bash
 cp deploy/.env.example deploy/.env && chmod 600 deploy/.env   # fill it in
 make start            # https://<OW_HOSTNAME>/, log in as admin with CONTROL_ADMIN_PASSWORD
 ```
+
+Production uses the images CI publishes (`make start PROD=1`); see the admin guide
+(`docs/content/admin/01-install.md`).
 
 Status: phases 1–5 implemented (core and single sign-on; images, add-ons and packages; admin and metrics; files and sharing; SSH, help, logs, TLS). Phase 6 (admin guide, backup, hardening) in progress.
 

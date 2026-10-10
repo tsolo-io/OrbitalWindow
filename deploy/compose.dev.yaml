@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Development override for compose.yaml: build the service and Samba images from this checkout
+# instead of pulling them, and mount the checkout's desktop image context and add-ons over the
+# copies baked into the image, so edits there take effect without rebuilding. `make start` uses
+# it; `make start PROD=1` does not.
+services:
+  orbitalwindow:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: orbitalwindow:dev
+    volumes:
+      - ./image:/opt/orbitalwindow/image:ro
+      - ../addons:/opt/orbitalwindow/addons:ro
+
+  samba:
+    build: ./samba
+    image: orbitalwindow-samba:dev

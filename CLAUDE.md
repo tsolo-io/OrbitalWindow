@@ -31,6 +31,11 @@ user help pages (also served at `/help`): `docs/content/user/`.
   - `hatch run docs:build` / `hatch run docs:serve`: zensical, run as `zensical build -f docs/zensical.toml`.
 - **Database:** DuckDB, single writer (the service process). Docker access through the Docker SDK (`docker` package)
   via a socket proxy. Never mount the raw socket into anything except the proxies.
+- **Images:** the service image is built from the root `Dockerfile` (desktop image context, add-ons and help
+  pages baked in); Samba from `deploy/samba/`. CI (`.gitea/workflows/build.yaml`) publishes both to
+  `gitea.tu.tsolo.net/kuat/orbitalwindow{,-samba}` (`:nightly` on every push, `:main`, `:<git tag>`).
+- **Compose:** `deploy/compose.yaml` is the production stack (published images, `OW_VERSION`);
+  `deploy/compose.dev.yaml` overrides it to build from the checkout. `make start` = dev, `make start PROD=1` = prod.
 - **Deployment files** live in `deploy/`, add-on definitions in `addons/`, docs in `docs/` (zensical: config `docs/zensical.toml`, pages in `docs/content/`).
 - **License:** Apache-2.0.
 

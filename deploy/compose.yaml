@@ -2,8 +2,18 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# OrbitalWindow stack. Desktop containers (ow-<user>) are not listed here: OrbitalWindow creates
-# them through the Docker API. Start with `make start` (uses deploy/.env).
+# OrbitalWindow stack — production. Uses the published images
+#   gitea.tu.tsolo.net/kuat/orbitalwindow:${OW_VERSION}        (the service)
+#   gitea.tu.tsolo.net/kuat/orbitalwindow-samba:${OW_VERSION}  (Windows file sharing)
+# built by CI (.gitea/workflows/build.yaml). OW_VERSION is a release tag (e.g. v1.0.0) or `main`.
+#
+# On a server, copy the deploy/ folder (this file, traefik/, the optional compose.nvidia.yaml and
+# compose.tls.yaml, .env.example), create .env and run:
+#   docker compose -f compose.yaml --env-file .env up -d          (or `make start PROD=1`)
+# For development, `make start` adds compose.dev.yaml, which builds both images from the checkout.
+#
+# Desktop containers (ow-<user>) are not listed here: OrbitalWindow creates them through the
+# Docker API.
 
 name: orbitalwindow
 
@@ -116,10 +126,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   orbitalwindow:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: orbitalwindow:latest
+    image: ${OW_IMAGE:-gitea.tu.tsolo.net/kuat/orbitalwindow}:${OW_VERSION:-main}
     container_name: orbitalwindow
     restart: unless-stopped
     logging: *logging
@@ -134,8 +141,8 @@ services:
     volumes:
       # Same path inside and outside, so mount sources we give Docker are valid host paths.
       - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}
-      - ./image:/opt/orbitalwindow/image:ro
-      - ../addons:/opt/orbitalwindow/addons:ro
+      # The desktop image context, add-ons and help pages are baked into the image. To use your
+      # own add-ons, mount a folder over /opt/orbitalwindow/addons (read-only).
     networks: [core, proxy-rw]
     depends_on: [socket-proxy-rw, samba]
     read_only: true
@@ -254,8 +261,7 @@ services:
       traefik.http.services.ow-dozzle.loadbalancer.server.port: "8080"
 
   samba:
-    build: ./samba
-    image: orbitalwindow-samba:latest
+    image: ${OW_SAMBA_IMAGE:-gitea.tu.tsolo.net/kuat/orbitalwindow-samba}:${OW_VERSION:-main}
     container_name: ow-samba
     restart: unless-stopped
     logging: *logging

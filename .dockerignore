@@ -1,10 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-.git
-.venv
+
+# The build context is the repository root; send only what the Dockerfile copies.
+**
+!pyproject.toml
+!README.md
+!LICENSES
+!src
+!deploy/image
+!addons
+!docs/content/user
 **/__pycache__
-**/.pytest_cache
-**/.ruff_cache
-docs/site
-deploy/.env
+**/*.pyc

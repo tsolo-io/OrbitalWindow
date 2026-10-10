@@ -67,7 +67,7 @@ remain.
 
 ## Keeping it secure
 
-- Update OrbitalWindow (`git pull && make start`) and **rebuild the desktops** regularly (security
+- Update OrbitalWindow (new `OW_VERSION`, then `make start PROD=1`) and **rebuild the desktops** regularly (security
   updates in the webtop base images).
 - Review the audit log (System page) now and then, and remove users who have left.
 - Keep `deploy/.env`, `deploy/acme.env` and the backups readable by admins only.
