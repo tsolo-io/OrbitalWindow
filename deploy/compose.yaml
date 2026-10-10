@@ -25,6 +25,7 @@ services:
       # Keep routers of not-yet-healthy containers: users get 503 instead of 404 while the
       # service restarts or a desktop is still starting.
       - --providers.docker.allowEmptyServices=true
+      - --providers.file.filename=/etc/traefik/dynamic.yaml
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
@@ -42,9 +43,29 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    volumes:
+      - ./traefik/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
+      - traefik-certs:/certs:ro
     networks: [core, proxy-ro]
-    depends_on: [socket-proxy-ro]
+    depends_on:
+      socket-proxy-ro:
+        condition: service_started
+      certs:
+        condition: service_completed_successfully
     security_opt: ["no-new-privileges:true"]
+
+  # Creates Traefik's self-signed default certificate once (see traefik/dynamic.yaml).
+  certs:
+    image: alpine:3.22
+    container_name: ow-certs
+    restart: "no"
+    command: ["/make-cert.sh"]
+    environment:
+      OW_HOSTNAME: ${OW_HOSTNAME:?set OW_HOSTNAME in deploy/.env}
+    volumes:
+      - ./traefik/make-cert.sh:/make-cert.sh:ro
+      - traefik-certs:/certs
+    networks: [gateway]
 
   # Read-only Docker API for Traefik: list/inspect containers and events only.
   socket-proxy-ro:
@@ -267,3 +288,5 @@ volumes:
     name: ow-samba-lib
   sshpiper-keys:
     name: ow-sshpiper-keys
+  traefik-certs:
+    name: ow-traefik-certs

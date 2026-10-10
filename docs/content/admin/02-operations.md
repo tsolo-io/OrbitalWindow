@@ -116,7 +116,8 @@ Then rebuild the desktops (**Desktops → Rebuild**); users' software images are
 |---|---|
 | Web page shows 404/500 for a minute | The service is starting (`make status`, `make logs`). |
 | A desktop stays "Starting…" | `ow-<user>` in Logs; a desktop is *Running* once its stream server (Selkies) answers, up to a minute after the container starts. |
-| Desktop tab: "websocket disconnected" | Each desktop start has its own address (`/desktop/<user>/<start id>/`); an open tab moves to the new one by itself once the desktop runs. Otherwise press **Open desktop** again. If it persists, turn on the Traefik access log. |
+| Desktop tab: "websocket disconnected", console "WebSocket connection … failed" (code 1006) | The browser refuses the certificate on the stream connection. After a change of `OW_HOSTNAME` (new certificate), close all OrbitalWindow tabs and accept the certificate again; or trust it on the PC (see Installing → TLS). |
+| Desktop tab: "websocket disconnected" (other cases) | Each desktop start has its own address (`/desktop/<user>/<start id>/`); an open tab moves to the new one by itself once the desktop runs. Otherwise press **Open desktop** again. If it persists, turn on the Traefik access log. |
 | "Your software is being installed" | A build is running; see the user's build log or the Desktops page. |
 | Windows says the password is wrong | Reset the password; Windows may cache the old one (*Credential Manager*). |
 | SSH: "Connection closed" | The user's desktop is not running, or the SSH add-on is off. After 5 failed logins the gateway blocks that address for 60 minutes. |

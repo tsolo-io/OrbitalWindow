@@ -39,6 +39,14 @@ Testing on the VM showed three problems:
   (an incognito window worked). Traefik routes only the running container's path;
   `/desktop/<user>/` and old paths are handled by OrbitalWindow, which redirects to the current
   path, or waits and then goes there. forwardAuth is unchanged (it checks the `<user>` segment).
+- **A fixed self-signed certificate.** The decisive bug: without a configured default
+  certificate, Traefik generates a *new* self-signed certificate on every configuration change, i.e.
+  every desktop start and stop. A browser that had accepted the old one kept using its open
+  connection for pages, but the stream's WebSocket opens a new connection, met a different
+  certificate and was refused (`tls: unknown certificate` in Traefik's debug log; "WebSocket
+  connection failed", code 1006, in the browser). A `certs` service now creates one self-signed
+  certificate for `OW_HOSTNAME` (10 years, in the `ow-traefik-certs` volume, recreated only when the
+  host name changes) and Traefik serves it as its default (`deploy/traefik/dynamic.yaml`).
 - Migration 5 drops the secondary index on `pkg_index` (a scan of ~80k rows per desktop is fast).
 - On any `duckdb.FatalException`, the service logs it and exits; Docker's restart policy starts it
   again and DuckDB recovers from its WAL, instead of every request failing.

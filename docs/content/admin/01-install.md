@@ -74,8 +74,11 @@ The first start pulls the images and builds the default desktop (10–20 minutes
 
 ## 4. TLS certificate
 
-Until a domain and DNS provider are set up, Traefik uses a self-signed certificate (browsers warn
-once). For a real certificate the name must be in DNS (a public record pointing to the LAN address is
+Until a domain and DNS provider are set up, Traefik uses a self-signed certificate for
+`OW_HOSTNAME`, created once by the `certs` service and kept in the `ow-traefik-certs` volume. Browsers
+warn the first time; after accepting it once, it stays valid (it changes only if `OW_HOSTNAME`
+changes). To avoid the warning altogether, install it as trusted on the users' PCs: export it with
+`docker run --rm -v ow-traefik-certs:/c alpine:3.22 cat /c/default.crt > orbitalwindow.crt`. For a real certificate the name must be in DNS (a public record pointing to the LAN address is
 fine) and Traefik must be able to create DNS records:
 
 1. In `deploy/.env`: `OW_ACME_DNS_PROVIDER=<lego provider code>` (for example `cloudflare`) and
