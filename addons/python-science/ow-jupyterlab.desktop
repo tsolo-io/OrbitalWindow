@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+[Desktop Entry]
+Type=Application
+Name=JupyterLab
+Comment=JupyterLab (conda "science" environment)
+Exec=bash -ic "jupyter lab --notebook-dir=$HOME"
+Icon=applications-science
+Terminal=false
+Categories=Development;Science;

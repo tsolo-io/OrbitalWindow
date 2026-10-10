@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+key: matlab
+label: MATLAB
+description: >-
+  MATLAB R2026b (shared install). Activate your own licence the first time you start it.
+  GPU computing (gpuArray) needs an NVIDIA GPU.
+restricted: true
+apt: [ca-certificates, libasound2t64, libcairo-gobject2, libcairo2, libcap2, libcups2t64, libdrm2,
+      libgbm1, libgdk-pixbuf-2.0-0, libgl1, libglib2.0-0t64, libgstreamer-plugins-base1.0-0,
+      libgstreamer1.0-0, libgtk-3-0t64, libice6, libnspr4, libnss3, libodbc2, libpam0g,
+      libpango-1.0-0, libpangocairo-1.0-0, libpangoft2-1.0-0, libsndfile1, libuuid1,
+      libwayland-client0, libxcomposite1, libxcursor1, libxdamage1, libxfixes3, libxft2,
+      libxinerama1, libxrandr2, libxt6t64, libxtst6, libxxf86vm1, libxmu6, locales, locales-all,
+      make, net-tools, procps]
+launchers: [ow-matlab.desktop]
+mounts:
+  - {source: shared/matlab, target: /opt/matlab, read_only: true}

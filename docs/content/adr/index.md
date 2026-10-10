@@ -29,3 +29,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0013](0013-files-sharing-and-remote-access.md) | Files, sharing and remote access services | accepted |
 | [0014](0014-admins-never-see-user-desktops.md) | Admins never see users' desktops or files | accepted |
 | [0015](0015-python-3-14-and-httpx2.md) | Python 3.14, pydantic and httpx2 | accepted |
+| [0016](0016-per-user-image-builds.md) | How per-user images are built and when they are stale | accepted |

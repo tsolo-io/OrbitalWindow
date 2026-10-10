@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+[Desktop Entry]
+Type=Application
+Name=RStudio
+Comment=IDE for R
+Exec=/usr/lib/rstudio/rstudio %F
+Icon=rstudio
+Terminal=false
+Categories=Development;Science;

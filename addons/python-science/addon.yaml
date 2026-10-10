@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+key: python-science
+label: Python science (conda)
+description: >-
+  Shared Miniforge install with a "science" environment (NumPy, SciPy, pandas, Matplotlib,
+  scikit-learn, JupyterLab, Spyder). Create your own environments with conda; they are kept in
+  your home folder.
+restricted: false
+script: install.sh
+launchers: [ow-jupyterlab.desktop, ow-spyder.desktop]
+mounts:
+  - {source: shared/conda, target: /opt/conda, read_only: true}

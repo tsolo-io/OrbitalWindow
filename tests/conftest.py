@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,6 +14,7 @@ from orbitalwindow.main import create_app
 from orbitalwindow.service import Service
 
 ORIGIN = "https://testserver"
+ADDONS_DIR = Path(__file__).parent.parent / "addons"
 
 
 class FakeSamba:
@@ -48,7 +50,11 @@ class FakeHostOps:
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(
-        root=tmp_path / "ow", hostname="desk.test", admin_password=None, cookie_secure=True
+        root=tmp_path / "ow",
+        hostname="desk.test",
+        admin_password=None,
+        cookie_secure=True,
+        addons_dir=ADDONS_DIR,
     )
 
 
@@ -58,8 +64,9 @@ def service(settings) -> Service:
     svc.samba = FakeSamba()  # type: ignore[assignment]
     svc.hostops = FakeHostOps()  # type: ignore[assignment]
     svc.db.execute(
-        "INSERT INTO images (label, base_tag, image_ref, status) "
-        "VALUES ('Ubuntu XFCE', 'ubuntu-xfce', 'ow-desktop:ubuntu-xfce', 'ready')"
+        "INSERT INTO images (label, base_tag, image_ref, status, built_at, docker_id) "
+        "VALUES ('Ubuntu XFCE', 'ubuntu-xfce', 'ow-desktop:ubuntu-xfce', 'ready', now(), "
+        "'sha256:base1')"
     )
     return svc
 

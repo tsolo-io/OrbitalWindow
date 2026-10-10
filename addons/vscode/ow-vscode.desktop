@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+[Desktop Entry]
+Type=Application
+Name=Visual Studio Code
+Comment=Code editor
+Exec=/usr/share/code/code %F
+Icon=vscode
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=Code

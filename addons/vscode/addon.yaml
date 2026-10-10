@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+key: vscode
+label: Visual Studio Code
+description: Microsoft's code editor, from the official Microsoft repository.
+restricted: false
+apt: [gpg, apt-transport-https]
+script: install.sh
+launchers: [ow-vscode.desktop]

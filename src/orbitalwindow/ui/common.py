@@ -71,7 +71,12 @@ def frame(auth: PageAuth, title: str) -> None:
             ui.link("OrbitalWindow", "/").classes("text-lg font-bold text-white no-underline")
             ui.link("My desktop", "/").classes("text-white no-underline")
             if auth.user.is_admin:
-                ui.link("Users", "/admin/users").classes("text-white no-underline")
+                for text, url in (
+                    ("Users", "/admin/users"),
+                    ("Desktops", "/admin/images"),
+                    ("Add-ons", "/admin/addons"),
+                ):
+                    ui.link(text, url).classes("text-white no-underline")
         with ui.row().classes("items-center gap-2"):
             ui.label(auth.user.display_name).classes("text-white")
             post_button("Log out", "/auth/logout", icon="logout")

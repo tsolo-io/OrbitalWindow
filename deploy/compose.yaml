@@ -110,6 +110,7 @@ services:
       # Same path inside and outside, so mount sources we give Docker are valid host paths.
       - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}
       - ./image:/opt/orbitalwindow/image:ro
+      - ../addons:/opt/orbitalwindow/addons:ro
     networks: [core, proxy-rw]
     depends_on: [socket-proxy-rw, samba]
     read_only: true
