@@ -81,7 +81,7 @@ Also rejected:
 |---|---|---|
 | KDE rendered in software (`llvmpipe`) | The KDE image defaults to `PIXELFLUX_WAYLAND=true`. GBM allocation fails on the NVIDIA open module: `KMS: DRM_IOCTL_MODE_CREATE_DUMB failed: Permission denied` → `GPU renderer failed to initialize … Pixman` | Set `PIXELFLUX_WAYLAND=false` for every desktop. KDE then runs `kwin_x11` and renders via zink on NVIDIA |
 | `nvtop`: "Operation not permitted" | Ubuntu's nvtop has file capability `cap_perfmon=ep`, which isn't in Docker's bounding set, so exec fails | `setcap -r /usr/bin/nvtop` in the image build (NVIDIA stats via NVML don't need it) |
-| VS Code aborted: *SUID sandbox helper … not configured correctly* | `/usr/share/code/chrome-sandbox` must be setuid root | `chown root:root … && chmod 4755 …` in the image build. Its launcher is `com.microsoft.VSCode.desktop` |
+| VS Code aborted: *SUID sandbox helper … not configured correctly* | `/usr/share/code/chrome-sandbox` must be setuid root | `chown root:root … && chmod 4755 …` in the image build. Its launcher is `com.microsoft.VSCode.desktop`. **Not enough under OrbitalWindow's desktop settings:** the helper then can't create its namespaces; start with `--no-sandbox` instead (ADR 0022) |
 | A shared conda env was created in a throwaway `$HOME` | `envs_dirs` in `.condarc` points to `~/.conda/envs` first | Create shared envs with `conda env create -p /opt/conda/envs/<name>` |
 
 ## Users' software

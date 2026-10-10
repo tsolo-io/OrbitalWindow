@@ -9,6 +9,9 @@ echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packa
   > /etc/apt/sources.list.d/vscode.list
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends code
-# Electron's sandbox helper must be setuid root, or VS Code aborts at start.
-chown root:root /usr/share/code/chrome-sandbox
-chmod 4755 /usr/share/code/chrome-sandbox
+# Chromium's sandbox can't create its namespaces in a desktop container, so VS Code aborts at
+# start unless it runs with --no-sandbox (ADR 0022): in the menu entries and on the command line.
+sed -i 's|^Exec=/usr/share/code/code|Exec=/usr/share/code/code --no-sandbox|' \
+    /usr/share/applications/com.microsoft.VSCode*.desktop
+printf '#!/bin/sh\nexec /usr/bin/code --no-sandbox "$@"\n' > /usr/local/bin/code
+chmod 755 /usr/local/bin/code

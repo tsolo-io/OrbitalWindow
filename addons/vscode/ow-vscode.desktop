@@ -5,7 +5,7 @@
 Type=Application
 Name=Visual Studio Code
 Comment=Code editor
-Exec=/usr/share/code/code %F
+Exec=/usr/share/code/code --no-sandbox %F
 Icon=vscode
 Terminal=false
 Categories=Development;IDE;
