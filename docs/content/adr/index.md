@@ -42,3 +42,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0026](0026-model-fit-estimate-and-llmfit.md) | Model fit: our own estimate, llmfit only for ideas | accepted |
 | [0027](0027-one-vllm-ai-session.md) | One AI session: a vLLM container with an OpenAI-compatible API | accepted |
 | [0028](0028-open-webui-chat.md) | The AI chat: Open WebUI on its own port, signed in through OrbitalWindow | accepted |
+| [0029](0029-coding-benchmarks.md) | Coding benchmarks with EvalPlus, run in isolated containers | accepted |

@@ -18,6 +18,7 @@ MODEL_COLUMNS = [
     {"name": "size", "label": "Size", "field": "size", "align": "right"},
     {"name": "modified", "label": "Downloaded", "field": "modified", "align": "left"},
     {"name": "fit", "label": "GPU fit", "field": "fit", "align": "left"},
+    {"name": "bench", "label": "Benchmark", "field": "bench", "align": "left"},
     {"name": "path", "label": "Folder", "field": "path", "align": "left"},
     {"name": "actions", "label": "", "field": "actions", "align": "right"},
 ]
@@ -29,6 +30,13 @@ SUGGESTION_COLUMNS = [
     {"name": "score", "label": "llmfit score", "field": "score", "align": "right"},
     {"name": "actions", "label": "", "field": "actions", "align": "right"},
 ]
+BENCH_PHASES = {
+    "queued": "waiting",
+    "starting": "starting the model",
+    "generating": "the model is answering",
+    "evaluating": "testing the answers",
+    "cancelling": "cancelling",
+}
 FIT_COLORS = "{fits: 'positive', busy: 'orange', tight: 'orange', 'too-big': 'negative'}"
 FIT_LABELS = {
     "fits": "fits",
@@ -175,6 +183,13 @@ def ai_page(request: Request) -> RedirectResponse | None:
             """,
         )
 
+        with ui.card().classes("w-full gap-2") as bench_card:
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label("Benchmarks running").classes("text-h6")
+                ui.link("All benchmarks", "/benchmarks").classes("text-sm")
+            bench_box = ui.column().classes("w-full gap-2")
+        bench_card.set_visibility(False)
+
         ui.label("Downloaded models").classes("text-h6")
         models = ui.table(columns=MODEL_COLUMNS, rows=[], row_key="repo").classes("w-full")
         models.add_slot(
@@ -183,6 +198,25 @@ def ai_page(request: Request) -> RedirectResponse | None:
             <q-td :props="props">
               <q-btn flat dense no-caps icon="delete" label="Delete" color="negative"
                      @click="$parent.$emit('delete', props.row)" />
+            </q-td>
+            """,
+        )
+        models.add_slot(
+            "body-cell-bench",
+            """
+            <q-td :props="props">
+              <div v-for="h in props.row.headlines" :key="h.id">
+                <a :href="'/benchmarks/' + h.id">{{ h.text }}</a></div>
+              <q-btn-dropdown flat dense no-caps icon="speed" label="Benchmark" size="sm">
+                <q-list dense>
+                  <q-item clickable v-close-popup @click="$parent.$emit('bench',
+                          {repo: props.row.repo, suite: 'humaneval'})">
+                    <q-item-section>HumanEval+ (164 tasks, a few minutes)</q-item-section></q-item>
+                  <q-item clickable v-close-popup @click="$parent.$emit('bench',
+                          {repo: props.row.repo, suite: 'mbpp'})">
+                    <q-item-section>MBPP+ (378 tasks)</q-item-section></q-item>
+                </q-list>
+              </q-btn-dropdown>
             </q-td>
             """,
         )
@@ -247,6 +281,9 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 return
             library, space, rows = result
             fits = await run.io_bound(lambda: [svc.fit_for_local(model) for model in library])
+            latest = await run.io_bound(svc.latest_benchmarks) or {}
+            benches = await run.io_bound(svc.list_benchmarks, 50) or []
+            show_benchmarks([row for row in benches if row["status"] in BENCH_PHASES])
             space_label.set_text(
                 f"{gb(space.free)} free of {gb(space.total)} "
                 f"· models use {gb(sum(m.bytes for m in library))}"
@@ -260,6 +297,10 @@ def ai_page(request: Request) -> RedirectResponse | None:
                     "fit": f"{FIT_LABELS[verdict.level]} · {gb(estimate.total)}",
                     "fit_level": verdict.level,
                     "fit_text": verdict.text,
+                    "headlines": [
+                        {"id": row["id"], "text": f"{row['suite_label']} {row['plus_score']:.1%}"}
+                        for row in latest.get(model.repo, [])
+                    ],
                     "path": str(model.path),
                 }
                 for model, (estimate, verdict) in zip(library, fits, strict=True)
@@ -280,6 +321,66 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 for row in rows
             ]
             downloads.update()
+
+        def show_benchmarks(active: list[dict]) -> None:
+            """Show the waiting and running benchmarks with their progress.
+
+            Args:
+                active: Benchmark rows that are waiting or running.
+            """
+            bench_card.set_visibility(bool(active))
+            bench_box.clear()
+            with bench_box:
+                for row in active:
+                    with ui.row().classes("w-full items-center gap-4"):
+                        ui.label(f"{row['suite_label']}: {row['repo']}").classes("font-medium")
+                        ui.label(BENCH_PHASES[row["status"]]).classes("text-grey-8")
+                        fraction = row["done"] / row["total"] if row["total"] else 0
+                        ui.linear_progress(value=fraction, show_value=False).classes("w-48")
+                        ui.label(f"{row['done']} of {row['total']} tasks").classes("text-caption")
+                        if row["status"] != "cancelling":
+                            ui.button(
+                                "Cancel",
+                                icon="close",
+                                on_click=guarded(auth, lambda _, i=row["id"]: on_bench_cancel(i)),
+                            ).props("flat dense no-caps")
+
+        async def on_bench(event) -> None:
+            """Start a benchmark of a model, asking first if it would replace a running model.
+
+            Args:
+                event: Table event with the model ``repo`` and the ``suite``.
+            """
+            repo, suite = event.args["repo"], event.args["suite"]
+            try:
+                await run.io_bound(svc.queue_benchmark, actor, repo, suite)
+            except ValidationError as exc:
+                if "would replace it" not in str(exc):
+                    ui.notify(str(exc), type="negative", multi_line=True)
+                    return
+                with ui.dialog() as dialog, ui.card():
+                    ui.label("Replace the running model?").classes("text-h6")
+                    ui.label(str(exc) + " Everyone using it loses it until it is started again.")
+                    with ui.row():
+                        ui.button("Replace and benchmark", on_click=lambda: dialog.submit(True)
+                                  ).props("no-caps")  # fmt: skip
+                        ui.button("Cancel", on_click=lambda: dialog.submit(False)).props(
+                            "no-caps flat"
+                        )
+                if not await dialog:
+                    return
+                if not await act(svc.queue_benchmark, repo, suite, True):
+                    return
+            ui.notify("Benchmark queued. It starts the model if needed.", type="positive")
+            await refresh()
+
+        async def on_bench_cancel(bench_id: int) -> None:
+            """Cancel a benchmark.
+
+            Args:
+                bench_id: The benchmark.
+            """
+            await act(svc.cancel_benchmark, bench_id, done="Benchmark cancelled.")
 
         async def act(fn, *args, done: str | None = None) -> bool:
             """Run a service call as this user, show errors or ``done``, then refresh.
@@ -436,6 +537,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
         downloads.on("cancel", guarded(auth, on_cancel))
         downloads.on("resume", guarded(auth, on_resume))
         models.on("delete", guarded(auth, on_delete))
+        models.on("bench", guarded(auth, on_bench))
         token_save.on_click(guarded(auth, on_token_save))
         token_clear.on_click(guarded(auth, on_token_clear))
         show_token_state()

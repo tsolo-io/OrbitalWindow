@@ -215,7 +215,9 @@ env: {}                     # extra container environment
 - **Chat (#18, ADR 0028):** Open WebUI `ow-openwebui` on port 8443 (Traefik entrypoint `ai`)
   while the session runs. It signs users in from the forwardAuth headers `X-OW-Email`/`Name`/`Role`
   and offers per-user API keys (`Bearer sk-…` skips forwardAuth). Its data is in `state/openwebui`.
-- **Next ticket:** benchmarks (#21).
+- **Benchmarks (#21, ADR 0029):** EvalPlus HumanEval+/MBPP+. `ow-bench-generate` runs on `ow-ai`;
+  `ow-bench-evaluate` runs with no network. Files are in `state/benchmarks/<id>/` with a
+  `benchmarks` row. Pages `/benchmarks` and `/benchmarks/<id>` are for every user.
 
 ### Server status (ticket #22, ADR 0025)
 - Page `/status` for every user: host name, uptime, load, CPU, memory, swap, disk space, disk and
