@@ -13,3 +13,6 @@ script: install.sh
 launchers: [ow-jupyterlab.desktop, ow-spyder.desktop]
 mounts:
   - {source: shared/conda, target: /opt/conda, read_only: true}
+env:
+  # Spyder's help pane uses Qt WebEngine (Chromium); its sandbox can't start in a container (ADR 0022).
+  QTWEBENGINE_DISABLE_SANDBOX: "1"

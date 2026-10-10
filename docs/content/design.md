@@ -121,7 +121,7 @@ env: {}                     # extra container environment
 - **First add-ons:**
   - `matlab`: MATLAB runtime libraries, `/opt/matlab` mount, launcher. Restricted.
   - `python-science`: `/opt/conda` mount, JupyterLab and Spyder launchers, conda bashrc hook.
-  - `vscode`: script adds the Microsoft repo and installs `code`, applies the chrome-sandbox fix, launcher.
+  - `vscode`: script adds the Microsoft repo and installs `code`, starts it with `--no-sandbox` (ADR 0022), launcher.
   - `devtools`: build-essential, cmake, gfortran, pkg-config, git-gui, gitk, git-lfs.
   - `rstudio`: r-base from apt plus the RStudio Desktop `.deb` from Posit via script, launcher. Posit may not publish a build for Ubuntu 26.04 yet; check during implementation and fall back to the newest Ubuntu build.
 - **Slim base:** `deploy/image/Dockerfile` keeps only what every desktop needs: git, python3 + venv, curl/unzip/rsync, nano, htop, nvtop (capability fix), mesa-utils, vulkan-tools, fonts. Everything above moves into add-ons.

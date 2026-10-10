@@ -37,6 +37,8 @@ env: {}                     # extra environment for the desktop container
   be inside system folders or `/config`, `/scratch`, `/shared` or `/groups`. If a source folder
   doesn't exist, the desktop refuses to start and tells the user why.
 - `env` may not change variables OrbitalWindow sets (`PUID`, `PASSWORD`, `SUBFOLDER`, …).
+- Electron apps (VS Code, RStudio, …) must start with `--no-sandbox`: Chromium's sandbox can't
+  create its namespaces in a desktop container (ADR 0022).
 
 ## When changes take effect
 

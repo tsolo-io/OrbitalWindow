@@ -22,8 +22,9 @@ curl -fsSL -o /tmp/rstudio.deb "$url"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/rstudio.deb
 rm -f /tmp/rstudio.deb
-# Electron's sandbox helper must be setuid root.
-if [ -f /usr/lib/rstudio/chrome-sandbox ]; then
-    chown root:root /usr/lib/rstudio/chrome-sandbox
-    chmod 4755 /usr/lib/rstudio/chrome-sandbox
-fi
+# Chromium's sandbox can't create its namespaces in a desktop container, so RStudio aborts at
+# start unless it runs with --no-sandbox (ADR 0022): in the menu entry and on the command line.
+sed -i 's|^Exec=/usr/lib/rstudio/rstudio|Exec=/usr/lib/rstudio/rstudio --no-sandbox|' \
+    /usr/share/applications/rstudio.desktop
+printf '#!/bin/sh\nexec /usr/lib/rstudio/rstudio --no-sandbox "$@"\n' > /usr/local/bin/rstudio
+chmod 755 /usr/local/bin/rstudio

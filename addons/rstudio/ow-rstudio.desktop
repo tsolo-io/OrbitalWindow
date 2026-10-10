@@ -5,7 +5,7 @@
 Type=Application
 Name=RStudio
 Comment=IDE for R
-Exec=/usr/lib/rstudio/rstudio %F
+Exec=/usr/lib/rstudio/rstudio --no-sandbox %F
 Icon=rstudio
 Terminal=false
 Categories=Development;Science;

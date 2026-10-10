@@ -35,3 +35,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0019](0019-ssh-help-logs-and-tls.md) | SSH gateway, help pages, log viewer and TLS | accepted |
 | [0020](0020-desktop-readiness-and-db-recovery.md) | Desktop readiness, the desktop tab, and recovering from DuckDB fatal errors | accepted |
 | [0021](0021-images-and-compose-files.md) | Published images and the production / development compose files | accepted |
+| [0022](0022-electron-apps-without-chromium-sandbox.md) | Electron apps run without Chromium's sandbox | accepted |
