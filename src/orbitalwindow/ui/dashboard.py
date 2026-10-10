@@ -61,6 +61,7 @@ def dashboard(request: Request, pw: str = "") -> RedirectResponse | None:
         ui.notify(text, type=kind, timeout=8000)
     with ui.column().classes("w-full max-w-3xl mx-auto p-4 gap-4"):
         desktop_card(auth)
+        ai_card(auth)
         software_card(auth)
         ssh_card(auth)
         files_card(auth)
@@ -215,6 +216,39 @@ def desktop_card(auth: PageAuth) -> None:
         picker.on_value_change(guarded(auth, on_pick))
         ui.timer(3.0, guarded(auth, refresh))
         ui.timer(0.1, guarded(auth, refresh), once=True)
+
+
+def ai_card(auth: PageAuth) -> None:
+    """Add the AI card, shown only while an AI model is starting or running.
+
+    Args:
+        auth: Session of the page.
+    """
+    svc = service()
+    with ui.card().classes("w-full") as card:
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("AI model").classes("text-h6")
+            badge = ui.badge("")
+        text = ui.label()
+        if auth.user.can_manage_ai:
+            ui.link("Manage the AI session", "/ai").classes("text-sm")
+    card.set_visibility(False)
+
+    async def refresh() -> None:
+        """Show the running model, or hide the card when there is none."""
+        state = (await run.io_bound(svc.ai_session))[0]
+        card.set_visibility(state.status in ("starting", "running"))
+        if state.status == "running":
+            badge.set_text("ready")
+            badge.props("color=positive")
+            text.set_text(f"{state.repo} is running and ready to use.")
+        elif state.status == "starting":
+            badge.set_text("starting")
+            badge.props("color=orange")
+            text.set_text(f"{state.repo} is starting. This can take a few minutes.")
+
+    ui.timer(0.1, guarded(auth, refresh), once=True)
+    ui.timer(10.0, guarded(auth, refresh))
 
 
 def files_card(auth: PageAuth) -> None:

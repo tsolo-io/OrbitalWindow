@@ -166,6 +166,23 @@ MIGRATIONS: list[str] = [
         finished_at TIMESTAMP
     );
     """,
+    # 7: AI sessions (one vLLM container at a time; a row per start)
+    """
+    CREATE SEQUENCE seq_ai_sessions START 1;
+    CREATE TABLE ai_sessions (
+        id INTEGER PRIMARY KEY DEFAULT nextval('seq_ai_sessions'),
+        repo VARCHAR NOT NULL,
+        gpu_index INTEGER NOT NULL,
+        context INTEGER NOT NULL,
+        gpu_share DOUBLE NOT NULL,
+        public BOOLEAN NOT NULL,       -- /v1 reachable through Traefik
+        status VARCHAR NOT NULL,       -- started | stopped | failed
+        error VARCHAR NOT NULL DEFAULT '',
+        started_by VARCHAR NOT NULL,
+        started_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        stopped_at TIMESTAMP
+    );
+    """,
 ]
 
 

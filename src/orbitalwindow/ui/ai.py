@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""AI managers: the model library. Disk space, downloaded models, downloads from Hugging Face."""
+"""AI managers: the AI session, and the model library (disk space, models, downloads)."""
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -10,6 +10,7 @@ from nicegui import run, ui
 
 from ..fit import Estimate, Verdict
 from ..users import ValidationError
+from .ai_session import session_card
 from .common import authenticate, frame, guarded, service
 
 MODEL_COLUMNS = [
@@ -94,7 +95,7 @@ def gb(size: int | None) -> str:
 
 @ui.page("/ai")
 def ai_page(request: Request) -> RedirectResponse | None:
-    """Render the AI page (model library) for AI managers and admins.
+    """Render the AI page (session and model library) for AI managers and admins.
 
     Args:
         request: The incoming page request.
@@ -109,6 +110,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
     actor = auth.user.name
     frame(auth, "AI")
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
+        refresh_session = session_card(auth, svc)
         ui.label("AI models").classes("text-h5")
         ui.label(
             "Models are downloaded from Hugging Face into a shared folder on the server. "
@@ -435,5 +437,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
         token_clear.on_click(guarded(auth, on_token_clear))
         show_token_state()
         ui.timer(3.0, guarded(auth, refresh))
+        ui.timer(3.0, guarded(auth, refresh_session))
         ui.timer(0.1, guarded(auth, refresh), once=True)
+        ui.timer(0.1, guarded(auth, refresh_session), once=True)
     return None

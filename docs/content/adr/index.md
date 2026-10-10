@@ -40,3 +40,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0024](0024-ai-model-library.md) | AI manager role and the model library | accepted |
 | [0025](0025-server-status-from-node-exporter.md) | Server status from node-exporter, read only while the page is open | accepted |
 | [0026](0026-model-fit-estimate-and-llmfit.md) | Model fit: our own estimate, llmfit only for ideas | accepted |
+| [0027](0027-one-vllm-ai-session.md) | One AI session: a vLLM container with an OpenAI-compatible API | accepted |

@@ -207,7 +207,12 @@ env: {}                     # extra container environment
 - **Downloads:** one at a time in `ow-model-dl` (image `ow-hf:1`), pinned to the inspected commit,
   weights in safetensors only. Progress, cancel and resume are on the AI page.
 - **Token:** `$OW_ROOT/state/hf_token` for gated models.
-- **Next tickets:** fit check (#16), one vLLM session (#17) and Open WebUI (#18).
+- **Fit (#16, ADR 0026):** estimate from weights, KV cache and overhead; llmfit image for
+  suggestions.
+- **Session (#17, ADR 0027):** one vLLM container `ow-ai-model` on internal network `ow-ai`, with an
+  API key from `state/ai_api_key`. `/v1` goes through Traefik only when switched on; it is in the
+  `ai_sessions` history.
+- **Next tickets:** Open WebUI (#18) and benchmarks (#21).
 
 ### Server status (ticket #22, ADR 0025)
 - Page `/status` for every user: host name, uptime, load, CPU, memory, swap, disk space, disk and
