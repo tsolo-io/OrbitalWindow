@@ -33,12 +33,22 @@ class Usage:
 
     @property
     def fraction(self) -> float | None:
+        """Return how much of the quota is used.
+
+        Returns:
+            Used bytes divided by the quota, or None when there is no quota.
+        """
         if not self.quota_gb:
             return None
         return self.bytes / (self.quota_gb * 1024**3)
 
     @property
     def warning(self) -> bool:
+        """Tell whether the usage is at or above ``WARN_FRACTION`` of the quota.
+
+        Returns:
+            True if a warning should be shown.
+        """
         return self.fraction is not None and self.fraction >= WARN_FRACTION
 
 
@@ -49,20 +59,47 @@ class HostSpace:
 
     @property
     def used_fraction(self) -> float:
+        """Return how full the filesystem is.
+
+        Returns:
+            The used fraction (0.0 when the size is unknown).
+        """
         return 1 - self.free / self.total if self.total else 0.0
 
     @property
     def warning(self) -> bool:
+        """Tell whether the filesystem is at or above ``HOST_WARN_FRACTION`` full.
+
+        Returns:
+            True if a warning should be shown.
+        """
         return self.used_fraction >= HOST_WARN_FRACTION
 
 
 def host_space(root: Path) -> HostSpace:
+    """Return the size and free space of the filesystem holding ``root``.
+
+    Args:
+        root: A path on the filesystem.
+
+    Returns:
+        Total and available bytes.
+    """
     st = os.statvfs(root)
     return HostSpace(st.f_blocks * st.f_frsize, st.f_bavail * st.f_frsize)
 
 
 def _subject_of(path: str) -> tuple[str, str] | None:
-    """'users/bob' → ('user', 'bob'); 'groups/labx' → ('group', 'labx'); scratch."""
+    """Map a measured path to its subject: 'users/bob' → ('user', 'bob'); scratch.
+
+    'groups/labx' → ('group', 'labx'); 'shared/scratch' → ('scratch', 'scratch').
+
+    Args:
+        path: A path relative to ``$OW_ROOT``.
+
+    Returns:
+        ``(subject, name)``, or None for a path that is not a home, group folder or scratch.
+    """
     if path == "shared/scratch":
         return "scratch", "scratch"
     kind, _, name = path.partition("/")
@@ -74,7 +111,15 @@ def _subject_of(path: str) -> tuple[str, str] | None:
 
 
 def measure(db: Database, hostops: HostOps) -> int:
-    """Run ``du`` over homes, group folders and scratch, and store the results."""
+    """Run ``du`` over homes, group folders and scratch, and store the results.
+
+    Args:
+        db: The application database.
+        hostops: Helper that runs ``du`` with root access.
+
+    Returns:
+        The number of stored measurements.
+    """
     sizes = hostops.disk_usage()
     now = datetime.now(UTC).replace(tzinfo=None)
     rows = []
@@ -90,6 +135,15 @@ def measure(db: Database, hostops: HostOps) -> int:
 
 
 def usage_for_user(db: Database, user: dict[str, Any]) -> Usage:
+    """Return the last measured usage of a user's home.
+
+    Args:
+        db: The application database.
+        user: The user row.
+
+    Returns:
+        The usage, with 0 bytes and no time when it was not measured yet.
+    """
     row = db.one("SELECT * FROM disk_usage WHERE subject = 'user' AND name = ?", [user["name"]])
     return Usage(
         "user",
@@ -101,7 +155,14 @@ def usage_for_user(db: Database, user: dict[str, Any]) -> Usage:
 
 
 def all_usage(db: Database) -> list[Usage]:
-    """Everyone (users, groups, scratch), largest first."""
+    """Return the usage of everyone (users, groups, scratch), largest first.
+
+    Args:
+        db: The application database.
+
+    Returns:
+        The last measurements with their quotas.
+    """
     rows = db.all(
         "SELECT d.*, coalesce(u.quota_gb, g.quota_gb) AS quota_gb FROM disk_usage d "
         "LEFT JOIN users u ON d.subject = 'user' AND u.name = d.name "
@@ -109,11 +170,21 @@ def all_usage(db: Database) -> list[Usage]:
         "ORDER BY d.bytes DESC"
     )
     return [
-        Usage(r["subject"], r["name"], r["bytes"], r["quota_gb"], r["measured_at"]) for r in rows
+        Usage(row["subject"], row["name"], row["bytes"], row["quota_gb"], row["measured_at"])
+        for row in rows
     ]
 
 
 def clean_scratch(hostops: HostOps, days: int) -> int:
+    """Delete scratch files untouched for ``days``.
+
+    Args:
+        hostops: Helper that deletes the files with root access.
+        days: Age in days after which an unchanged file is deleted.
+
+    Returns:
+        The number of removed files and folders.
+    """
     removed = hostops.clean_scratch(days)
     if removed:
         log.info("scratch clean-up removed %d item(s) older than %d days", len(removed), days)

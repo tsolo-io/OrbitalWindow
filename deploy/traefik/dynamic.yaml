@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Traefik's default certificate: a self-signed one created once by the `certs` service and kept
+# in a volume. Without it Traefik generates a new self-signed certificate on every configuration
+# change (every desktop start/stop), and browsers that accepted the previous one refuse new
+# connections (e.g. the desktop stream's WebSocket). With OW_ACME_DNS_PROVIDER set, Let's Encrypt
+# certificates are used for OW_HOSTNAME instead.
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/default.crt
+        keyFile: /certs/default.key

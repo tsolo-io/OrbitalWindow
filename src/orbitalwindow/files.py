@@ -43,20 +43,54 @@ FULL_ACCESS = {
 
 
 def files_container_name(user: str) -> str:
+    """Return the Docker container name of a user's file manager.
+
+    Args:
+        user: OrbitalWindow user name.
+
+    Returns:
+        ``ow-files-<user>``.
+    """
     return f"ow-files-{user}"
 
 
 def files_network_name(user: str) -> str:
+    """Return the name of the network of a user's file manager.
+
+    Args:
+        user: OrbitalWindow user name.
+
+    Returns:
+        ``ow-fnet-<user>``.
+    """
     return f"ow-fnet-{user}"
 
 
 def files_path(user: str) -> str:
+    """Return the URL path of a user's file manager.
+
+    Args:
+        user: OrbitalWindow user name.
+
+    Returns:
+        ``/files/<user>/``.
+    """
     return f"/files/{user}/"
 
 
 def _source(path: str, name: str, *, read_only: bool = False) -> dict[str, Any]:
-    access = {k: (v if k in ("view", "download", "configured") or not read_only else False)
-              for k, v in FULL_ACCESS.items()}  # fmt: skip
+    """Return a FileBrowser source config for one mounted folder.
+
+    Args:
+        path: Folder path inside the container.
+        name: Display name of the source.
+        read_only: Whether the source is read-only (only view and download allowed).
+
+    Returns:
+        The source config.
+    """
+    access = {key: (value if key in ("view", "download", "configured") or not read_only else False)
+              for key, value in FULL_ACCESS.items()}  # fmt: skip
     return {
         "path": path,
         "name": name,
@@ -70,7 +104,18 @@ def _source(path: str, name: str, *, read_only: bool = False) -> dict[str, Any]:
 
 
 def files_config(user: str, groups: list[str], admin_password: str) -> dict[str, Any]:
-    """FileBrowser Quantum config: one source per mount, proxy-header login, no share links."""
+    """Return the FileBrowser Quantum config of a user's file manager.
+
+    One source per mount, proxy-header login, no share links.
+
+    Args:
+        user: OrbitalWindow user name.
+        groups: Names of the user's groups.
+        admin_password: Password of FileBrowser's built-in admin.
+
+    Returns:
+        The config, ready to be dumped as YAML.
+    """
     sources = [_source("/srv/home", "Home")]
     sources += [_source(f"/srv/groups/{g}", f"Group {g}") for g in groups]
     sources.append(_source("/srv/scratch", "Scratch"))
@@ -121,6 +166,19 @@ class FilesSpec:
 def build_files_spec(
     user: dict[str, Any], groups: list[dict[str, Any]], settings: Settings
 ) -> FilesSpec:
+    """Build the container spec of a user's file manager.
+
+    The spec hash covers the image, the container spec, the labels and the generated config,
+    so any change recreates the container.
+
+    Args:
+        user: User row from the database.
+        groups: Group rows whose folders are mounted.
+        settings: Service settings.
+
+    Returns:
+        The file manager container spec.
+    """
     name = user["name"]
     cname = files_container_name(name)
     net = files_network_name(name)
@@ -136,9 +194,9 @@ def build_files_spec(
             "mode": "ro",
         },
     }
-    for g in groups:
-        target = f"/srv/groups/{g['name']}"
-        volumes[str(root / "groups" / g["name"])] = {"bind": target, "mode": "rw"}
+    for group in groups:
+        target = f"/srv/groups/{group['name']}"
+        volumes[str(root / "groups" / group["name"])] = {"bind": target, "mode": "rw"}
     router = cname
     path = files_path(name)
     labels = {
@@ -166,6 +224,7 @@ def build_files_spec(
         "read_only": True,
         "tmpfs": {"/tmp": ""},
         "mem_limit": 512 * 1024**2,
+        "pids_limit": 256,
         # The image's own check assumes port 80 and "/"; we run unprivileged on 8080 under
         # /files/<user>/. Traefik only routes to healthy containers.
         "healthcheck": {
@@ -189,12 +248,12 @@ def build_files_spec(
         repr(
             (
                 FILES_IMAGE,
-                sorted(volumes.items()),
-                kwargs["group_add"],
+                # The whole container spec and labels, so any change (mounts, limits, health
+                # check…) recreates the container.
+                sorted((k, repr(v)) for k, v in kwargs.items()),
                 labels,
-                # The generated config (without its random password): a change recreates.
+                # The generated config (without its random password).
                 files_config(name, [g["name"] for g in groups], ""),
-                kwargs["healthcheck"],
             )
         ).encode()
     ).hexdigest()[:16]
@@ -205,24 +264,47 @@ def build_files_spec(
 
 class FileManagers:
     def __init__(self, client: docker.DockerClient, settings: Settings) -> None:
+        """Create the file manager controller.
+
+        Args:
+            client: Docker client.
+            settings: Service settings.
+        """
         self._client = client
         self._settings = settings
         self._locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
 
     def _write_config(self, user: str, groups: list[str]) -> None:
+        """Write a user's FileBrowser config file atomically, with a new random admin password.
+
+        Args:
+            user: OrbitalWindow user name.
+            groups: Names of the user's groups.
+        """
         path: Path = self._settings.state_dir / "files-config" / f"{user}.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         config = files_config(user, groups, secrets.token_urlsafe(24))
         text = yaml.safe_dump(config, sort_keys=False)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(text)
-        tmp.chmod(0o644)  # read by the user's UID inside the container; holds no user secret
+        # Read by the user's UID inside the container. It holds FileBrowser's admin password, which
+        # is random and useless (password login is off); state/ itself is mode 700.
+        tmp.chmod(0o644)
         tmp.replace(path)
 
     def ensure(
         self, user: dict[str, Any], groups: list[dict[str, Any]], *, recreate: bool = False
     ) -> bool:
-        """Make sure ``ow-files-<user>`` runs with the current spec. Returns True if (re)created."""
+        """Make sure ``ow-files-<user>`` runs with the current spec.
+
+        Args:
+            user: User row from the database.
+            groups: Group rows whose folders are mounted.
+            recreate: Recreate the container even if its spec has not changed.
+
+        Returns:
+            True if the container was (re)created.
+        """
         name = user["name"]
         spec = build_files_spec(user, groups, self._settings)
         with self._locks[name]:
@@ -250,10 +332,20 @@ class FileManagers:
             return True
 
     def stop(self, name: str) -> None:
+        """Stop a user's file manager container, if there is one.
+
+        Args:
+            name: OrbitalWindow user name.
+        """
         with contextlib.suppress(docker.errors.NotFound):
             self._client.containers.get(files_container_name(name)).stop(timeout=5)
 
     def remove(self, name: str) -> None:
+        """Remove a user's file manager container and its network.
+
+        Args:
+            name: OrbitalWindow user name.
+        """
         with self._locks[name]:
             with contextlib.suppress(docker.errors.NotFound):
                 self._client.containers.get(files_container_name(name)).remove(force=True)
@@ -261,12 +353,13 @@ class FileManagers:
                 if net.name != files_network_name(name):
                     continue
                 net.reload()
-                for c in net.containers:
+                for container in net.containers:
                     with contextlib.suppress(docker.errors.APIError):
-                        net.disconnect(c, force=True)
+                        net.disconnect(container, force=True)
                 net.remove()
 
     def _ensure_image(self) -> None:
+        """Pull the FileBrowser image if it is not present."""
         try:
             self._client.images.get(FILES_IMAGE)
         except docker.errors.ImageNotFound:
@@ -274,6 +367,14 @@ class FileManagers:
             self._client.images.pull(FILES_IMAGE)
 
     def _ensure_network(self, name: str) -> Any:
+        """Return the network of a user's file manager, creating it if needed.
+
+        Args:
+            name: OrbitalWindow user name.
+
+        Returns:
+            The Docker network.
+        """
         net_name = files_network_name(name)
         for net in self._client.networks.list(names=[net_name]):
             if net.name == net_name:
@@ -283,12 +384,17 @@ class FileManagers:
         )
 
     def _connect_traefik(self, network: Any) -> None:
+        """Connect the Traefik container to a network, if not already connected.
+
+        Args:
+            network: Docker network.
+        """
         network.reload()
         traefik = self._settings.traefik_container
         if any(c.name == traefik for c in network.containers):
             return
         try:
             network.connect(traefik)
-        except docker.errors.APIError as e:
-            if "already exists" not in str(e):
+        except docker.errors.APIError as exc:
+            if "already exists" not in str(exc):
                 raise

@@ -18,7 +18,8 @@ RUN apt-get update \
 
 COPY root/ /
 
-# Healthy once nginx answers (any HTTP status: basic auth gives 401). OrbitalWindow shows
-# "Starting…" until then, so Open desktop never lands on a 502.
+# Healthy once Selkies (the stream server, port 8082) answers, which is up to a minute after
+# nginx. OrbitalWindow shows "Starting…" and Traefik does not route to the desktop until then, so
+# a browser never connects to a half-started stream server (its page then stays broken).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --start-interval=2s \
-  CMD curl -s -o /dev/null http://127.0.0.1:3000/ || exit 1
+  CMD curl -fs -o /dev/null "http://127.0.0.1:8082${SUBFOLDER:-/}api/status" || exit 1

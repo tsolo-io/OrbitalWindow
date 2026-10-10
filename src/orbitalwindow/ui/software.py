@@ -11,7 +11,12 @@ from .common import PageAuth, guarded, help_icon, service
 
 
 def show_build_log(build_id: int, title: str = "Installation log") -> None:
-    """A dialog that follows a build's log while it runs."""
+    """Open a dialog that follows a build's log while it runs.
+
+    Args:
+        build_id: Id of the build.
+        title: Dialog title.
+    """
     svc = service()
     with ui.dialog().props("maximized=false") as dialog, ui.card().classes("w-full max-w-4xl"):
         with ui.row().classes("w-full items-center justify-between"):
@@ -25,6 +30,7 @@ def show_build_log(build_id: int, title: str = "Installation log") -> None:
         ui.button("Close", on_click=dialog.close).props("no-caps flat")
 
         async def refresh() -> None:
+            """Show the build's latest log and status; stop polling once it has finished."""
             build = await run.io_bound(svc.build_log, build_id)
             if build is None:
                 return
@@ -43,6 +49,11 @@ def show_build_log(build_id: int, title: str = "Installation log") -> None:
 
 
 def software_card(auth: PageAuth) -> None:
+    """Add the software card: add-on switches, extra packages, Apply and the build status.
+
+    Args:
+        auth: Session of the page.
+    """
     svc = service()
     user_id = auth.user.id
     actor = auth.user.name
@@ -77,6 +88,7 @@ def software_card(auth: PageAuth) -> None:
         latest: dict[str, int | None] = {"build": None}
 
         def render_addons() -> None:
+            """Rebuild the list of add-on switches."""
             addons_box.clear()
             with addons_box:
                 states = svc.software.addon_states(user_id)
@@ -96,17 +108,32 @@ def software_card(auth: PageAuth) -> None:
                     switch.on_value_change(guarded(auth, _toggle(spec.key)))
 
         def _toggle(key: str):
-            async def handler(e) -> None:
+            """Make a switch handler that switches one add-on on or off.
+
+            Args:
+                key: Add-on key.
+
+            Returns:
+                An async value-change handler.
+            """
+
+            async def handler(event) -> None:
+                """Save the switch's new value; re-render the switches if it was refused.
+
+                Args:
+                    event: Value-change event of the switch.
+                """
                 try:
-                    await run.io_bound(svc.set_addon, actor, user_id, key, bool(e.value))
-                except ValidationError as err:
-                    ui.notify(str(err), type="negative")
+                    await run.io_bound(svc.set_addon, actor, user_id, key, bool(event.value))
+                except ValidationError as exc:
+                    ui.notify(str(exc), type="negative")
                     render_addons()
                 await refresh_status()
 
             return handler
 
         def render_packages() -> None:
+            """Rebuild the chips of the user's extra packages."""
             packages_box.clear()
             with packages_box:
                 names = svc.software.packages(user_id)
@@ -117,16 +144,31 @@ def software_card(auth: PageAuth) -> None:
                     chip.on("remove", guarded(auth, _remove(name)))
 
         def _remove(name: str):
+            """Make a chip handler that removes one extra package.
+
+            Args:
+                name: Package name.
+
+            Returns:
+                An async remove handler.
+            """
+
             async def handler() -> None:
+                """Remove the package and update the list and status."""
                 await run.io_bound(svc.remove_package, actor, user_id, name)
                 render_packages()
                 await refresh_status()
 
             return handler
 
-        async def on_type(e) -> None:
+        async def on_type(event) -> None:
+            """Suggest package names matching what has been typed so far.
+
+            Args:
+                event: Value-change event of the package input.
+            """
             image_id = svc.db.scalar("SELECT image_id FROM users WHERE id = ?", [user_id])
-            prefix = (e.value or "").strip()
+            prefix = (event.value or "").strip()
             names = await run.io_bound(svc.software.search_packages, image_id, prefix, 12)
             suggestions.clear()
             with suggestions:
@@ -138,17 +180,28 @@ def software_card(auth: PageAuth) -> None:
                         )
 
         def _add(name: str):
+            """Make a click handler that adds a suggested package.
+
+            Args:
+                name: Package name.
+
+            Returns:
+                An async click handler.
+            """
+
             async def handler() -> None:
+                """Put the suggestion into the input and add it."""
                 pkg_input.set_value(name)
                 await on_add()
 
             return handler
 
         async def on_add() -> None:
+            """Add the package from the input and update the list and status."""
             try:
                 name = await run.io_bound(svc.add_package, actor, user_id, pkg_input.value or "")
-            except ValidationError as err:
-                ui.notify(str(err), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             ui.notify(f"Added {name}. Press Apply to install it.")
             pkg_input.set_value("")
@@ -157,10 +210,11 @@ def software_card(auth: PageAuth) -> None:
             await refresh_status()
 
         async def on_apply() -> None:
+            """Start building the user's software, if anything changed, and show the log."""
             try:
                 build_id = await run.io_bound(svc.apply_software, actor, user_id)
-            except ValidationError as err:
-                ui.notify(str(err), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             if build_id is None:
                 ui.notify("Your software is already up to date.")
@@ -170,10 +224,12 @@ def software_card(auth: PageAuth) -> None:
             await refresh_status()
 
         def on_log() -> None:
+            """Show the log of the latest build."""
             if latest["build"]:
                 show_build_log(latest["build"])
 
         async def refresh_status() -> None:
+            """Update the status text, the Apply button and the log button."""
             row = await run.io_bound(svc.software.user_image, user_id)
             pending = await run.io_bound(svc.software_pending, user_id)
             latest["build"] = row["build_id"] if row else None
@@ -196,8 +252,8 @@ def software_card(auth: PageAuth) -> None:
         pkg_input.on("keydown.enter", guarded(auth, on_add))
         add_btn.on_click(guarded(auth, on_add))
         apply_btn.on_click(guarded(auth, on_apply))
-        log_btn.on_click(on_log)
+        log_btn.on_click(guarded(auth, on_log))
         render_addons()
         render_packages()
-        ui.timer(3.0, refresh_status)
-        ui.timer(0.1, refresh_status, once=True)
+        ui.timer(3.0, guarded(auth, refresh_status))
+        ui.timer(0.1, guarded(auth, refresh_status), once=True)

@@ -40,6 +40,18 @@ class Allocation:
 
 
 def validate_name(name: str, *, allow_reserved: bool = False) -> str:
+    """Normalise and check a new user name.
+
+    Args:
+        name: The requested name (case and surrounding spaces are ignored).
+        allow_reserved: Accept names from ``RESERVED_NAMES`` (e.g. for the first admin).
+
+    Returns:
+        The lowercased, stripped name.
+
+    Raises:
+        ValidationError: If the name has the wrong form or is reserved.
+    """
     name = name.strip().lower()
     if not NAME_RE.fullmatch(name):
         raise ValidationError(
@@ -51,6 +63,15 @@ def validate_name(name: str, *, allow_reserved: bool = False) -> str:
 
 
 def validate_password(password: str, min_length: int) -> None:
+    """Check a new password against the password rules.
+
+    Args:
+        password: The new password.
+        min_length: Minimum number of characters.
+
+    Raises:
+        ValidationError: If the password is too short, too long or has surrounding spaces.
+    """
     if len(password) < min_length:
         raise ValidationError(f"The password must be at least {min_length} characters long.")
     if len(password) > 256:
@@ -60,11 +81,31 @@ def validate_password(password: str, min_length: int) -> None:
 
 
 def mac_for(number: int) -> str:
+    """Return the locally administered MAC address for a user number.
+
+    Args:
+        number: The user's allocation number.
+
+    Returns:
+        A MAC address of the form ``02:42:de:5c:xx:xx``.
+    """
     return f"02:42:de:5c:{(number >> 8) & 0xFF:02x}:{number & 0xFF:02x}"
 
 
 def allocate(db: Database) -> Allocation:
-    """Next UID and MAC. Backed by a counter, so numbers of deleted users are never reused."""
+    """Allocate the next UID and MAC.
+
+    Backed by a counter, so numbers of deleted users are never reused.
+
+    Args:
+        db: The application database.
+
+    Returns:
+        The allocated number, UID/GID and MAC address.
+
+    Raises:
+        ValidationError: If no more user numbers are available.
+    """
     number = db.next_counter("user")
     if number > MAX_USERS:
         raise ValidationError("No more user numbers are available.")
@@ -72,10 +113,28 @@ def allocate(db: Database) -> Allocation:
 
 
 def get_user(db: Database, user_id: int) -> dict[str, Any] | None:
+    """Return a user row by id.
+
+    Args:
+        db: The application database.
+        user_id: The user's database id.
+
+    Returns:
+        The user row, or None if there is no such user.
+    """
     return db.one("SELECT * FROM users WHERE id = ?", [user_id])
 
 
 def get_user_by_name(db: Database, name: str) -> dict[str, Any] | None:
+    """Return a user row by name.
+
+    Args:
+        db: The application database.
+        name: The user name.
+
+    Returns:
+        The user row, or None if there is no such user.
+    """
     return db.one("SELECT * FROM users WHERE name = ?", [name])
 
 
@@ -92,7 +151,27 @@ def insert_user(
     quota_gb: float | None,
     allow_reserved: bool = False,
 ) -> dict[str, Any]:
-    """Validate and store a new user row. Side effects (home, Samba) are the caller's job."""
+    """Validate and store a new user row. Side effects (home, Samba) are the caller's job.
+
+    Args:
+        db: The application database.
+        name: The new user name.
+        display_name: Full name shown in the UI; the user name is used when empty.
+        password: The initial password (hashed before storing).
+        is_admin: Whether the user is an administrator.
+        image_id: Desktop image id, or None.
+        cpus: CPU limit, or None for unlimited.
+        mem_gb: Memory limit in GB, or None for unlimited.
+        quota_gb: Home quota in GB, or None for unlimited.
+        allow_reserved: Accept names from ``RESERVED_NAMES``.
+
+    Returns:
+        The stored user row.
+
+    Raises:
+        ValidationError: If the name is not valid or already used by a user or group, or no
+            more user numbers are available.
+    """
     name = validate_name(name, allow_reserved=allow_reserved)
     with db.transaction():
         if get_user_by_name(db, name):
@@ -121,7 +200,16 @@ def insert_user(
 
 
 def set_password_hash(db: Database, user_id: int, password: str) -> int:
-    """Store a new hash and bump the session version (signs out other sessions). Returns it."""
+    """Store a new hash and bump the session version (signs out other sessions).
+
+    Args:
+        db: The application database.
+        user_id: The user's database id.
+        password: The new plain-text password.
+
+    Returns:
+        The new session version.
+    """
     with db.transaction():
         db.execute(
             "UPDATE users SET pw_hash = ?, session_ver = session_ver + 1 WHERE id = ?",
@@ -131,7 +219,17 @@ def set_password_hash(db: Database, user_id: int, password: str) -> int:
 
 
 def parse_limit(value: str | float | None) -> float | None:
-    """'' / None / 0 → unlimited (None); otherwise a positive number."""
+    """Parse a resource limit: '' / None / 0 → unlimited (None); otherwise a positive number.
+
+    Args:
+        value: The limit as entered or stored.
+
+    Returns:
+        The limit, or None for unlimited.
+
+    Raises:
+        ValidationError: If the limit is negative.
+    """
     if value is None or value == "":
         return None
     number = float(value)

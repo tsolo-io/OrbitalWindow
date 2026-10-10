@@ -13,6 +13,7 @@ from orbitalwindow.users import ValidationError
 
 @pytest.fixture
 def user1(service, users):
+    """Fill the package index for base image 1 and return user1."""
     service.db.execute(
         "INSERT INTO pkg_index SELECT 1, unnest(['octave', 'gimp', 'octave-doc', 'r-base'])"
     )
@@ -20,10 +21,20 @@ def user1(service, users):
 
 
 def get(service, user_id):
+    """Return a user's database row by id.
+
+    Args:
+        service: Service under test.
+        user_id: User id.
+
+    Returns:
+        The user row, or None if there is no such user.
+    """
     return service.db.one("SELECT * FROM users WHERE id = ?", [user_id])
 
 
 def test_restricted_addon_needs_grant(service, user1):
+    """A restricted add-on can only be switched on after a grant."""
     states = {s.addon.key: s for s in service.software.addon_states(user1["id"])}
     assert not states["matlab"].available and states["vscode"].available
     with pytest.raises(ValidationError, match="Ask your administrator"):
@@ -34,6 +45,7 @@ def test_restricted_addon_needs_grant(service, user1):
 
 
 def test_disabled_addon_is_not_offered(service, user1):
+    """An add-on disabled by the admin is neither offered nor active."""
     service.set_addon("user1", user1["id"], "vscode", True)
     service.set_addon_enabled("boss", "vscode", False)
     assert "vscode" not in {s.addon.key for s in service.software.addon_states(user1["id"])}
@@ -41,6 +53,7 @@ def test_disabled_addon_is_not_offered(service, user1):
 
 
 def test_restricted_override(service, user1):
+    """The admin can override whether an add-on is restricted."""
     service.set_addon_restricted("boss", "matlab", False)
     service.set_addon("user1", user1["id"], "matlab", True)
     service.set_addon_restricted("boss", "vscode", True)
@@ -49,6 +62,7 @@ def test_restricted_override(service, user1):
 
 
 def test_packages_are_checked_against_the_index(service, user1):
+    """Packages are validated against the package index."""
     assert service.add_package("user1", user1["id"], " Octave ") == "octave"
     with pytest.raises(ValidationError, match="no package called"):
         service.add_package("user1", user1["id"], "does-not-exist")
@@ -60,6 +74,7 @@ def test_packages_are_checked_against_the_index(service, user1):
 
 
 def test_plan_hash(service, user1):
+    """The plan hash changes with packages, add-ons and the base image."""
     uid = user1["id"]
     assert service.software.plan(get(service, uid)).hash is None
     service.add_package("user1", uid, "octave")
@@ -72,6 +87,7 @@ def test_plan_hash(service, user1):
 
 
 def test_user_dockerfile(service, user1):
+    """The user Dockerfile installs add-ons in key order, then packages."""
     uid = user1["id"]
     service.set_addon("user1", uid, "vscode", True)
     service.set_addon("user1", uid, "devtools", True)
@@ -96,6 +112,7 @@ def test_user_dockerfile(service, user1):
 
 
 def test_image_choice_for_start(service, user1):
+    """A start uses the base image, refuses pending changes, then the user image."""
     uid = user1["id"]
     assert service.image_ref_for(get(service, uid)) == "ow-desktop:ubuntu-xfce"
     service.add_package("user1", uid, "octave")
@@ -123,6 +140,7 @@ def test_image_choice_for_start(service, user1):
 
 
 def test_revoke_switches_off_and_stops_desktop_using_mount(service, user1, monkeypatch):
+    """Revoking an add-on switches it off and stops a desktop using it."""
     uid = user1["id"]
     service.grant_addon("boss", uid, "matlab")
     service.set_addon("user1", uid, "matlab", True)
@@ -137,6 +155,7 @@ def test_revoke_switches_off_and_stops_desktop_using_mount(service, user1, monke
 
 
 def test_addon_mounts_and_env_in_spec(service, settings, user1):
+    """Add-on mounts and labels appear in the desktop spec."""
     addons = [service.software.catalog.addons["matlab"]]
     k = build_spec(get(service, user1["id"]), "img", settings, GpuVendor.NONE, "s", addons).kwargs
     mount = k["volumes"][str(settings.root / "shared/matlab")]
@@ -145,6 +164,7 @@ def test_addon_mounts_and_env_in_spec(service, settings, user1):
 
 
 def test_start_refuses_missing_shared_install(service, user1):
+    """A start is refused when an add-on's shared install is missing."""
     uid = user1["id"]
     service.grant_addon("boss", uid, "matlab")
     service.set_addon("user1", uid, "matlab", True)
@@ -157,6 +177,7 @@ def test_start_refuses_missing_shared_install(service, user1):
 
 
 def test_choose_image_drops_unknown_packages_and_rebuilds(service, user1):
+    """Choosing another image drops unknown packages and queues a build."""
     uid = user1["id"]
     service.add_package("user1", uid, "octave")
     service.add_package("user1", uid, "gimp")

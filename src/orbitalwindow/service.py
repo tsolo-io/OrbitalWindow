@@ -71,6 +71,14 @@ class Service:
         db: Database | None = None,
         prepare_layout: bool = True,
     ) -> None:
+        """Wire up the database, Docker helpers and background workers.
+
+        Args:
+            settings: Application settings.
+            client: Docker client used for every container and image operation.
+            db: Database to use; opened from ``settings.db_path`` when None.
+            prepare_layout: Create the host folder layout under the root before anything else.
+        """
         self.settings = settings
         self.client = client
         self.hostops = HostOps(client, str(settings.root))
@@ -81,6 +89,7 @@ class Service:
             self.db, load_or_create_secret(settings.secret_path), settings.session_hours * 3600
         )
         self.limiter = LoginRateLimiter(settings.login_max_failures, settings.login_window_seconds)
+        self._login_slots = threading.BoundedSemaphore(4)
         self.desktops = Desktops(client, self.db, settings)
         self.files = FileManagers(client, settings)
         self.samba = Samba(client, settings.samba_container, settings.samba_state_dir)
@@ -96,6 +105,12 @@ class Service:
     # --- startup -----------------------------------------------------------------------------
 
     def bootstrap(self) -> None:
+        """Prepare a fresh or restarted installation.
+
+        Stores default settings that are missing, rewrites the scratch README, starts the builder,
+        adds the default desktop and the first admin when there are none yet, and syncs Samba.
+        Problems are logged rather than raised.
+        """
         for key, value in DEFAULT_SETTINGS.items():
             if self.db.get_setting(key) is None:
                 self.db.set_setting(key, value)
@@ -108,22 +123,26 @@ class Service:
         try:
             days = int(self.db.get_setting("scratch_retention_days") or 30)
             self.hostops.prepare_layout(os.getuid(), days)
-        except docker.errors.DockerException as e:
-            log.warning("could not update the scratch README: %s", e)
+        except docker.errors.DockerException as exc:
+            log.warning("could not update the scratch README: %s", exc)
         self.builder.start()
         if not self.db.scalar("SELECT count(*) FROM images"):
             try:
                 self.add_image("system", self.settings.default_desktop)
-            except ValidationError as e:
-                log.error("default desktop %r: %s", self.settings.default_desktop, e)
+            except ValidationError as exc:
+                log.error("default desktop %r: %s", self.settings.default_desktop, exc)
         if not self.db.scalar("SELECT count(*) FROM users"):
             self._create_first_admin()
         try:
             self.samba.sync(self.db)
-        except (SambaError, docker.errors.DockerException) as e:
-            log.warning("Samba sync at startup failed: %s", e)
+        except (SambaError, docker.errors.DockerException) as exc:
+            log.warning("Samba sync at startup failed: %s", exc)
 
     def _create_first_admin(self) -> None:
+        """Create the first administrator from ``CONTROL_ADMIN_PASSWORD``.
+
+        Logs a warning and does nothing when no password is configured.
+        """
         secret = self.settings.admin_password
         if secret is None or not secret.get_secret_value():
             log.warning("No users yet and CONTROL_ADMIN_PASSWORD is not set: nobody can log in.")
@@ -136,18 +155,24 @@ class Service:
             is_admin=True,
             allow_reserved=True,
         )
-        for w in result.warnings:
-            log.warning("first admin: %s", w)
+        for warning in result.warnings:
+            log.warning("first admin: %s", warning)
         log.info("Created the first admin %r from CONTROL_ADMIN_PASSWORD", self.settings.admin_name)
 
     def start_reconcile(self) -> None:
+        """Start the reconcile loop in a daemon thread."""
         threading.Thread(target=self._reconcile_loop, name="ow-reconcile", daemon=True).start()
 
     def stop(self) -> None:
+        """Stop the reconcile loop and the image builder."""
         self._reconcile_stop.set()
         self.builder.stop()
 
     def _reconcile_loop(self) -> None:
+        """Run ``reconcile`` every ``reconcile_seconds`` until ``stop`` is called.
+
+        Errors are logged and the loop carries on.
+        """
         while True:
             try:
                 reconcile(self)
@@ -159,11 +184,27 @@ class Service:
     # --- login -------------------------------------------------------------------------------
 
     def login(self, name: str, password: str, client_ip: str) -> str | None:
-        """Return a session token, or None. Raises PermissionError when rate limited."""
+        """Return a session token, or None.
+
+        Failed and successful attempts are audited and counted by the rate limiter.
+
+        Args:
+            name: Login name as typed.
+            password: Password as typed.
+            client_ip: Address of the client, used for rate limiting and the audit log.
+
+        Returns:
+            A session token, or None when the name or password is wrong.
+
+        Raises:
+            PermissionError: When the IP or user is rate limited.
+        """
         keys = (f"ip:{client_ip}", f"user:{name.strip().lower()}")
         if self.limiter.blocked(*keys):
             raise PermissionError("Too many failed attempts. Please wait a few minutes.")
-        row = auth_authenticate(self.db, name, password)
+        # argon2 needs 64 MB per check; cap how many run at once so a login flood can't exhaust RAM.
+        with self._login_slots:
+            row = auth_authenticate(self.db, name, password)
         if row is None:
             self.limiter.failure(*keys)
             self.db.audit(name.strip().lower()[:64] or "?", "login.failed", detail=client_ip)
@@ -172,9 +213,27 @@ class Service:
         self.db.audit(row["name"], "login", detail=client_ip)
         return self.sessions.issue(row["id"], row["session_ver"])
 
+    def logout(self, user_id: int) -> None:
+        """End all sessions of a user by bumping their session version.
+
+        Args:
+            user_id: Id of the user logging out.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        self.db.execute("UPDATE users SET session_ver = session_ver + 1 WHERE id = ?", [user_id])
+        self.db.audit(user["name"], "logout", user["name"])
+
     # --- accounts ----------------------------------------------------------------------------
 
     def _defaults(self) -> dict[str, float | None]:
+        """Return the default limits for new users from the settings.
+
+        Returns:
+            ``cpus``, ``mem_gb`` and ``quota_gb``; None means unlimited/none.
+        """
         return {
             "cpus": users_mod.parse_limit(self.db.get_setting("default_cpus")),
             "mem_gb": users_mod.parse_limit(self.db.get_setting("default_mem_gb")),
@@ -194,6 +253,27 @@ class Service:
         mem_gb: float | None | str = "default",
         allow_reserved: bool = False,
     ) -> Result:
+        """Create a user with home folder, Samba account and file manager.
+
+        Problems after the user row is stored are returned as warnings.
+
+        Args:
+            actor: Name recorded in the audit log.
+            name: Login name of the new user.
+            display_name: Human-readable name.
+            password: Initial password; a generated one is used (and returned) when None.
+            is_admin: Make the user an administrator.
+            image_id: Desktop image; the first enabled one when None.
+            cpus: CPU limit, or ``"default"`` for the configured default.
+            mem_gb: RAM limit in GB, or ``"default"`` for the configured default.
+            allow_reserved: Allow names that are normally reserved.
+
+        Returns:
+            The warnings and, if generated, the password to show once.
+
+        Raises:
+            ValidationError: When the password, limits or user details are not valid.
+        """
         result = Result()
         if password is None:
             password = result.password = generate_password()
@@ -223,20 +303,33 @@ class Service:
         self.db.audit(actor, "user.create", row["name"], "admin" if is_admin else "")
         try:
             self.hostops.create_home(row["name"], row["uid_gid"])
-        except docker.errors.DockerException as e:
+        except docker.errors.DockerException as exc:
             log.exception("create home for %s", row["name"])
-            result.warnings.append(f"The home folder could not be created: {e}")
+            result.warnings.append(f"The home folder could not be created: {exc}")
         try:
             self.samba.sync(self.db)
             self.samba.set_password(row["name"], password)
-        except (SambaError, docker.errors.DockerException) as e:
+        except (SambaError, docker.errors.DockerException) as exc:
             log.exception("samba for %s", row["name"])
-            result.warnings.append(f"Windows file sharing (Samba) was not updated: {e}")
+            result.warnings.append(f"Windows file sharing (Samba) was not updated: {exc}")
         result.warnings += self.ensure_files(row["id"])
         return result
 
     def change_own_password(self, user_id: int, current: str, new: str) -> tuple[int, Result]:
-        """Returns the new session version (so the caller can re-issue its cookie)."""
+        """Change a user's own password after checking the current one.
+
+        Args:
+            user_id: Id of the user changing their password.
+            current: The current password.
+            new: The new password.
+
+        Returns:
+            The new session version (so the caller can re-issue its cookie) and the result of
+            updating the Samba password.
+
+        Raises:
+            ValidationError: When the current password is wrong or the new one is not acceptable.
+        """
         user = users_mod.get_user(self.db, user_id)
         if user is None or auth_authenticate(self.db, user["name"], current) is None:
             raise ValidationError("The current password is not correct.")
@@ -248,6 +341,19 @@ class Service:
         return ver, self._samba_password(user["name"], new)
 
     def admin_set_password(self, actor: str, user_id: int, new: str | None) -> Result:
+        """Set or reset a user's password as an administrator.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user whose password is set.
+            new: The new password; a generated one is used (and returned) when None.
+
+        Returns:
+            Warnings and, if generated, the password to show once.
+
+        Raises:
+            ValidationError: When the user no longer exists or the password is not acceptable.
+        """
         user = self._require_user(user_id)
         result = Result()
         if new is None:
@@ -259,33 +365,77 @@ class Service:
         return result
 
     def _samba_password(self, name: str, password: str) -> Result:
+        """Set the Samba password of a user, turning failures into warnings.
+
+        Args:
+            name: User name.
+            password: The new password.
+
+        Returns:
+            A result with a warning when Samba was not updated.
+        """
         result = Result()
         try:
             self.samba.set_password(name, password)
-        except (SambaError, docker.errors.DockerException) as e:
+        except (SambaError, docker.errors.DockerException) as exc:
             log.exception("samba password for %s", name)
-            result.warnings.append(f"Windows file sharing (Samba) password was not updated: {e}")
+            result.warnings.append(f"Windows file sharing (Samba) password was not updated: {exc}")
         return result
 
     def _require_user(self, user_id: int) -> dict[str, Any]:
+        """Return a user row or fail.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            The user row.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = users_mod.get_user(self.db, user_id)
         if user is None:
             raise ValidationError("That user no longer exists.")
         return user
 
     def list_users(self) -> list[dict[str, Any]]:
+        """Return all users, sorted by name.
+
+        Returns:
+            User rows with the ``image_label`` of their desktop added.
+        """
         return self.db.all(
             "SELECT u.*, i.label AS image_label FROM users u "
             "LEFT JOIN images i ON i.id = u.image_id ORDER BY u.name"
         )
 
     def _admins_left_without(self, user_id: int) -> int:
+        """Count the enabled administrators other than the given user.
+
+        Args:
+            user_id: Id of the user to leave out.
+
+        Returns:
+            The number of other enabled administrators.
+        """
         return self.db.scalar(
             "SELECT count(*) FROM users WHERE is_admin AND NOT disabled AND id <> ?", [user_id]
         )
 
     def _guard_admin_change(self, actor_id: int | None, user: dict[str, Any], what: str) -> None:
-        """Admins may not lock themselves out, and there must always be an enabled admin."""
+        """Check that a change does not lock an admin out.
+
+        Admins may not lock themselves out, and there must always be an enabled admin.
+
+        Args:
+            actor_id: Id of the acting user, or None for the system.
+            user: The user being changed.
+            what: Verb for the error message, e.g. ``"disable"``.
+
+        Raises:
+            ValidationError: When the change targets the actor or the last enabled administrator.
+        """
         if actor_id is not None and user["id"] == actor_id:
             raise ValidationError(f"You cannot {what} your own account.")
         if user["is_admin"] and not user["disabled"] and not self._admins_left_without(user["id"]):
@@ -294,7 +444,22 @@ class Service:
     def set_disabled(
         self, actor: str, actor_id: int | None, user_id: int, disabled: bool
     ) -> Result:
-        """Disable: block login, desktop and Samba, end sessions. Enable: reverse (no desktop)."""
+        """Disable or enable a user.
+
+        Disable: block login, desktop and Samba, end sessions. Enable: reverse (no desktop).
+
+        Args:
+            actor: Name recorded in the audit log.
+            actor_id: Id of the acting user, or None for the system.
+            user_id: Id of the user to change.
+            disabled: True to disable, False to enable.
+
+        Returns:
+            Warnings about the desktop, file manager or Samba.
+
+        Raises:
+            ValidationError: When the user no longer exists or the change would lock an admin out.
+        """
         user = self._require_user(user_id)
         result = Result()
         if disabled:
@@ -306,23 +471,38 @@ class Service:
             try:
                 self.desktops.stop(user)
                 self.files.stop(user["name"])
-            except docker.errors.DockerException as e:
-                result.warnings.append(f"The desktop could not be stopped: {e}")
+            except docker.errors.DockerException as exc:
+                result.warnings.append(f"The desktop could not be stopped: {exc}")
         else:
             self.db.execute("UPDATE users SET disabled = false WHERE id = ?", [user_id])
             result.warnings += self.ensure_files(user_id)
         try:
             self.samba.set_enabled(user["name"], not disabled)
-        except (SambaError, docker.errors.DockerException) as e:
-            result.warnings.append(f"Windows file sharing (Samba) was not updated: {e}")
+        except (SambaError, docker.errors.DockerException) as exc:
+            result.warnings.append(f"Windows file sharing (Samba) was not updated: {exc}")
         self.db.audit(actor, "user.disable" if disabled else "user.enable", user["name"])
         return result
 
     def delete_user(
         self, actor: str, actor_id: int | None, user_id: int, delete_home: bool = False
     ) -> Result:
-        """Remove the user and everything OrbitalWindow made for them. The home folder is kept
-        unless ``delete_home``. UID and MAC are never reused. Audit rows are kept."""
+        """Remove the user and everything OrbitalWindow made for them.
+
+        The home folder is kept unless ``delete_home``. UID and MAC are never reused. Audit rows
+        are kept.
+
+        Args:
+            actor: Name recorded in the audit log.
+            actor_id: Id of the acting user, or None for the system.
+            user_id: Id of the user to delete.
+            delete_home: Also remove the home folder.
+
+        Returns:
+            Warnings, including where the home folder was kept.
+
+        Raises:
+            ValidationError: When the user no longer exists or the change would lock an admin out.
+        """
         user = self._require_user(user_id)
         self._guard_admin_change(actor_id, user, "delete")
         name = user["name"]
@@ -331,8 +511,8 @@ class Service:
             self.desktops.stop(user)
             self.files.remove(name)
             self.hostops.remove_files_data(name)
-        except docker.errors.DockerException as e:
-            result.warnings.append(f"The desktop or file manager could not be removed: {e}")
+        except docker.errors.DockerException as exc:
+            result.warnings.append(f"The desktop or file manager could not be removed: {exc}")
         self.builder.remove_user_image(name)
         ssh_mod.remove_upstream_key(self.settings.state_dir, name)
         with self.db.transaction():
@@ -349,20 +529,31 @@ class Service:
             self.db.execute("DELETE FROM users WHERE id = ?", [user_id])
         try:
             self.samba.remove_user(name, self.db)
-        except (SambaError, docker.errors.DockerException) as e:
-            result.warnings.append(f"Windows file sharing (Samba) was not updated: {e}")
+        except (SambaError, docker.errors.DockerException) as exc:
+            result.warnings.append(f"Windows file sharing (Samba) was not updated: {exc}")
         home = self.settings.users_dir / name
         if delete_home:
             try:
                 self.hostops.remove_home(name)
-            except docker.errors.DockerException as e:
-                result.warnings.append(f"The home folder {home} could not be removed: {e}")
+            except docker.errors.DockerException as exc:
+                result.warnings.append(f"The home folder {home} could not be removed: {exc}")
         else:
             result.warnings.append(f"The home folder was kept: {home}")
         self.db.audit(actor, "user.delete", name, "home deleted" if delete_home else "home kept")
         return result
 
     def set_admin(self, actor: str, actor_id: int | None, user_id: int, is_admin: bool) -> None:
+        """Grant or remove administrator rights.
+
+        Args:
+            actor: Name recorded in the audit log.
+            actor_id: Id of the acting user, or None for the system.
+            user_id: Id of the user to change.
+            is_admin: True to grant, False to remove administrator rights.
+
+        Raises:
+            ValidationError: When the user no longer exists or the change would lock an admin out.
+        """
         user = self._require_user(user_id)
         if not is_admin:
             self._guard_admin_change(actor_id, user, "remove administrator rights from")
@@ -372,7 +563,19 @@ class Service:
     def set_limits(
         self, actor: str, user_id: int, cpus: float | str | None, mem_gb: float | str | None
     ) -> None:
-        """CPU and RAM limits (None/empty/0 = unlimited). They apply at the next start."""
+        """Set a user's CPU and RAM limits.
+
+        None/empty/0 means unlimited. They apply at the next start.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            cpus: CPU limit.
+            mem_gb: RAM limit in GB.
+
+        Raises:
+            ValidationError: When the user no longer exists or the limits are not valid.
+        """
         user = self._require_user(user_id)
         cpus_v, mem_v = _validate_limits(cpus, mem_gb)
         self.db.execute(
@@ -381,13 +584,32 @@ class Service:
         self.db.audit(actor, "user.limits", user["name"], f"cpus={cpus_v} mem_gb={mem_v}")
 
     def set_quota(self, actor: str, user_id: int, quota_gb: Any) -> None:
-        """Soft disk quota for the home folder (empty = none)."""
+        """Set the soft disk quota for a user's home folder (empty = none).
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            quota_gb: Quota in GB, or empty for none.
+
+        Raises:
+            ValidationError: When the user no longer exists or the quota is not valid.
+        """
         user = self._require_user(user_id)
         quota = _parse_quota(quota_gb)
         self.db.execute("UPDATE users SET quota_gb = ? WHERE id = ?", [quota, user_id])
         self.db.audit(actor, "user.quota", user["name"], str(quota))
 
     def set_display_name(self, actor: str, user_id: int, display_name: str) -> None:
+        """Change a user's display name.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            display_name: The new name (1–80 characters after trimming).
+
+        Raises:
+            ValidationError: When the user no longer exists or the name is empty or too long.
+        """
         user = self._require_user(user_id)
         display_name = display_name.strip()
         if not display_name or len(display_name) > 80:
@@ -398,7 +620,20 @@ class Service:
     # --- file manager ------------------------------------------------------------------------
 
     def ensure_files(self, user_id: int, *, recreate: bool = False) -> list[str]:
-        """Start (or recreate) the user's file manager. Returns warnings instead of raising."""
+        """Start (or recreate) the user's file manager.
+
+        Returns warnings instead of raising. Does nothing for disabled users.
+
+        Args:
+            user_id: Id of the user.
+            recreate: Recreate the file manager data and container even if they exist.
+
+        Returns:
+            Warnings; empty when all went well.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         if user["disabled"]:
             return []
@@ -406,12 +641,20 @@ class Service:
             if recreate or not self._files_exists(user["name"]):
                 self.hostops.create_files_data(user["name"], user["uid_gid"])
             self.files.ensure(user, groups_mod.groups_of(self.db, user_id), recreate=recreate)
-        except docker.errors.DockerException as e:
+        except docker.errors.DockerException as exc:
             log.exception("file manager for %s", user["name"])
-            return [f"The web file manager could not be started: {e}"]
+            return [f"The web file manager could not be started: {exc}"]
         return []
 
     def _files_exists(self, name: str) -> bool:
+        """Return whether the user's file manager container exists.
+
+        Args:
+            name: User name.
+
+        Returns:
+            True when the container exists.
+        """
         try:
             self.client.containers.get(files_container_name(name))
         except docker.errors.NotFound:
@@ -421,6 +664,14 @@ class Service:
     # --- SSH keys ----------------------------------------------------------------------------
 
     def ssh_keys(self, user_id: int) -> list[dict[str, Any]]:
+        """Return a user's SSH public keys, oldest first.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            Key rows with id, label, fingerprint, public key and when it was added.
+        """
         return self.db.all(
             "SELECT id, label, fingerprint, pubkey, added_at FROM ssh_keys "
             "WHERE user_id = ? ORDER BY added_at",
@@ -428,6 +679,21 @@ class Service:
         )
 
     def add_ssh_key(self, actor: str, user_id: int, label: str, text: str) -> dict[str, Any]:
+        """Add an SSH public key to a user.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            label: Label for the key.
+            text: The public key line as pasted.
+
+        Returns:
+            The stored ``label`` and the key's ``fingerprint``.
+
+        Raises:
+            ValidationError: When the key or label is not valid, the user has too many keys or
+                already has this key.
+        """
         user = self._require_user(user_id)
         key = ssh_mod.parse_public_key(text)
         label = ssh_mod.validate_label(label, key)
@@ -447,6 +713,16 @@ class Service:
         return {"label": label, "fingerprint": key.fingerprint}
 
     def remove_ssh_key(self, actor: str, user_id: int, key_id: int) -> None:
+        """Remove one of a user's SSH keys.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            key_id: Id of the key.
+
+        Raises:
+            ValidationError: When the user or the key no longer exists.
+        """
         user = self._require_user(user_id)
         row = self.db.one("SELECT * FROM ssh_keys WHERE id = ? AND user_id = ?", [key_id, user_id])
         if row is None:
@@ -456,6 +732,14 @@ class Service:
         self.db.audit(actor, "ssh.key.remove", user["name"], detail)
 
     def _ssh_access(self, user: dict[str, Any]) -> SshAccess:
+        """Build the SSH gateway settings for starting a user's desktop.
+
+        Args:
+            user: The user row.
+
+        Returns:
+            The sshpiper labels for the user's keys and the path of the upstream public key.
+        """
         private, _ = ssh_mod.ensure_upstream_key(self.settings.state_dir, user["name"])
         keys = [k["pubkey"] for k in self.ssh_keys(user["id"])]
         return SshAccess(
@@ -464,7 +748,17 @@ class Service:
         )
 
     def ssh_restart_needed(self, user_id: int) -> bool:
-        """True when the running desktop has other SSH keys than the user has now."""
+        """Return whether the desktop needs a restart for SSH key changes.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            True when the running desktop has other SSH keys than the user has now.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         try:
             container = self.client.containers.get(container_name(user["name"]))
@@ -478,42 +772,109 @@ class Service:
         return running != wanted
 
     def ssh_command(self, user_name: str) -> str:
+        """Return the ``ssh`` command a user runs to reach their desktop.
+
+        Args:
+            user_name: User name.
+
+        Returns:
+            The command line with the SSH port and public host name.
+        """
         return f"ssh -p {self.settings.ssh_port} {user_name}@{self.public_hostname()}"
 
     # --- groups ------------------------------------------------------------------------------
 
     def list_groups(self) -> list[dict[str, Any]]:
+        """Return all groups.
+
+        Returns:
+            Group rows.
+        """
         return groups_mod.list_groups(self.db)
 
     def groups_of(self, user_id: int) -> list[dict[str, Any]]:
+        """Return the groups a user is a member of.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            Group rows.
+        """
         return groups_mod.groups_of(self.db, user_id)
 
     def group_members(self, group_id: int) -> list[dict[str, Any]]:
+        """Return the members of a group.
+
+        Args:
+            group_id: Id of the group.
+
+        Returns:
+            User rows of the members.
+        """
         return groups_mod.members(self.db, group_id)
 
     def create_group(
         self, actor: str, name: str, description: str = "", quota_gb: Any = None
     ) -> Result:
+        """Create a group with its shared folder, and update Samba.
+
+        Args:
+            actor: Name recorded in the audit log.
+            name: Group name.
+            description: Free-text description.
+            quota_gb: Soft quota in GB, or empty for none.
+
+        Returns:
+            Warnings about the folder or Samba.
+
+        Raises:
+            ValidationError: When the name or quota is not valid.
+        """
         quota = _parse_quota(quota_gb)
         group = groups_mod.insert_group(self.db, name, description, quota)
         self.db.audit(actor, "group.create", group["name"], f"gid={group['gid']}")
         result = Result()
         try:
             self.hostops.create_group_dir(group["name"], group["gid"])
-        except docker.errors.DockerException as e:
-            result.warnings.append(f"The group folder could not be created: {e}")
+        except docker.errors.DockerException as exc:
+            result.warnings.append(f"The group folder could not be created: {exc}")
         result.warnings += self._sync_samba()
         return result
 
     def set_group_quota(self, actor: str, group_id: int, quota_gb: Any) -> None:
+        """Set the soft disk quota of a group folder (empty = none).
+
+        Args:
+            actor: Name recorded in the audit log.
+            group_id: Id of the group.
+            quota_gb: Quota in GB, or empty for none.
+
+        Raises:
+            ValidationError: When the group no longer exists or the quota is not valid.
+        """
         group = self._require_group(group_id)
         quota = _parse_quota(quota_gb)
         self.db.execute("UPDATE groups SET quota_gb = ? WHERE id = ?", [quota, group_id])
         self.db.audit(actor, "group.quota", group["name"], str(quota))
 
     def set_group_members(self, actor: str, group_id: int, user_ids: list[int]) -> Result:
-        """Replace the member list. Samba and file managers follow at once; running desktops
-        see the change after a restart (the dashboard says so)."""
+        """Replace the member list of a group.
+
+        Samba and file managers follow at once; running desktops see the change after a restart
+        (the dashboard says so).
+
+        Args:
+            actor: Name recorded in the audit log.
+            group_id: Id of the group.
+            user_ids: Ids of all users who should be members.
+
+        Returns:
+            Warnings about Samba or file managers.
+
+        Raises:
+            ValidationError: When the group or some of the users no longer exist.
+        """
         group = self._require_group(group_id)
         before = {m["id"] for m in groups_mod.members(self.db, group_id)}
         after = set(user_ids)
@@ -535,6 +896,19 @@ class Service:
         return result
 
     def delete_group(self, actor: str, group_id: int, delete_folder: bool = False) -> Result:
+        """Delete a group and update Samba and the members' file managers.
+
+        Args:
+            actor: Name recorded in the audit log.
+            group_id: Id of the group.
+            delete_folder: Also remove the group folder; otherwise it is kept.
+
+        Returns:
+            Warnings, including where the folder was kept.
+
+        Raises:
+            ValidationError: When the group no longer exists.
+        """
         group = self._require_group(group_id)
         member_ids = [m["id"] for m in groups_mod.members(self.db, group_id)]
         with self.db.transaction():
@@ -551,8 +925,8 @@ class Service:
         if delete_folder:
             try:
                 self.hostops.remove_group_dir(group["name"])
-            except docker.errors.DockerException as e:
-                result.warnings.append(f"The folder {folder} could not be removed: {e}")
+            except docker.errors.DockerException as exc:
+                result.warnings.append(f"The folder {folder} could not be removed: {exc}")
         else:
             result.warnings.append(f"The group folder was kept: {folder}")
         detail = "folder deleted" if delete_folder else "folder kept"
@@ -560,7 +934,17 @@ class Service:
         return result
 
     def group_restart_needed(self, user_id: int) -> bool:
-        """True when the running desktop was started with other groups than the user has now."""
+        """Return whether the desktop needs a restart for group changes.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            True when the running desktop was started with other groups than the user has now.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         running = self.desktops.groups_in_use(user["name"])
         if running is None:
@@ -568,31 +952,73 @@ class Service:
         return running != {g["name"] for g in groups_mod.groups_of(self.db, user_id)}
 
     def _require_group(self, group_id: int) -> dict[str, Any]:
+        """Return a group row or fail.
+
+        Args:
+            group_id: Id of the group.
+
+        Returns:
+            The group row.
+
+        Raises:
+            ValidationError: When the group no longer exists.
+        """
         group = groups_mod.get_group(self.db, group_id)
         if group is None:
             raise ValidationError("That group no longer exists.")
         return group
 
     def _sync_samba(self) -> list[str]:
+        """Sync Samba users and shares with the database, turning failures into warnings.
+
+        Returns:
+            A warning when Samba was not updated; empty otherwise.
+        """
         try:
             self.samba.sync(self.db)
-        except (SambaError, docker.errors.DockerException) as e:
+        except (SambaError, docker.errors.DockerException) as exc:
             log.exception("samba sync")
-            return [f"Windows file sharing (Samba) was not updated: {e}"]
+            return [f"Windows file sharing (Samba) was not updated: {exc}"]
         return []
 
     # --- disk --------------------------------------------------------------------------------
 
     def disk_usage_for(self, user_id: int) -> DiskUsage:
+        """Return the disk usage of a user's home folder.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            The last measured usage and quota.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         return disk.usage_for_user(self.db, self._require_user(user_id))
 
     def disk_overview(self) -> tuple[list[DiskUsage], HostSpace]:
+        """Return disk usage of all homes and group folders, and free host space.
+
+        Returns:
+            The usage rows and the space on the file system holding the data root.
+        """
         return disk.all_usage(self.db), disk.host_space(self.settings.root)
 
     def measure_disk(self) -> int:
+        """Measure disk usage of homes, group folders and scratch, and store it.
+
+        Returns:
+            The number of folders measured.
+        """
         return disk.measure(self.db, self.hostops)
 
     def clean_scratch(self) -> int:
+        """Remove scratch items older than the configured retention.
+
+        Returns:
+            The number of items removed.
+        """
         days = int(self.db.get_setting("scratch_retention_days") or 30)
         removed = disk.clean_scratch(self.hostops, days)
         detail = f"{removed} item(s), older than {days} days"
@@ -602,14 +1028,32 @@ class Service:
     # --- settings ----------------------------------------------------------------------------
 
     def get_settings(self) -> dict[str, str]:
+        """Return all stored settings.
+
+        Returns:
+            Setting values by key.
+        """
         rows = self.db.all("SELECT key, value FROM settings")
         return {r["key"]: r["value"] for r in rows}
 
     def public_hostname(self) -> str:
+        """Return the host name users connect to.
+
+        Returns:
+            The ``hostname`` setting, or the configured host name when it is not set.
+        """
         return self.db.get_setting("hostname") or self.settings.hostname
 
     def update_settings(self, actor: str, values: dict[str, Any]) -> None:
-        """Validate and store admin-editable settings (only the keys given)."""
+        """Validate and store admin-editable settings (only the keys given).
+
+        Args:
+            actor: Name recorded in the audit log.
+            values: New values by setting key.
+
+        Raises:
+            ValidationError: When a value is not valid.
+        """
         clean: dict[str, str] = {}
         if "default_cpus" in values or "default_mem_gb" in values:
             cpus, mem = _validate_limits(values.get("default_cpus"), values.get("default_mem_gb"))
@@ -642,6 +1086,15 @@ class Service:
     # --- audit and metrics -------------------------------------------------------------------
 
     def audit_log(self, search: str = "", limit: int = 200) -> list[dict[str, Any]]:
+        """Return audit entries, newest first.
+
+        Args:
+            search: Text to look for in actor, action, target or detail; empty for all.
+            limit: Maximum number of entries.
+
+        Returns:
+            Audit rows.
+        """
         like = f"%{search.strip()}%"
         return self.db.all(
             "SELECT * FROM audit WHERE ? = '%%' OR actor ILIKE ? OR action ILIKE ? "
@@ -650,15 +1103,31 @@ class Service:
         )
 
     def _managed_ids(self) -> dict[str, str]:
-        """Full container ID → name of every OrbitalWindow container (one Docker call)."""
+        """Return full container ID → name of every OrbitalWindow container (one Docker call).
+
+        Returns:
+            Container names keyed by full container ID.
+        """
         containers = self.client.containers.list(filters={"label": "ow.managed=true"}, sparse=True)
         return {c.id: c.attrs.get("Names", [c.id])[0].lstrip("/") for c in containers}
 
     def usage_all(self) -> dict[str, Usage]:
-        """CPU/RAM per container name (empty if cAdvisor is unreachable)."""
+        """Return CPU/RAM per container name (empty if cAdvisor is unreachable).
+
+        Returns:
+            Usage keyed by container name.
+        """
         return self.metrics.usage(self._managed_ids())
 
     def usage_for(self, name: str) -> Usage | None:
+        """Return the CPU/RAM use of a user's desktop.
+
+        Args:
+            name: User name.
+
+        Returns:
+            The usage, or None when the desktop does not exist or has no data.
+        """
         try:
             cid = self.client.containers.get(container_name(name)).id
         except docker.errors.NotFound:
@@ -666,16 +1135,20 @@ class Service:
         return self.metrics.usage({cid: container_name(name)}).get(container_name(name))
 
     def system_overview(self) -> list[dict[str, Any]]:
-        """One row per user: desktop state, image, CPU/RAM use and limits."""
+        """Return one row per user: desktop state, image, CPU/RAM use and limits.
+
+        Returns:
+            User rows with ``state``, ``cpu_cores`` and ``mem_bytes`` added.
+        """
         states = self.desktops.states()
         usage = self.usage_all()
         rows = []
-        for u in self.list_users():
-            use = usage.get(container_name(u["name"]))
+        for user in self.list_users():
+            use = usage.get(container_name(user["name"]))
             rows.append(
-                u
+                user
                 | {
-                    "state": states.get(u["name"], DesktopState.STOPPED).value,
+                    "state": states.get(user["name"], DesktopState.STOPPED).value,
                     "cpu_cores": use.cpu_cores if use else None,
                     "mem_bytes": use.mem_bytes if use else None,
                 }
@@ -685,6 +1158,20 @@ class Service:
     # --- desktops ----------------------------------------------------------------------------
 
     def desktop_state(self, user_id: int) -> DesktopState:
+        """Return the state of a user's desktop.
+
+        A stopped desktop is reported as building while its desktop image or the user's software
+        is being built for the first time.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            The desktop state.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         state = self.desktops.state(user["name"])
         if state is DesktopState.STOPPED and user["image_id"] is not None:
@@ -702,10 +1189,31 @@ class Service:
 
     @staticmethod
     def _usable_user_image(user: dict[str, Any], row: dict[str, Any] | None) -> bool:
+        """Return whether a per-user image is built and based on the user's current desktop.
+
+        Args:
+            user: The user row.
+            row: The user's per-user image row, or None.
+
+        Returns:
+            True when the per-user image can be used to start the desktop.
+        """
         return bool(row and row["built_at"] and row["built_from_image_id"] == user["image_id"])
 
     def image_ref_for(self, user: dict[str, Any]) -> str:
-        """The image a start uses: the per-user image if the user needs one, else the desktop."""
+        """Return the image a start uses.
+
+        The per-user image if the user needs one, else the desktop.
+
+        Args:
+            user: The user row.
+
+        Returns:
+            The Docker image reference.
+
+        Raises:
+            DesktopError: When no usable desktop or per-user image is available yet.
+        """
         if user["image_id"] is None:
             raise DesktopError("No desktop has been chosen yet.")
         image = self.db.one("SELECT * FROM images WHERE id = ?", [user["image_id"]])
@@ -728,7 +1236,17 @@ class Service:
         )
 
     def restart_needed(self, user_id: int) -> bool:
-        """True when the running desktop was started with other software than it would get now."""
+        """Return whether the desktop needs a restart for software changes.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            True when the running desktop was started with other software than it would get now.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         try:
             ref = self.image_ref_for(user)
@@ -740,6 +1258,16 @@ class Service:
         return container.image.id != current or active != self.desktops.addons_in_use(user["name"])
 
     def start_desktop(self, actor: str, user_id: int) -> None:
+        """Start a user's desktop with their add-ons, groups and SSH access.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+            DesktopError: When the desktop cannot be started.
+        """
         user = self._require_user(user_id)
         addons = self.software.active_addons(user_id)
         self.desktops.start(
@@ -752,6 +1280,16 @@ class Service:
         self.db.audit(actor, "desktop.start", user["name"])
 
     def stop_desktop(self, actor: str, user_id: int, by_admin: bool = False) -> None:
+        """Stop a user's desktop.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            by_admin: Mark the desktop as stopped by an administrator.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         self.desktops.stop(user)
         if by_admin:
@@ -759,6 +1297,20 @@ class Service:
         self.db.audit(actor, "desktop.stop", user["name"], "by admin" if by_admin else "")
 
     def choose_image(self, actor: str, user_id: int, image_id: int) -> None:
+        """Switch a user to another desktop image.
+
+        Packages that do not exist for the new desktop are dropped, and a per-user build is
+        queued when needed.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            image_id: Id of the desktop image.
+
+        Raises:
+            ValidationError: When the user no longer exists, the desktop is not available or the
+                user's desktop is not stopped.
+        """
         user = self._require_user(user_id)
         image = self.db.one("SELECT * FROM images WHERE id = ? AND enabled", [image_id])
         if image is None:
@@ -776,6 +1328,17 @@ class Service:
             self.builder.queue_user(user_id)
 
     def _drop_unknown_packages(self, user_id: int, image_id: int) -> list[str]:
+        """Remove the user's packages that the desktop's package index does not know.
+
+        Nothing is removed when the desktop has no package index.
+
+        Args:
+            user_id: Id of the user.
+            image_id: Id of the desktop image.
+
+        Returns:
+            Names of the removed packages.
+        """
         if not self.db.scalar("SELECT count(*) FROM pkg_index WHERE image_id = ?", [image_id]):
             return []
         rows = self.db.all(
@@ -789,28 +1352,77 @@ class Service:
         return names
 
     def enabled_images(self) -> list[dict[str, Any]]:
+        """Return the enabled desktop images, sorted by label.
+
+        Returns:
+            Image rows.
+        """
         return self.db.all("SELECT * FROM images WHERE enabled ORDER BY label")
 
     # --- software (add-ons and packages) -----------------------------------------------------
 
     def set_addon(self, actor: str, user_id: int, key: str, on: bool) -> None:
+        """Switch an add-on on or off for a user.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            key: Add-on key.
+            on: True to switch it on.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         self.software.set_addon(user_id, key, on)
         self.db.audit(actor, "addon.on" if on else "addon.off", user["name"], key)
 
     def add_package(self, actor: str, user_id: int, name: str) -> str:
+        """Add a package to a user's software selection.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            name: Package name as typed.
+
+        Returns:
+            The package name as stored.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         name = self.software.add_package(user_id, user["image_id"], name)
         self.db.audit(actor, "package.add", user["name"], name)
         return name
 
     def remove_package(self, actor: str, user_id: int, name: str) -> None:
+        """Remove a package from a user's software selection.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            name: Package name.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         self.software.remove_package(user_id, name)
         self.db.audit(actor, "package.remove", user["name"], name)
 
     def software_pending(self, user_id: int) -> bool:
-        """True when the add-on/package selection differs from the last good per-user image."""
+        """Return whether the user's software selection needs a new build.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            True when the add-on/package selection differs from the last good per-user image.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         if user["image_id"] is None:
             return False
@@ -819,7 +1431,18 @@ class Service:
         return not self.software.up_to_date(user)
 
     def apply_software(self, actor: str, user_id: int) -> int | None:
-        """Queue a per-user build if anything changed. Returns the build id, or None."""
+        """Queue a per-user build if anything changed.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+
+        Returns:
+            The build id, or None when nothing changed.
+
+        Raises:
+            ValidationError: When the user no longer exists or the desktop is still being prepared.
+        """
         user = self._require_user(user_id)
         if not self.software_pending(user_id):
             return None
@@ -831,10 +1454,22 @@ class Service:
         return build_id
 
     def build_log(self, build_id: int) -> dict[str, Any] | None:
+        """Return a build row, including its log.
+
+        Args:
+            build_id: Id of the build.
+
+        Returns:
+            The build row, or None when it does not exist.
+        """
         return self.db.one("SELECT * FROM builds WHERE id = ?", [build_id])
 
     def _rebuild_users_of(self, image_id: int) -> None:
-        """After a desktop is rebuilt, rebuild the per-user images built on it."""
+        """After a desktop is rebuilt, rebuild the per-user images built on it.
+
+        Args:
+            image_id: Id of the rebuilt desktop image.
+        """
         for user in self.db.all("SELECT * FROM users WHERE image_id = ?", [image_id]):
             if self.software.plan(user).hash is not None:
                 self.builder.queue_user(user["id"])
@@ -842,6 +1477,14 @@ class Service:
     # --- add-on administration ---------------------------------------------------------------
 
     def reload_addons(self, actor: str) -> list[str]:
+        """Reload the add-on catalog and rebuild per-user images that changed.
+
+        Args:
+            actor: Name recorded in the audit log.
+
+        Returns:
+            One ``key: error`` line per add-on that failed to load.
+        """
         catalog = self.software.reload()
         self.db.audit(actor, "addons.reload", detail=f"{len(catalog.addons)} ok, "
                       f"{len(catalog.errors)} with errors")  # fmt: skip
@@ -855,17 +1498,41 @@ class Service:
                 self.builder.queue_user(row["user_id"])
 
     def set_addon_enabled(self, actor: str, key: str, enabled: bool) -> None:
+        """Enable or disable an add-on for everyone and rebuild affected images.
+
+        Args:
+            actor: Name recorded in the audit log.
+            key: Add-on key.
+            enabled: True to enable.
+        """
         self.db.execute("UPDATE addon_settings SET enabled = ? WHERE key = ?", [enabled, key])
         self.db.audit(actor, "addon.enable" if enabled else "addon.disable", key)
         self._rebuild_stale()
 
     def set_addon_restricted(self, actor: str, key: str, restricted: bool | None) -> None:
+        """Override whether an add-on needs a grant.
+
+        Args:
+            actor: Name recorded in the audit log.
+            key: Add-on key.
+            restricted: True or False to override, None to use the add-on's own setting.
+        """
         self.db.execute(
             "UPDATE addon_settings SET restricted_override = ? WHERE key = ?", [restricted, key]
         )
         self.db.audit(actor, "addon.restricted", key, str(restricted))
 
     def grant_addon(self, actor: str, user_id: int, key: str) -> None:
+        """Allow a user to use a restricted add-on.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            key: Add-on key.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         self.db.execute(
             "INSERT INTO addon_grants VALUES (?, ?) ON CONFLICT DO NOTHING", [user_id, key]
@@ -873,7 +1540,19 @@ class Service:
         self.db.audit(actor, "addon.grant", user["name"], key)
 
     def revoke_addon(self, actor: str, user_id: int, key: str) -> Result:
-        """Revoke a grant: switch the add-on off, and stop the desktop if it uses its mounts."""
+        """Revoke a grant: switch the add-on off, and stop the desktop if it uses its mounts.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            key: Add-on key.
+
+        Returns:
+            A warning when the desktop was stopped.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
         user = self._require_user(user_id)
         result = Result()
         with self.db.transaction():
@@ -891,12 +1570,33 @@ class Service:
         return result
 
     def grants(self, user_id: int) -> set[str]:
+        """Return the restricted add-ons a user has been granted.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            Add-on keys.
+        """
         rows = self.db.all("SELECT key FROM addon_grants WHERE user_id = ?", [user_id])
         return {r["key"] for r in rows}
 
     # --- images ------------------------------------------------------------------------------
 
     def add_image(self, actor: str, base_tag: str, label: str | None = None) -> int:
+        """Add a desktop image and queue its build.
+
+        Args:
+            actor: Name recorded in the audit log.
+            base_tag: Image tag, for example ``ubuntu-xfce``.
+            label: Display label; derived from the tag when empty.
+
+        Returns:
+            The id of the new image.
+
+        Raises:
+            ValidationError: When the tag is not valid or the desktop already exists.
+        """
         base_tag = base_tag.strip()
         if not TAG_RE.fullmatch(base_tag):
             raise ValidationError("That is not a valid image tag (for example: ubuntu-xfce).")
@@ -911,6 +1611,11 @@ class Service:
         return image_id
 
     def list_images(self) -> list[dict[str, Any]]:
+        """Return all desktop images, sorted by label.
+
+        Returns:
+            Image rows with the number of ``users`` and indexed ``packages`` added.
+        """
         return self.db.all(
             "SELECT i.*, (SELECT count(*) FROM users u WHERE u.image_id = i.id) AS users, "
             "(SELECT count(*) FROM pkg_index p WHERE p.image_id = i.id) AS packages "
@@ -918,6 +1623,18 @@ class Service:
         )
 
     def rebuild_image(self, actor: str, image_id: int) -> int:
+        """Queue a rebuild of a desktop image.
+
+        Args:
+            actor: Name recorded in the audit log.
+            image_id: Id of the image.
+
+        Returns:
+            The build id.
+
+        Raises:
+            ValidationError: When the image no longer exists or is already being built.
+        """
         image = self._require_image(image_id)
         if image["status"] == "building":
             raise ValidationError("This desktop is already being built.")
@@ -925,11 +1642,31 @@ class Service:
         return self.builder.queue_base(image_id)
 
     def set_image_enabled(self, actor: str, image_id: int, enabled: bool) -> None:
+        """Enable or disable a desktop image for users to choose.
+
+        Args:
+            actor: Name recorded in the audit log.
+            image_id: Id of the image.
+            enabled: True to enable.
+
+        Raises:
+            ValidationError: When the image no longer exists.
+        """
         image = self._require_image(image_id)
         self.db.execute("UPDATE images SET enabled = ? WHERE id = ?", [enabled, image_id])
         self.db.audit(actor, "image.enable" if enabled else "image.disable", image["base_tag"])
 
     def remove_image(self, actor: str, image_id: int) -> None:
+        """Remove a desktop image that no user uses, including its Docker image.
+
+        Args:
+            actor: Name recorded in the audit log.
+            image_id: Id of the image.
+
+        Raises:
+            ValidationError: When the image no longer exists, users still use it or it is being
+                built.
+        """
         image = self._require_image(image_id)
         if self.db.scalar("SELECT count(*) FROM users WHERE image_id = ?", [image_id]):
             raise ValidationError("Users still use this desktop. Move them to another one first.")
@@ -942,11 +1679,22 @@ class Service:
             self.client.images.remove(image["image_ref"])
         except docker.errors.ImageNotFound:
             pass
-        except docker.errors.APIError as e:
-            log.warning("could not remove %s: %s", image["image_ref"], e)
+        except docker.errors.APIError as exc:
+            log.warning("could not remove %s: %s", image["image_ref"], exc)
         self.db.audit(actor, "image.remove", image["base_tag"])
 
     def _require_image(self, image_id: int) -> dict[str, Any]:
+        """Return an image row or fail.
+
+        Args:
+            image_id: Id of the image.
+
+        Returns:
+            The image row.
+
+        Raises:
+            ValidationError: When the image no longer exists.
+        """
         image = self.db.one("SELECT * FROM images WHERE id = ?", [image_id])
         if image is None:
             raise ValidationError("That desktop no longer exists.")
@@ -958,6 +1706,17 @@ HOSTNAME_RE = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(\.{_LABEL})*$")
 
 
 def _parse_quota(value: Any) -> float | None:
+    """Parse a quota in GB.
+
+    Args:
+        value: Quota as entered; empty for none.
+
+    Returns:
+        The quota, or None for none.
+
+    Raises:
+        ValidationError: When the value is not a number or is less than 1 GB.
+    """
     try:
         quota = users_mod.parse_limit(value)
     except ValueError:
@@ -968,6 +1727,20 @@ def _parse_quota(value: Any) -> float | None:
 
 
 def _int_in(value: Any, low: int, high: int, what: str) -> int:
+    """Parse a whole number within a range.
+
+    Args:
+        value: Value as entered.
+        low: Smallest allowed number.
+        high: Largest allowed number.
+        what: Name of the value for error messages.
+
+    Returns:
+        The number.
+
+    Raises:
+        ValidationError: When the value is not a whole number or is out of range.
+    """
     try:
         number = int(str(value).strip())
     except ValueError:
@@ -978,6 +1751,19 @@ def _int_in(value: Any, low: int, high: int, what: str) -> int:
 
 
 def _validate_limits(cpus: Any, mem_gb: Any) -> tuple[float | None, float | None]:
+    """Parse and check CPU and RAM limits.
+
+    Args:
+        cpus: CPU limit; empty for unlimited.
+        mem_gb: RAM limit in GB; empty for unlimited.
+
+    Returns:
+        The CPU and RAM limits, each None for unlimited.
+
+    Raises:
+        ValidationError: When a limit is not a number, CPUs are outside 0.25 to the host's
+            count, or RAM is below 2 GB.
+    """
     try:
         cpus_v = users_mod.parse_limit(cpus)
         mem_v = users_mod.parse_limit(mem_gb)
@@ -992,6 +1778,13 @@ def _validate_limits(cpus: Any, mem_gb: Any) -> tuple[float | None, float | None
 
 
 def _label_for(base_tag: str) -> str:
-    """'ubuntu-xfce' → 'Ubuntu XFCE'."""
+    """Return a display label for an image tag: 'ubuntu-xfce' → 'Ubuntu XFCE'.
+
+    Args:
+        base_tag: Image tag.
+
+    Returns:
+        The label.
+    """
     words = base_tag.replace("_", "-").split("-")
     return " ".join(w.upper() if len(w) <= 4 and w != "ubuntu" else w.capitalize() for w in words)

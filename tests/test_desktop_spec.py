@@ -19,7 +19,10 @@ USER = {
 
 
 def test_spec_snapshot(settings):
-    spec = build_spec(USER, "ow-desktop:ubuntu-xfce", settings, GpuVendor.NVIDIA, "s3cret")
+    """The desktop container spec matches the expected snapshot."""
+    spec = build_spec(
+        USER, "ow-desktop:ubuntu-xfce", settings, GpuVendor.NVIDIA, "s3cret", session="a1b2c3d4"
+    )
     root = str(settings.root)
     assert spec.name == "ow-user1"
     assert spec.network == "ow-net-user1"
@@ -27,6 +30,7 @@ def test_spec_snapshot(settings):
     k = spec.kwargs
     assert k["hostname"] == "ow-user1"
     assert k["cap_drop"] == ["NET_RAW"]
+    assert k["pids_limit"] == 4096
     assert k["shm_size"] == "2g"
     assert k["nano_cpus"] == 4_000_000_000
     assert k["mem_limit"] == 16 * 1024**3
@@ -40,7 +44,7 @@ def test_spec_snapshot(settings):
         "TITLE": "User One – OrbitalWindow",
         "CUSTOM_USER": "user1",
         "PASSWORD": "s3cret",
-        "SUBFOLDER": "/desktop/user1/",
+        "SUBFOLDER": "/desktop/user1/a1b2c3d4/",
         "PIXELFLUX_WAYLAND": "false",
         "START_DOCKER": "false",
         "NVIDIA_DRIVER_CAPABILITIES": "all",
@@ -53,10 +57,11 @@ def test_spec_snapshot(settings):
     }
     labels = k["labels"]
     assert labels["ow.managed"] == "true" and labels["ow.user"] == "user1"
+    assert labels["ow.session"] == "a1b2c3d4"
     assert labels["traefik.docker.network"] == "ow-net-user1"
     assert (
         labels["traefik.http.routers.ow-user1.rule"]
-        == "Path(`/desktop/user1`) || PathPrefix(`/desktop/user1/`)"
+        == "Path(`/desktop/user1/a1b2c3d4`) || PathPrefix(`/desktop/user1/a1b2c3d4/`)"
     )
     assert labels["traefik.http.routers.ow-user1.middlewares"] == (
         "ow-desktop-slash@docker,ow-auth-desktop@docker,ow-user1-basic"
@@ -69,6 +74,7 @@ def test_spec_snapshot(settings):
 
 
 def test_unlimited_and_no_gpu(settings):
+    """No limits and no GPU leave out the limit and device options."""
     user = USER | {"cpus": None, "mem_gb": None}
     k = build_spec(user, "img", settings, GpuVendor.NONE, "x").kwargs
     assert "nano_cpus" not in k and "mem_limit" not in k
@@ -77,12 +83,14 @@ def test_unlimited_and_no_gpu(settings):
 
 
 def test_amd(settings):
+    """An AMD GPU passes /dev/dri and /dev/kfd without device requests."""
     k = build_spec(USER, "img", settings, GpuVendor.AMD, "x").kwargs
     assert k["devices"] == ["/dev/dri:/dev/dri:rwm", "/dev/kfd:/dev/kfd:rwm"]
     assert k["device_requests"] == []
 
 
 def test_state_mapping():
+    """Docker container states map to the right desktop states."""
     from orbitalwindow.desktops import DesktopState, _state_of
 
     assert _state_of({"Status": "running"}) is DesktopState.RUNNING
@@ -94,3 +102,15 @@ def test_state_mapping():
     )
     assert _state_of({"Status": "created"}) is DesktopState.STARTING
     assert _state_of({"Status": "exited"}) is DesktopState.ERROR
+
+
+def test_each_start_gets_its_own_path(settings):
+    """Every desktop start gets its own URL path."""
+    from orbitalwindow.desktops import desktop_path
+
+    assert desktop_path("user1") == "/desktop/user1/"
+    assert desktop_path("user1", "a1b2c3d4") == "/desktop/user1/a1b2c3d4/"
+    first = build_spec(USER, "img", settings, GpuVendor.NONE, "x").kwargs["environment"]
+    second = build_spec(USER, "img", settings, GpuVendor.NONE, "x").kwargs["environment"]
+    assert first["SUBFOLDER"] != second["SUBFOLDER"]
+    assert first["SUBFOLDER"].startswith("/desktop/user1/")

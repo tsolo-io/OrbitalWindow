@@ -33,7 +33,7 @@ recorded the choices; this record covers how they were built.
     read-only root filesystem.
   - It does not verify the desktop's host key (the plugin passes none). The upstream hop is on the
     user's private network, reachable only by sshpiper and Traefik, so this is accepted.
-  - failtoban bans an address after 5 failed logins (its default; seen in the logs).
+  - failtoban bans an address for 60 minutes after 5 failed logins (its defaults).
 - **Keys:** users paste public keys (ed25519, ecdsa, sk-*, RSA ≥ 3072 bits; a pasted private key is
   refused with a warning). Stored with a label and SHA256 fingerprint (same as `ssh-keygen -l`),
   without the user's comment. The upstream keypair is ed25519, generated with `cryptography`

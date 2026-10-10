@@ -16,11 +16,21 @@ from orbitalwindow.users import ValidationError
 
 
 def user(service, name):
+    """Return a user's database row.
+
+    Args:
+        service: Service under test.
+        name: User name.
+
+    Returns:
+        The user row, or None if there is no such user.
+    """
     return service.db.one("SELECT * FROM users WHERE name = ?", [name])
 
 
 @pytest.fixture
 def labx(service, users):
+    """Create group labx (100 GB quota) with user1 and user2; return its row."""
     service.create_group("boss", "labx", "Lab X", "100")
     gid = service.db.scalar("SELECT id FROM groups WHERE name = 'labx'")
     service.set_group_members("boss", gid, [users["user1"]["id"], users["user2"]["id"]])
@@ -28,6 +38,7 @@ def labx(service, users):
 
 
 def test_group_names_share_the_user_namespace(service, users):
+    """Group and user names share one namespace and reserved names."""
     with pytest.raises(ValidationError, match="already a user"):
         service.create_group("boss", "user1")
     with pytest.raises(ValidationError, match="reserved"):
@@ -38,6 +49,7 @@ def test_group_names_share_the_user_namespace(service, users):
 
 
 def test_create_group_and_members(service, users, labx):
+    """Creating a group sets up its folder, members' file managers and Samba."""
     assert labx["gid"] == 3001 and labx["quota_gb"] == 100
     assert service.hostops.group_dirs == {"labx": 3001}
     assert [g["name"] for g in service.groups_of(users["user1"]["id"])] == ["labx"]
@@ -49,6 +61,7 @@ def test_create_group_and_members(service, users, labx):
 
 
 def test_samba_users_json_has_groups(service, users, labx, tmp_path):
+    """The Samba users file lists groups with their members."""
     from orbitalwindow.samba import Samba
 
     samba = Samba(service.client, "ow-samba", tmp_path)
@@ -58,6 +71,7 @@ def test_samba_users_json_has_groups(service, users, labx, tmp_path):
 
 
 def test_remove_member_and_delete_group(service, users, labx):
+    """Members can be removed and groups deleted; GIDs are not reused."""
     service.set_group_members("boss", labx["id"], [users["user1"]["id"]])
     assert service.groups_of(users["user2"]["id"]) == []
     assert service.files.running["user2"] == []
@@ -71,16 +85,19 @@ def test_remove_member_and_delete_group(service, users, labx):
 
 
 def test_delete_group_with_folder(service, users, labx):
+    """Deleting a group with delete_folder removes its folder."""
     service.delete_group("boss", labx["id"], delete_folder=True)
     assert service.hostops.removed_group_dirs == ["labx"]
 
 
 def test_unknown_member_is_refused(service, users, labx):
+    """Adding an unknown user to a group is refused."""
     with pytest.raises(ValidationError):
         service.set_group_members("boss", labx["id"], [9999])
 
 
 def test_desktop_spec_has_group_mounts(service, settings, users, labx):
+    """The desktop spec mounts the user's group folders."""
     groups = service.groups_of(users["user1"]["id"])
     spec = build_spec(user(service, "user1"), "img", settings, GpuVendor.NONE, "s", (), groups)
     k = spec.kwargs
@@ -91,6 +108,7 @@ def test_desktop_spec_has_group_mounts(service, settings, users, labx):
 
 
 def test_group_restart_notice(service, users, labx, monkeypatch):
+    """A restart notice shows only when a running desktop lacks a group."""
     uid = users["user1"]["id"]
     monkeypatch.setattr(service.desktops, "groups_in_use", lambda name: set())
     assert service.group_restart_needed(uid)
@@ -101,6 +119,7 @@ def test_group_restart_notice(service, users, labx, monkeypatch):
 
 
 def test_files_spec_and_config(settings, users, service, labx):
+    """The file manager container spec and config are locked down."""
     groups = service.groups_of(users["user1"]["id"])
     spec = build_files_spec(user(service, "user1"), groups, settings)
     k = spec.kwargs
@@ -136,9 +155,19 @@ def test_files_spec_and_config(settings, users, service, labx):
 
 
 def test_files_forward_auth(client, users):
+    """File manager forwardAuth allows only the owner on their own path."""
     from conftest import login
 
     def check(cookie, uri):
+        """Call the files forwardAuth endpoint as Traefik would.
+
+        Args:
+            cookie: Session cookie to send, or None for none.
+            uri: Value for ``X-Forwarded-Uri``.
+
+        Returns:
+            The forwardAuth response.
+        """
         client.cookies.clear()
         if cookie:
             client.cookies.set("ow_session", cookie)
@@ -156,6 +185,7 @@ def test_files_forward_auth(client, users):
 
 
 def test_lifecycle_of_file_manager(service, users):
+    """The file manager follows the user being disabled, enabled and deleted."""
     boss_id, uid = users["boss"]["id"], users["user2"]["id"]
     assert "user2" in service.files.running  # created with the user
     service.set_disabled("boss", boss_id, uid, True)
@@ -167,6 +197,7 @@ def test_lifecycle_of_file_manager(service, users):
 
 
 def test_disk_usage_and_quota(service, users, labx):
+    """Disk usage is measured, sorted and compared against quotas."""
     gib = 1024**3
     service.set_quota("boss", users["user1"]["id"], "50")
     service.hostops.sizes = {
@@ -186,6 +217,7 @@ def test_disk_usage_and_quota(service, users, labx):
 
 
 def test_scheduled_jobs(service, users, monkeypatch):
+    """Disk measuring runs hourly and scratch clean-up once a day after 02:00."""
     calls = []
     monkeypatch.setattr(service, "measure_disk", lambda: calls.append("disk"))
     monkeypatch.setattr(service, "clean_scratch", lambda: calls.append("scratch"))
@@ -203,10 +235,25 @@ def test_scheduled_jobs(service, users, monkeypatch):
 
 
 def test_clean_scratch_is_audited(service):
+    """Cleaning scratch is written to the audit log."""
     assert service.clean_scratch() == 1
     assert service.db.one("SELECT * FROM audit WHERE action = 'scratch.clean'")
 
 
 def test_retention_change_rewrites_readme(service):
+    """Changing scratch retention rewrites the scratch README."""
     service.update_settings("boss", {"scratch_retention_days": "14"})
     assert service.hostops.readme_days == [14]
+
+
+def test_files_spec_hash_covers_every_setting(settings, users, service, monkeypatch):
+    """The file manager spec hash changes with every setting."""
+    from orbitalwindow import files as files_mod
+
+    user = service.db.one("SELECT * FROM users WHERE name = 'user1'")
+    before = build_files_spec(user, [], settings).spec_hash
+    monkeypatch.setattr(files_mod, "FILES_IMAGE", "gtstef/filebrowser:other")
+    assert build_files_spec(user, [], settings).spec_hash != before
+    monkeypatch.undo()
+    spec = build_files_spec(user, [], settings)
+    assert spec.kwargs["pids_limit"] == 256 and spec.spec_hash == before

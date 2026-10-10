@@ -25,6 +25,16 @@ class HelpPage:
 
 
 def list_pages(folder: Path) -> list[HelpPage]:
+    """List the help pages in a folder, ordered by file name.
+
+    The title is the page's first ``# `` heading, or else made from its slug.
+
+    Args:
+        folder: The folder holding the ``NN-<slug>.md`` files.
+
+    Returns:
+        The pages; empty if the folder does not exist.
+    """
     pages = []
     if not folder.is_dir():
         return pages
@@ -41,7 +51,15 @@ def list_pages(folder: Path) -> list[HelpPage]:
 
 
 def render(page: HelpPage, values: dict[str, str]) -> str:
-    """Markdown with the licence comment removed and placeholders filled in."""
+    """Return a page's Markdown with the licence comment removed and placeholders filled in.
+
+    Args:
+        page: The help page.
+        values: Replacement text by placeholder name; missing ones become empty.
+
+    Returns:
+        The Markdown, with links to other pages pointing at ``/help/<slug>``.
+    """
     text = COMMENT_RE.sub("", page.path.read_text())
     for key in PLACEHOLDERS:
         text = text.replace("{" + key + "}", values.get(key, ""))

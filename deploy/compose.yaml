@@ -25,6 +25,7 @@ services:
       # Keep routers of not-yet-healthy containers: users get 503 instead of 404 while the
       # service restarts or a desktop is still starting.
       - --providers.docker.allowEmptyServices=true
+      - --providers.file.filename=/etc/traefik/dynamic.yaml
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
@@ -33,14 +34,38 @@ services:
       # Desktop streams are long-lived WebSockets; don't time them out.
       - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0
       - --log.level=INFO
+      # Access log (JSON, to `docker logs ow-traefik`) for troubleshooting; see deploy/.env.
+      - --accesslog=${OW_TRAEFIK_ACCESS_LOG:-false}
+      - --accesslog.format=json
+      - --accesslog.fields.headers.defaultmode=drop
       - --global.checknewversion=false
       - --global.sendanonymoususage=false
     ports:
       - "80:80"
       - "443:443"
+    volumes:
+      - ./traefik/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
+      - traefik-certs:/certs:ro
     networks: [core, proxy-ro]
-    depends_on: [socket-proxy-ro]
+    depends_on:
+      socket-proxy-ro:
+        condition: service_started
+      certs:
+        condition: service_completed_successfully
     security_opt: ["no-new-privileges:true"]
+
+  # Creates Traefik's self-signed default certificate once (see traefik/dynamic.yaml).
+  certs:
+    image: alpine:3.22
+    container_name: ow-certs
+    restart: "no"
+    command: ["/make-cert.sh"]
+    environment:
+      OW_HOSTNAME: ${OW_HOSTNAME:?set OW_HOSTNAME in deploy/.env}
+    volumes:
+      - ./traefik/make-cert.sh:/make-cert.sh:ro
+      - traefik-certs:/certs
+    networks: [gateway]
 
   # Read-only Docker API for Traefik: list/inspect containers and events only.
   socket-proxy-ro:
@@ -128,7 +153,7 @@ services:
       # Used by every desktop router (labels set by OrbitalWindow on ow-<user>).
       traefik.http.middlewares.ow-auth-desktop.forwardauth.address: http://orbitalwindow:8000/auth/desktop
       traefik.http.middlewares.ow-auth-desktop.forwardauth.authResponseHeaders: X-OW-User
-      traefik.http.middlewares.ow-desktop-slash.redirectregex.regex: ^(https?://[^/]+/desktop/[a-z0-9]+)$$
+      traefik.http.middlewares.ow-desktop-slash.redirectregex.regex: ^(https?://[^/]+/desktop/[a-z0-9]+/[0-9a-f]+)$$
       traefik.http.middlewares.ow-desktop-slash.redirectregex.replacement: $${1}/
       traefik.http.middlewares.ow-desktop-slash.redirectregex.permanent: "true"
       # Used by every file manager router (labels set by OrbitalWindow on ow-files-<user>).
@@ -263,3 +288,5 @@ volumes:
     name: ow-samba-lib
   sshpiper-keys:
     name: ow-sshpiper-keys
+  traefik-certs:
+    name: ow-traefik-certs

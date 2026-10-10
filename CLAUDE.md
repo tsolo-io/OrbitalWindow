@@ -16,9 +16,10 @@ start, stop and open their own browser desktop. Admins manage users, desktop ima
   touching desktop images, GPUs, Traefik, Samba or MATLAB. Most "why is it like this" answers are there.
 
 ## Status
-Built in phases (see `docs/content/design.md`), one stacked PR per phase for ticket #2. The POC is not carried
-over: no migration, no backward compatibility, no redirects. Decisions and their reasons are recorded as ADRs in
-`docs/content/adr/`; add one for every new architectural decision.
+All six design phases are implemented, one stacked PR per phase for ticket #2 (PRs #4–#9). The POC is not
+carried over: no migration, no backward compatibility, no redirects. Decisions and their reasons are recorded as
+ADRs in `docs/content/adr/`; add one for every new architectural decision. Admin guide: `docs/content/admin/`;
+user help pages (also served at `/help`): `docs/content/user/`.
 
 ## Project conventions
 - **Build:** hatch / hatchling, src layout (`src/orbitalwindow/`), Python 3.14 (service image `python:3.14-slim`).
@@ -32,6 +33,14 @@ over: no migration, no backward compatibility, no redirects. Decisions and their
   via a socket proxy. Never mount the raw socket into anything except the proxies.
 - **Deployment files** live in `deploy/`, add-on definitions in `addons/`, docs in `docs/` (zensical: config `docs/zensical.toml`, pages in `docs/content/`).
 - **License:** Apache-2.0.
+
+### Code style
+- **Variable names:** no single-letter names in a `for` loop whose body spans lines or in a comprehension that
+  wraps over several lines; a one-line comprehension may keep short names. Exceptions are caught `as exc`.
+- **Docstrings:** document every function and method (private helpers and nested UI handlers too): a one-line
+  summary, a long description only if needed (after a blank line), then Google style `Args:` (no types; they
+  are in the signature), `Returns:` and other sections such as `Raises:` when relevant. Test functions only
+  need a one-line docstring.
 
 ## Environment facts
 - **Production:** single server, Ubuntu 24.04, mostly NVIDIA GPUs (some AMD), 2–3 users, LAN only.

@@ -48,6 +48,12 @@ class ContainerMetrics:
     """
 
     def __init__(self, base_url: str, client: httpx2.Client | None = None) -> None:
+        """Create the cAdvisor reader.
+
+        Args:
+            base_url: cAdvisor's base URL.
+            client: HTTP client to use instead of a new one (e.g. in tests).
+        """
         self._client = client or httpx2.Client(base_url=base_url, timeout=4.0)
         self._lock = threading.Lock()
         self._by_id: dict[str, Usage] = {}
@@ -55,6 +61,11 @@ class ContainerMetrics:
         self.available = True
 
     def _summary(self) -> dict[str, Usage]:
+        """Return the usage of every Docker container cgroup, cached for ``CACHE_SECONDS``.
+
+        Returns:
+            Usage by full container ID; empty when cAdvisor is not reachable.
+        """
         now = time.monotonic()
         if now - self._at < CACHE_SECONDS:
             return self._by_id
@@ -62,9 +73,9 @@ class ContainerMetrics:
             r = self._client.get("/api/v2.0/summary/", params={"type": "name", "recursive": "true"})
             r.raise_for_status()
             summary = r.json()
-        except (httpx2.HTTPError, ValueError) as e:
+        except (httpx2.HTTPError, ValueError) as exc:
             if self.available:
-                log.warning("cAdvisor is not reachable: %s", e)
+                log.warning("cAdvisor is not reachable: %s", exc)
             self.available = False
             self._by_id, self._at = {}, now
             return self._by_id
@@ -82,7 +93,14 @@ class ContainerMetrics:
         return by_id
 
     def usage(self, names_by_id: dict[str, str]) -> dict[str, Usage]:
-        """Usage of the given containers (full ID → name), keyed by name."""
+        """Return the usage of the given containers.
+
+        Args:
+            names_by_id: Container names by full container ID.
+
+        Returns:
+            Usage keyed by container name; containers cAdvisor does not report are left out.
+        """
         with self._lock:
             by_id = self._summary()
         return {name: by_id[cid] for cid, name in names_by_id.items() if cid in by_id}
@@ -100,6 +118,11 @@ class GpuMetrics:
         self._at = 0.0
 
     def _init(self) -> bool:
+        """Initialise NVML once; remember a failure so it is not retried.
+
+        Returns:
+            True if NVML is ready to use.
+        """
         if self._ready:
             return True
         if self._failed:
@@ -108,14 +131,19 @@ class GpuMetrics:
             import pynvml
 
             pynvml.nvmlInit()
-        except Exception as e:  # library missing, no driver, no device
-            log.info("NVML not available (GPU numbers hidden): %s", e)
+        except Exception as exc:  # library missing, no driver, no device
+            log.info("NVML not available (GPU numbers hidden): %s", exc)
             self._failed = True
             return False
         self._nvml, self._ready = pynvml, True
         return True
 
     def stats(self) -> list[GpuStat]:
+        """Return utilisation and memory of every GPU, cached for ``CACHE_SECONDS``.
+
+        Returns:
+            One entry per GPU; empty when NVML is not available.
+        """
         with self._lock:
             now = time.monotonic()
             if now - self._at < CACHE_SECONDS or not self._init():
@@ -123,27 +151,35 @@ class GpuMetrics:
             nv = self._nvml
             result = []
             try:
-                for i in range(nv.nvmlDeviceGetCount()):
-                    h = nv.nvmlDeviceGetHandleByIndex(i)
-                    name = nv.nvmlDeviceGetName(h)
-                    mem = nv.nvmlDeviceGetMemoryInfo(h)
-                    util = nv.nvmlDeviceGetUtilizationRates(h)
+                for index in range(nv.nvmlDeviceGetCount()):
+                    handle = nv.nvmlDeviceGetHandleByIndex(index)
+                    name = nv.nvmlDeviceGetName(handle)
+                    mem = nv.nvmlDeviceGetMemoryInfo(handle)
+                    util = nv.nvmlDeviceGetUtilizationRates(handle)
                     result.append(
                         GpuStat(
-                            i,
+                            index,
                             name.decode() if isinstance(name, bytes) else str(name),
                             int(util.gpu),
                             int(mem.used),
                             int(mem.total),
                         )
                     )
-            except Exception as e:
-                log.warning("NVML query failed: %s", e)
+            except Exception as exc:
+                log.warning("NVML query failed: %s", exc)
             self._cache, self._at = result, now
             return result
 
 
 def fmt_bytes(n: int | None) -> str:
+    """Format a byte count for display.
+
+    Args:
+        n: Number of bytes, or None for no limit.
+
+    Returns:
+        ``"1.5 GB"``, ``"200 MB"`` or ``"unlimited"``.
+    """
     if n is None:
         return "unlimited"
     gb = n / 1024**3

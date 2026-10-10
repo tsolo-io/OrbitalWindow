@@ -16,6 +16,14 @@ SUMMARY = {
 
 
 def make(handler):
+    """Return ContainerMetrics talking to a mocked cAdvisor.
+
+    Args:
+        handler: httpx mock transport handler that answers the requests.
+
+    Returns:
+        ContainerMetrics using the deployment's cAdvisor base path.
+    """
     # Same base path as the real deployment (cAdvisor's --url_base_prefix).
     base = "http://cadvisor:8080/admin/cadvisor"
     client = httpx2.Client(base_url=base, transport=httpx2.MockTransport(handler))
@@ -23,9 +31,18 @@ def make(handler):
 
 
 def test_usage_from_cadvisor_cgroups():
+    """Usage is read from cAdvisor cgroups for the asked containers and cached."""
     calls = []
 
     def handler(request):
+        """Record the request URL and answer with the canned summary.
+
+        Args:
+            request: Incoming mocked request.
+
+        Returns:
+            A 200 response with ``SUMMARY`` as JSON.
+        """
         calls.append(str(request.url))
         return httpx2.Response(200, json=SUMMARY)
 
@@ -41,16 +58,19 @@ def test_usage_from_cadvisor_cgroups():
 
 
 def test_cadvisor_down_gives_empty_usage():
+    """An unavailable cAdvisor gives empty usage and marks metrics unavailable."""
     m = make(lambda request: httpx2.Response(503))
     assert m.usage({A: "ow-user1"}) == {}
     assert not m.available
 
 
 def test_gpu_metrics_without_nvidia():
+    """GPU metrics are empty without an NVIDIA driver."""
     assert GpuMetrics().stats() == []  # no driver on test machines
 
 
 def test_fmt_bytes():
+    """Byte counts are formatted for display."""
     assert fmt_bytes(None) == "unlimited"
     assert fmt_bytes(3 * 1024**3) == "3.0 GB"
     assert fmt_bytes(200 * 1024**2) == "200 MB"

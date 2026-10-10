@@ -20,7 +20,8 @@ needs to be installed on your computer.
 1. On your dashboard, press **Start**. The status changes to *Starting…* and then *Running*. This
    takes about half a minute.
 2. Press **Open desktop**. Your desktop opens in a new browser tab. You are not asked for a
-   password again.
+   password again. After stopping, restarting or switching your desktop, press **Open desktop**
+   again: it reloads that tab.
 3. When you have finished for the day, save your work and press **Stop** on the dashboard. Your files
    are kept; only the running desktop is switched off, which frees the server for others.
 

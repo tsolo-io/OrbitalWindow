@@ -8,6 +8,7 @@ from orbitalwindow.db import MIGRATIONS, Database
 
 
 def test_migrations_are_idempotent(tmp_path):
+    """Opening an existing database again does not rerun migrations."""
     path = tmp_path / "ow.duckdb"
     Database(path).close()
     db = Database(path)
@@ -15,6 +16,7 @@ def test_migrations_are_idempotent(tmp_path):
 
 
 def test_transaction_rolls_back():
+    """An exception inside a transaction rolls it back."""
     db = Database(":memory:")
     with pytest.raises(RuntimeError), db.transaction():
         db.set_setting("a", "1")
@@ -23,8 +25,41 @@ def test_transaction_rolls_back():
 
 
 def test_nested_transaction_joins_outer():
+    """A nested transaction joins the outer one."""
     db = Database(":memory:")
     with db.transaction():
         assert db.next_counter("x") == 1
         assert db.next_counter("x") == 2
     assert db.next_counter("x") == 3
+
+
+def test_fatal_error_exits_the_process(monkeypatch):
+    """A DuckDB fatal error calls the on_fatal hook and is re-raised."""
+    import duckdb
+
+    db = Database(":memory:")
+    calls = []
+    db.on_fatal = lambda: calls.append("exit")
+
+    class Broken:
+        def execute(self, *args):
+            """Raise a DuckDB fatal error for every query.
+
+            Args:
+                *args: Query arguments (ignored).
+
+            Raises:
+                duckdb.FatalException: Always.
+            """
+            raise duckdb.FatalException("database has been invalidated")
+
+    db._con = Broken()
+    with pytest.raises(duckdb.FatalException):
+        db.scalar("SELECT 1")
+    assert calls == ["exit"]
+
+
+def test_pkg_index_has_no_secondary_index():
+    """The package index table has no secondary index."""
+    db = Database(":memory:")
+    assert db.scalar("SELECT count(*) FROM duckdb_indexes() WHERE table_name = 'pkg_index'") == 0

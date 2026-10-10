@@ -33,3 +33,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0017](0017-metrics-and-admin-tools.md) | Metrics from cAdvisor and NVML; admin tools behind forwardAuth | accepted |
 | [0018](0018-files-groups-and-quotas.md) | File manager, group folders, scratch and soft quotas | accepted |
 | [0019](0019-ssh-help-logs-and-tls.md) | SSH gateway, help pages, log viewer and TLS | accepted |
+| [0020](0020-desktop-readiness-and-db-recovery.md) | Desktop readiness, the desktop tab, and recovering from DuckDB fatal errors | accepted |

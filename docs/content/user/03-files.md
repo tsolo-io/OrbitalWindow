@@ -31,14 +31,15 @@ works even when your desktop is stopped.
 
 ## Group folders
 
-Your administrator can create a folder for a project or lab group. Everyone in the group can open
-and edit the files in it. If you were just added to a group, stop and start your desktop to see it.
+Your administrator can create a folder for a project or lab group. Everyone in the group can open,
+edit and delete the files in it, so keep private work in your home folder. If you were just added to a group, stop and start your desktop to see it.
 
 ## Scratch
 
 `/scratch` is shared with everyone on the server: handy for passing large files around. Everyone can
-read the files; only the owner can delete them. Files that are not changed for a while are deleted
-automatically, so do not keep anything important there.
+read the files, and normally only the owner can delete them. It is **not private**: anyone who uses
+`sudo` in their desktop can read, change or delete any file there. Files that are not changed for a
+while are deleted automatically, so do not keep anything important there.
 
 ## Disk space
 

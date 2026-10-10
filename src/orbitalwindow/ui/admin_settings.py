@@ -20,6 +20,14 @@ GPU_OPTIONS = {
 
 @ui.page("/admin/settings")
 def admin_settings(request: Request) -> RedirectResponse | None:
+    """Render the admin settings page.
+
+    Args:
+        request: The incoming page request.
+
+    Returns:
+        A redirect if not logged in as an admin, else None (the page is rendered).
+    """
     auth = authenticate(request, admin=True)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -53,6 +61,7 @@ def admin_settings(request: Request) -> RedirectResponse | None:
             )
 
         async def save() -> None:
+            """Save all settings from the form and report the outcome."""
             values = {
                 "default_cpus": cpus.value,
                 "default_mem_gb": mem.value,
@@ -63,8 +72,8 @@ def admin_settings(request: Request) -> RedirectResponse | None:
             }
             try:
                 await run.io_bound(svc.update_settings, auth.user.name, values)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             ui.notify("Settings saved.", type="positive")
 

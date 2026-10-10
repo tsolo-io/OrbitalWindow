@@ -6,8 +6,10 @@ SPDX-License-Identifier: Apache-2.0
 
 # Problems and questions
 
-**The desktop does not open, or shows a grey page.** Wait a few seconds after the status says
-*Running*, then press **Open desktop** again.
+**The desktop tab says "websocket disconnected" or shows a grey page.** This can happen when the
+desktop was stopped, restarted or switched to another desktop while the tab was open. Usually the tab
+shows "Your desktop is not running" and comes back by itself when the desktop is running again. If
+not, press **Open desktop** on the dashboard (it reuses the same tab) or reload the tab with F5.
 
 **My desktop was stopped.** An administrator may have stopped it, for example for maintenance. Your
 files are safe; press **Start** again.

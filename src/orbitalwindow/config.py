@@ -66,33 +66,73 @@ class Settings(BaseSettings):
 
     @property
     def state_dir(self) -> Path:
+        """Return the service state folder.
+
+        Returns:
+            ``<root>/state``.
+        """
         return self.root / "state"
 
     @property
     def db_path(self) -> Path:
+        """Return the path of the DuckDB database.
+
+        Returns:
+            ``<state_dir>/orbitalwindow.duckdb``.
+        """
         return self.state_dir / "orbitalwindow.duckdb"
 
     @property
     def secret_path(self) -> Path:
+        """Return the path of the session signing key.
+
+        Returns:
+            ``<state_dir>/secret.key``.
+        """
         return self.state_dir / "secret.key"
 
     @property
     def users_dir(self) -> Path:
+        """Return the folder holding the users' homes.
+
+        Returns:
+            ``<root>/users``.
+        """
         return self.root / "users"
 
     @property
     def groups_dir(self) -> Path:
+        """Return the folder holding the group folders.
+
+        Returns:
+            ``<root>/groups``.
+        """
         return self.root / "groups"
 
     @property
     def shared_dir(self) -> Path:
+        """Return the shared folder (data and scratch).
+
+        Returns:
+            ``<root>/shared``.
+        """
         return self.root / "shared"
 
     @property
     def samba_state_dir(self) -> Path:
+        """Return the folder for the Samba state (``users.json``).
+
+        Returns:
+            ``<state_dir>/samba``.
+        """
         return self.state_dir / "samba"
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """Return the settings, read from the environment once and then cached.
+
+    Returns:
+        The process-level settings.
+    """
     return Settings()

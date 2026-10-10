@@ -13,6 +13,7 @@ from orbitalwindow.users import ValidationError
 
 @pytest.fixture
 def stops(service, monkeypatch):
+    """Record desktop stops and skip user image removal; return the stopped names."""
     stopped: list[str] = []
     monkeypatch.setattr(service.desktops, "stop", lambda user: stopped.append(user["name"]))
     monkeypatch.setattr(service.builder, "remove_user_image", lambda name: None)
@@ -20,10 +21,20 @@ def stops(service, monkeypatch):
 
 
 def row(service, name):
+    """Return a user's database row.
+
+    Args:
+        service: Service under test.
+        name: User name.
+
+    Returns:
+        The user row, or None if there is no such user.
+    """
     return service.db.one("SELECT * FROM users WHERE name = ?", [name])
 
 
 def test_disable_blocks_everything_and_enable_restores(service, users, stops):
+    """Disabling signs out, blocks login and stops the desktop; enabling restores."""
     boss, user1 = users["boss"], users["user1"]
     token = service.sessions.issue(user1["id"], user1["session_ver"])
     service.set_disabled("boss", boss["id"], user1["id"], True)
@@ -40,6 +51,7 @@ def test_disable_blocks_everything_and_enable_restores(service, users, stops):
 
 
 def test_admin_cannot_disable_or_delete_self(service, users, stops):
+    """An admin cannot disable or delete their own account."""
     boss = users["boss"]
     with pytest.raises(ValidationError, match="your own account"):
         service.set_disabled("boss", boss["id"], boss["id"], True)
@@ -48,6 +60,7 @@ def test_admin_cannot_disable_or_delete_self(service, users, stops):
 
 
 def test_last_admin_is_protected(service, users, stops):
+    """The last administrator cannot be disabled, deleted or demoted."""
     boss = users["boss"]
     # Acting as "system" (no actor id) still can't remove the last admin.
     for fn in (
@@ -62,6 +75,7 @@ def test_last_admin_is_protected(service, users, stops):
 
 
 def test_delete_user(service, users, stops):
+    """Deleting a user removes their rows and Samba account but keeps the home."""
     user2 = users["user2"]
     service.db.execute("INSERT INTO user_packages VALUES (?, 'octave')", [user2["id"]])
     service.grant_addon("boss", user2["id"], "matlab")
@@ -81,11 +95,13 @@ def test_delete_user(service, users, stops):
 
 
 def test_delete_user_with_home(service, users, stops):
+    """Deleting a user with delete_home also removes the home folder."""
     service.delete_user("boss", users["boss"]["id"], users["user2"]["id"], delete_home=True)
     assert "user2" not in [h[0] for h in service.hostops.homes]
 
 
 def test_limits(service, users):
+    """CPU and memory limits are stored, cleared and validated."""
     uid = users["user1"]["id"]
     service.set_limits("boss", uid, "4", "16")
     assert (row(service, "user1")["cpus"], row(service, "user1")["mem_gb"]) == (4.0, 16.0)
@@ -97,11 +113,13 @@ def test_limits(service, users):
 
 
 def test_create_user_validates_limits(service):
+    """Creating a user with invalid limits is refused."""
     with pytest.raises(ValidationError):
         service.create_user(actor="t", name="bad", display_name="b", cpus="x", mem_gb="")
 
 
 def test_settings(service):
+    """Global settings are saved, normalised and validated."""
     service.update_settings(
         "boss",
         {
@@ -130,6 +148,7 @@ def test_settings(service):
 
 
 def test_audit_search(service, users):
+    """Audit search filters by text and is safe against SQL injection."""
     rows = service.audit_log("user2")
     assert rows and all("user2" in (r["target"] + r["detail"] + r["actor"]) for r in rows)
     assert len(service.audit_log("")) >= 3
@@ -137,6 +156,7 @@ def test_audit_search(service, users):
 
 
 def test_admin_forward_auth(client, users):
+    """Admin forwardAuth redirects anonymous users and allows only admins."""
     from conftest import login
 
     headers = {
@@ -155,6 +175,7 @@ def test_admin_forward_auth(client, users):
 
 
 def test_reconcile_removes_orphans(service, users):
+    """Reconcile removes containers and networks of unknown or disabled users."""
     from orbitalwindow.reconcile import reconcile
 
     orphan = MagicMock(labels={"ow.user": "ghost", "ow.role": "desktop"}, name="ow-ghost")
@@ -163,6 +184,14 @@ def test_reconcile_removes_orphans(service, users):
     service.db.execute("UPDATE users SET disabled = true WHERE name = 'user2'")
 
     def net(user):
+        """Return a fake managed Docker network for a user.
+
+        Args:
+            user: User name for the ``ow.user`` label.
+
+        Returns:
+            A MagicMock network with managed labels and no containers.
+        """
         return MagicMock(attrs={"Labels": {"ow.managed": "true", "ow.user": user}}, containers=[])
 
     ghost_net, live_net = net("ghost"), net("user1")

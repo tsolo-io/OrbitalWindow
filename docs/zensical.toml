@@ -15,6 +15,12 @@ nav = [
   { "Home" = "index.md" },
   { "Design" = "design.md" },
   { "POC learnings" = "poc-learnings.md" },
+  { "Admin guide" = [
+    { "Installing" = "admin/01-install.md" },
+    { "Operations" = "admin/02-operations.md" },
+    { "AMD hosts" = "admin/03-amd.md" },
+    { "Security" = "admin/04-security.md" },
+  ] },
   { "User guide" = [
     { "Getting started" = "user/01-getting-started.md" },
     { "Software" = "user/02-software.md" },
@@ -43,6 +49,7 @@ nav = [
     { "0017 Metrics, admin tools" = "adr/0017-metrics-and-admin-tools.md" },
     { "0018 Files, groups, quotas" = "adr/0018-files-groups-and-quotas.md" },
     { "0019 SSH, help, logs, TLS" = "adr/0019-ssh-help-logs-and-tls.md" },
+    { "0020 Desktop readiness, DB recovery" = "adr/0020-desktop-readiness-and-db-recovery.md" },
   ] },
 ]
 

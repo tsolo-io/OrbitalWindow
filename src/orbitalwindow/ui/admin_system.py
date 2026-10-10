@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..metrics import fmt_bytes
-from .common import authenticate, frame, service
+from .common import authenticate, frame, guarded, service
 
 DESKTOP_COLUMNS = [
     {"name": "name", "label": "User", "field": "name", "sortable": True, "align": "left"},
@@ -40,6 +40,14 @@ AUDIT_COLUMNS = [
 
 @ui.page("/admin/system")
 def admin_system(request: Request) -> RedirectResponse | None:
+    """Render the admin system page.
+
+    Args:
+        request: The incoming page request.
+
+    Returns:
+        A redirect if not logged in as an admin, else None (the page is rendered).
+    """
     auth = authenticate(request, admin=True)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -81,6 +89,7 @@ def admin_system(request: Request) -> RedirectResponse | None:
             )
 
         async def refresh_disk() -> None:
+            """Reload the server's free space and the disk usage table."""
             usage, host = await run.io_bound(svc.disk_overview)
             free = fmt_bytes(host.free)
             text = f"Free on the server: {free} of {fmt_bytes(host.total)}"
@@ -90,20 +99,23 @@ def admin_system(request: Request) -> RedirectResponse | None:
             host_label.classes(replace="text-negative" if host.warning else "text-grey-8")
             disk.rows = [
                 {
-                    "key": f"{u.subject}:{u.name}",
-                    "subject": u.subject,
-                    "name": u.name,
-                    "used": fmt_bytes(u.bytes),
-                    "quota": f"{u.quota_gb:g} GB" if u.quota_gb else "–",
-                    "percent": f"{u.fraction:.0%}" if u.fraction is not None else "–",
-                    "warning": u.warning,
-                    "measured": u.measured_at.strftime("%Y-%m-%d %H:%M") if u.measured_at else "",
+                    "key": f"{entry.subject}:{entry.name}",
+                    "subject": entry.subject,
+                    "name": entry.name,
+                    "used": fmt_bytes(entry.bytes),
+                    "quota": f"{entry.quota_gb:g} GB" if entry.quota_gb else "–",
+                    "percent": f"{entry.fraction:.0%}" if entry.fraction is not None else "–",
+                    "warning": entry.warning,
+                    "measured": entry.measured_at.strftime("%Y-%m-%d %H:%M")
+                    if entry.measured_at
+                    else "",
                 }
-                for u in usage
+                for entry in usage
             ]
             disk.update()
 
         async def on_measure() -> None:
+            """Measure disk usage now, then reload the table."""
             measure_btn.disable()
             try:
                 await run.io_bound(svc.measure_disk)
@@ -112,9 +124,9 @@ def admin_system(request: Request) -> RedirectResponse | None:
             await refresh_disk()
             ui.notify("Disk usage measured.")
 
-        measure_btn.on_click(on_measure)
-        ui.timer(0.1, refresh_disk, once=True)
-        ui.timer(60.0, refresh_disk)
+        measure_btn.on_click(guarded(auth, on_measure))
+        ui.timer(0.1, guarded(auth, refresh_disk), once=True)
+        ui.timer(60.0, guarded(auth, refresh_disk))
 
         with ui.card().classes("w-full"):
             ui.label("GPUs").classes("text-h6")
@@ -130,19 +142,20 @@ def admin_system(request: Request) -> RedirectResponse | None:
             audit.props("dense :pagination='{rowsPerPage: 25}'")
 
         async def refresh() -> None:
+            """Reload the desktop table and the GPU statistics."""
             rows = await run.io_bound(svc.system_overview)
             cadvisor_note.set_visibility(not svc.metrics.available)
             desktops.rows = [
                 {
-                    "name": r["name"] + (" (disabled)" if r["disabled"] else ""),
-                    "state": r["state"],
-                    "image": r["image_label"] or "–",
-                    "cpu": f"{r['cpu_cores']:.2f} cores" if r["cpu_cores"] is not None else "–",
-                    "cpu_limit": f"{r['cpus']:g}" if r["cpus"] else "unlimited",
-                    "mem": fmt_bytes(r["mem_bytes"]) if r["mem_bytes"] is not None else "–",
-                    "mem_limit": f"{r['mem_gb']:g} GB" if r["mem_gb"] else "unlimited",
+                    "name": row["name"] + (" (disabled)" if row["disabled"] else ""),
+                    "state": row["state"],
+                    "image": row["image_label"] or "–",
+                    "cpu": f"{row['cpu_cores']:.2f} cores" if row["cpu_cores"] is not None else "–",
+                    "cpu_limit": f"{row['cpus']:g}" if row["cpus"] else "unlimited",
+                    "mem": fmt_bytes(row["mem_bytes"]) if row["mem_bytes"] is not None else "–",
+                    "mem_limit": f"{row['mem_gb']:g} GB" if row["mem_gb"] else "unlimited",
                 }
-                for r in rows
+                for row in rows
             ]
             desktops.update()
             gpus = await run.io_bound(svc.gpus.stats)
@@ -151,35 +164,43 @@ def admin_system(request: Request) -> RedirectResponse | None:
                 if not gpus:
                     ui.label("No GPU statistics (no NVIDIA GPU, or NVML is not available).")\
                         .classes("text-grey-7")  # fmt: skip
-                for g in gpus:
-                    gpu_line(g)
+                for gpu in gpus:
+                    gpu_line(gpu)
 
         async def refresh_audit() -> None:
+            """Reload the audit log table, filtered by the search text."""
             rows = await run.io_bound(svc.audit_log, search.value or "", 500)
             audit.rows = [
-                r | {"i": i, "ts": r["ts"].strftime("%Y-%m-%d %H:%M:%S")}
-                for i, r in enumerate(rows)
+                row | {"i": index, "ts": row["ts"].strftime("%Y-%m-%d %H:%M:%S")}
+                for index, row in enumerate(rows)
             ]
             audit.update()
 
-        search.on_value_change(refresh_audit)
-        ui.timer(5.0, refresh)
-        ui.timer(0.1, refresh, once=True)
-        ui.timer(0.1, refresh_audit, once=True)
-        ui.timer(30.0, refresh_audit)
+        search.on_value_change(guarded(auth, refresh_audit))
+        ui.timer(5.0, guarded(auth, refresh))
+        ui.timer(0.1, guarded(auth, refresh), once=True)
+        ui.timer(0.1, guarded(auth, refresh_audit), once=True)
+        ui.timer(30.0, guarded(auth, refresh_audit))
     return None
 
 
-def gpu_line(g) -> None:
+def gpu_line(gpu) -> None:
+    """Add a GPU's name with bars for its load and memory use.
+
+    Args:
+        gpu: GPU statistics (index, name, utilisation and memory).
+    """
     with ui.column().classes("w-full gap-1"):
-        ui.label(f"GPU {g.index}: {g.name}").classes("font-medium")
+        ui.label(f"GPU {gpu.index}: {gpu.name}").classes("font-medium")
         with ui.row().classes("w-full items-center no-wrap"):
             ui.label("Load").classes("w-16 text-sm")
-            ui.linear_progress(g.util_percent / 100, show_value=False).classes("grow")
-            ui.label(f"{g.util_percent}%").classes("w-32 text-sm text-right")
+            ui.linear_progress(gpu.util_percent / 100, show_value=False).classes("grow")
+            ui.label(f"{gpu.util_percent}%").classes("w-32 text-sm text-right")
         with ui.row().classes("w-full items-center no-wrap"):
             ui.label("Memory").classes("w-16 text-sm")
-            ui.linear_progress(g.mem_used / max(g.mem_total, 1), show_value=False).classes("grow")
-            ui.label(f"{fmt_bytes(g.mem_used)} of {fmt_bytes(g.mem_total)}").classes(
+            ui.linear_progress(gpu.mem_used / max(gpu.mem_total, 1), show_value=False).classes(
+                "grow"
+            )
+            ui.label(f"{fmt_bytes(gpu.mem_used)} of {fmt_bytes(gpu.mem_total)}").classes(
                 "w-32 text-sm text-right"
             )

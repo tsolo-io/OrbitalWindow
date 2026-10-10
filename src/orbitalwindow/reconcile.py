@@ -30,21 +30,27 @@ SCRATCH_CLEAN_HOUR = 2  # local time; runs once a day at or after this hour
 
 
 def reconcile(svc: Service, now: datetime | None = None) -> None:
+    """Make Docker match the database once, then run the scheduled jobs that are due.
+
+    Args:
+        svc: The application service.
+        now: Current local time for the scheduled jobs; ``datetime.now()`` when None.
+    """
     client = svc.client
     users = {u["name"]: u for u in svc.db.all("SELECT id, name, disabled FROM users")}
 
-    for c in client.containers.list(all=True, filters={"label": f"{LABEL_MANAGED}=true"}):
-        role = c.labels.get(LABEL_ROLE)
+    for container in client.containers.list(all=True, filters={"label": f"{LABEL_MANAGED}=true"}):
+        role = container.labels.get(LABEL_ROLE)
         if role not in ("desktop", "files"):
             continue
-        name = c.labels.get(LABEL_USER, "")
+        name = container.labels.get(LABEL_USER, "")
         user = users.get(name)
         if user is None or (user["disabled"] and role == "desktop"):
-            log.warning("removing %s (user %s)", c.name, "disabled" if user else "deleted")
+            log.warning("removing %s (user %s)", container.name, "disabled" if user else "deleted")
             try:
-                c.remove(force=True)
-            except docker.errors.APIError as e:
-                log.warning("could not remove %s: %s", c.name, e)
+                container.remove(force=True)
+            except docker.errors.APIError as exc:
+                log.warning("could not remove %s: %s", container.name, exc)
 
     for user in users.values():
         if user["disabled"]:
@@ -57,14 +63,14 @@ def reconcile(svc: Service, now: datetime | None = None) -> None:
         name = (net.attrs.get("Labels") or {}).get(LABEL_USER)
         if name and name not in users:
             net.reload()
-            for c in net.containers:
+            for container in net.containers:
                 with contextlib.suppress(docker.errors.APIError):
-                    net.disconnect(c, force=True)
+                    net.disconnect(container, force=True)
             try:
                 net.remove()
                 log.info("removed network %s of deleted user %s", net.name, name)
-            except docker.errors.APIError as e:
-                log.warning("could not remove network %s: %s", net.name, e)
+            except docker.errors.APIError as exc:
+                log.warning("could not remove network %s: %s", net.name, exc)
 
     fixed = svc.desktops.ensure_traefik_connected()
     if fixed:
@@ -74,23 +80,39 @@ def reconcile(svc: Service, now: datetime | None = None) -> None:
 
 
 def _due(svc: Service, key: str) -> datetime | None:
+    """Return when a scheduled job last ran.
+
+    Args:
+        svc: The application service.
+        key: The setting that stores the job's last run time.
+
+    Returns:
+        The last run time, or None if the job never ran.
+    """
     value = svc.db.get_setting(key)
     return datetime.fromisoformat(value) if value else None
 
 
 def run_scheduled(svc: Service, now: datetime) -> None:
-    """Hourly disk measurement; scratch clean-up once a day after SCRATCH_CLEAN_HOUR."""
+    """Run the jobs that are due: hourly disk measurement; daily scratch clean-up.
+
+    The scratch clean-up runs once a day at or after ``SCRATCH_CLEAN_HOUR``.
+
+    Args:
+        svc: The application service.
+        now: Current local time.
+    """
     last = _due(svc, "last_disk_measure")
     if last is None or now - last >= DISK_EVERY:
         svc.db.set_setting("last_disk_measure", now.isoformat(timespec="seconds"))
         try:
             svc.measure_disk()
-        except docker.errors.DockerException as e:
-            log.warning("disk usage measurement failed: %s", e)
+        except docker.errors.DockerException as exc:
+            log.warning("disk usage measurement failed: %s", exc)
     last = _due(svc, "last_scratch_clean")
     if now.hour >= SCRATCH_CLEAN_HOUR and (last is None or last.date() < now.date()):
         svc.db.set_setting("last_scratch_clean", now.isoformat(timespec="seconds"))
         try:
             svc.clean_scratch()
-        except docker.errors.DockerException as e:
-            log.warning("scratch clean-up failed: %s", e)
+        except docker.errors.DockerException as exc:
+            log.warning("scratch clean-up failed: %s", exc)

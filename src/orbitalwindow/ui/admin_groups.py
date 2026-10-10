@@ -26,6 +26,14 @@ COLUMNS = [
 
 @ui.page("/admin/groups")
 def admin_groups(request: Request) -> RedirectResponse | None:
+    """Render the admin groups page.
+
+    Args:
+        request: The incoming page request.
+
+    Returns:
+        A redirect if not logged in as an admin, else None (the page is rendered).
+    """
     auth = authenticate(request, admin=True)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -56,43 +64,66 @@ def admin_groups(request: Request) -> RedirectResponse | None:
         )
 
         async def refresh() -> None:
+            """Reload the group table with member names and quotas."""
             groups = await run.io_bound(svc.list_groups)
             rows = []
-            for g in groups:
-                names = [m["name"] for m in await run.io_bound(svc.group_members, g["id"])]
+            for group in groups:
+                names = [m["name"] for m in await run.io_bound(svc.group_members, group["id"])]
                 rows.append(
-                    g
+                    group
                     | {
                         "member_names": ", ".join(names) or "–",
                         "member_ids": [],
-                        "quota": f"{g['quota_gb']:g} GB" if g["quota_gb"] else "none",
+                        "quota": f"{group['quota_gb']:g} GB" if group["quota_gb"] else "none",
                         "created_at": None,
                     }
                 )
             table.rows = rows
             table.update()
 
-        async def on_members(e) -> None:
-            members_dialog(auth, e.args, refresh)
+        async def on_members(event) -> None:
+            """Open the members dialog of a group.
 
-        async def on_quota(e) -> None:
-            quota_dialog(auth, e.args, refresh)
+            Args:
+                event: Table event with the group row.
+            """
+            members_dialog(auth, event.args, refresh)
 
-        async def on_delete(e) -> None:
-            delete_dialog(auth, e.args, refresh)
+        async def on_quota(event) -> None:
+            """Open the quota dialog of a group.
+
+            Args:
+                event: Table event with the group row.
+            """
+            quota_dialog(auth, event.args, refresh)
+
+        async def on_delete(event) -> None:
+            """Open the delete dialog of a group.
+
+            Args:
+                event: Table event with the group row.
+            """
+            delete_dialog(auth, event.args, refresh)
 
         async def on_add() -> None:
+            """Open the dialog to create a group."""
             create_dialog(auth, refresh)
 
         add_btn.on_click(guarded(auth, on_add))
         table.on("members", guarded(auth, on_members))
         table.on("quota", guarded(auth, on_quota))
         table.on("delete", guarded(auth, on_delete))
-        ui.timer(0.1, refresh, once=True)
+        ui.timer(0.1, guarded(auth, refresh), once=True)
     return None
 
 
 def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open a dialog to create a group.
+
+    Args:
+        auth: Session of the page.
+        refresh: Callback that reloads the group table.
+    """
     svc = service()
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label("Add group").classes("text-h6")
@@ -104,6 +135,7 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
         quota = ui.input("Quota in GB (optional)")
 
         async def create() -> None:
+            """Create the group from the form and show the result."""
             if auth.check() is None:
                 return
             try:
@@ -111,8 +143,8 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
                     svc.create_group, auth.user.name, name.value or "", description.value or "",
                     quota.value,
                 )  # fmt: skip
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             if result.warnings:
@@ -128,14 +160,23 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
 
 
 def members_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open a dialog to choose the members of a group.
+
+    Args:
+        auth: Session of the page.
+        row: Table row of the group.
+        refresh: Callback that reloads the group table.
+    """
     svc = service()
     users = svc.list_users()
     current = {m["id"] for m in svc.group_members(row["id"])}
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label(f"Members of {row['name']}").classes("text-h6")
         boxes = {
-            u["id"]: ui.checkbox(f"{u['name']} ({u['display_name']})", value=u["id"] in current)
-            for u in users
+            user["id"]: ui.checkbox(
+                f"{user['name']} ({user['display_name']})", value=user["id"] in current
+            )
+            for user in users
         }
         ui.label(
             "Windows file sharing and the file manager update straight away. Running desktops "
@@ -143,6 +184,7 @@ def members_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[No
         ).classes("text-caption text-grey-7")
 
         async def save() -> None:
+            """Save the ticked users as the group's members."""
             if auth.check() is None:
                 return
             chosen = [uid for uid, box in boxes.items() if box.value]
@@ -150,8 +192,8 @@ def members_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[No
                 result = await run.io_bound(
                     svc.set_group_members, auth.user.name, row["id"], chosen
                 )
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             if result.warnings:
@@ -167,6 +209,13 @@ def members_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[No
 
 
 def quota_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open a dialog to set the soft quota of a group.
+
+    Args:
+        auth: Session of the page.
+        row: Table row of the group.
+        refresh: Callback that reloads the group table.
+    """
     svc = service()
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label(f"Quota of {row['name']}").classes("text-h6")
@@ -175,12 +224,13 @@ def quota_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None
             .classes("text-caption text-grey-7")  # fmt: skip
 
         async def save() -> None:
+            """Save the entered quota."""
             if auth.check() is None:
                 return
             try:
                 await run.io_bound(svc.set_group_quota, auth.user.name, row["id"], quota.value)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             await refresh()
@@ -192,6 +242,13 @@ def quota_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None
 
 
 def delete_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open a dialog to delete a group, optionally with its folder, after typing its name.
+
+    Args:
+        auth: Session of the page.
+        row: Table row of the group.
+        refresh: Callback that reloads the group table.
+    """
     svc = service()
     name = row["name"]
     with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
@@ -204,6 +261,7 @@ def delete_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[Non
         typed = ui.input(f"Type {name} to confirm").props("autocapitalize=none")
 
         async def do_delete() -> None:
+            """Delete the group once its name was typed correctly, and show the result."""
             if auth.check() is None:
                 return
             if (typed.value or "").strip() != name:

@@ -26,6 +26,14 @@ COLUMNS = [
 
 @ui.page("/admin/images")
 def admin_images(request: Request) -> RedirectResponse | None:
+    """Render the admin desktop images page.
+
+    Args:
+        request: The incoming page request.
+
+    Returns:
+        A redirect if not logged in as an admin, else None (the page is rendered).
+    """
     auth = authenticate(request, admin=True)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -79,36 +87,65 @@ def admin_images(request: Request) -> RedirectResponse | None:
         )
 
         async def refresh() -> None:
+            """Reload the image table."""
             rows = await run.io_bound(svc.list_images)
             table.rows = [
-                r | {"built_at": r["built_at"].strftime("%Y-%m-%d %H:%M") if r["built_at"] else "–"}
-                for r in rows
+                row
+                | {
+                    "built_at": row["built_at"].strftime("%Y-%m-%d %H:%M")
+                    if row["built_at"]
+                    else "–"
+                }
+                for row in rows
             ]
             table.update()
 
         async def act(fn, *args, done: str | None = None) -> None:
+            """Run a service call as the admin, show errors or ``done``, then refresh the table.
+
+            Args:
+                fn: Service function called as ``fn(actor, *args)``.
+                *args: Further arguments for ``fn``.
+                done: Message to show on success; nothing if None.
+            """
             try:
                 await run.io_bound(fn, actor, *args)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
             else:
                 if done:
                     ui.notify(done)
             await refresh()
 
         async def on_add() -> None:
+            """Add the image from the form (starts a build) and clear the form."""
             await act(svc.add_image, tag.value or "", label.value or None, done="Build started.")
             tag.set_value("")
             label.set_value("")
 
-        async def on_enable(e) -> None:
-            await act(svc.set_image_enabled, e.args["id"], bool(e.args["v"]))
+        async def on_enable(event) -> None:
+            """Offer or withdraw an image from the table toggle.
 
-        async def on_rebuild(e) -> None:
-            await act(svc.rebuild_image, e.args["id"], done="Rebuild started.")
+            Args:
+                event: Table event with ``id`` and the new value ``v``.
+            """
+            await act(svc.set_image_enabled, event.args["id"], bool(event.args["v"]))
 
-        async def on_remove(e) -> None:
-            row = e.args
+        async def on_rebuild(event) -> None:
+            """Start a rebuild of an image.
+
+            Args:
+                event: Table event with the image row.
+            """
+            await act(svc.rebuild_image, event.args["id"], done="Rebuild started.")
+
+        async def on_remove(event) -> None:
+            """Ask for confirmation, then remove an image.
+
+            Args:
+                event: Table event with the image row.
+            """
+            row = event.args
             with ui.dialog() as dialog, ui.card():
                 ui.label(f"Remove the desktop {row['label']} ({row['base_tag']})?")
                 with ui.row():
@@ -118,18 +155,23 @@ def admin_images(request: Request) -> RedirectResponse | None:
             if await dialog:
                 await act(svc.remove_image, row["id"], done="Removed.")
 
-        def on_log(e) -> None:
-            build = svc.builder.latest_build("base", e.args["id"])
+        def on_log(event) -> None:
+            """Show the latest build log of an image.
+
+            Args:
+                event: Table event with the image row.
+            """
+            build = svc.builder.latest_build("base", event.args["id"])
             if build is None:
                 ui.notify("No build yet.")
                 return
-            show_build_log(build["id"], f"Build log: {e.args['label']}")
+            show_build_log(build["id"], f"Build log: {event.args['label']}")
 
         add_btn.on_click(guarded(auth, on_add))
         table.on("enable", guarded(auth, on_enable))
         table.on("rebuild", guarded(auth, on_rebuild))
         table.on("remove", guarded(auth, on_remove))
-        table.on("log", on_log)
-        ui.timer(5.0, refresh)
-        ui.timer(0.1, refresh, once=True)
+        table.on("log", guarded(auth, on_log))
+        ui.timer(5.0, guarded(auth, refresh))
+        ui.timer(0.1, guarded(auth, refresh), once=True)
     return None

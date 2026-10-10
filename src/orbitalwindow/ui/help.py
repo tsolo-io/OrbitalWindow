@@ -15,6 +15,15 @@ from .common import authenticate, frame, service
 @ui.page("/help")
 @ui.page("/help/{slug}")
 def help_page(request: Request, slug: str = "") -> RedirectResponse | None:
+    """Render a user guide page with a list of all pages on the side.
+
+    Args:
+        request: The incoming page request.
+        slug: Slug of the page to show; the first page if empty or unknown.
+
+    Returns:
+        A redirect to the login page if not logged in, else None (the page is rendered).
+    """
     auth = authenticate(request)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -39,9 +48,9 @@ def help_page(request: Request, slug: str = "") -> RedirectResponse | None:
     with ui.row().classes("w-full max-w-6xl mx-auto p-4 no-wrap items-start gap-6"):
         with ui.column().classes("w-56 shrink-0 gap-1"):
             ui.label("User guide").classes("text-subtitle1 font-medium")
-            for p in pages:
-                link = ui.link(p.title, f"/help/{p.slug}").classes("no-underline")
-                if p is page:
+            for entry in pages:
+                link = ui.link(entry.title, f"/help/{entry.slug}").classes("no-underline")
+                if entry is page:
                     link.classes("font-bold")
         with ui.card().classes("grow"):
             ui.markdown(render(page, values)).classes("w-full")
