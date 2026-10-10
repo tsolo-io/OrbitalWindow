@@ -7,7 +7,8 @@
 #   make test       run pytest
 #   make format     fix lint issues and format the code (ruff)
 #   make lint       check lint and formatting without changing files
-#   make start      build and start the whole stack (needs deploy/.env)
+#   make start      build and start the whole stack from this checkout (needs deploy/.env)
+#   make start PROD=1  start it from the published images instead
 #   make stop       stop and remove the stack (data under $OW_ROOT is kept)
 #   make restart    stop, rebuild and start
 #   make logs       follow the OrbitalWindow service log
@@ -15,7 +16,9 @@
 
 GPU_VENDOR := $(shell sed -n 's/^OW_GPU_VENDOR=//p' deploy/.env 2>/dev/null)
 ACME_PROVIDER := $(shell sed -n 's/^OW_ACME_DNS_PROVIDER=//p' deploy/.env 2>/dev/null)
-COMPOSE_FILES := -f deploy/compose.yaml \
+# PROD=1 uses the published images (deploy/compose.yaml only); otherwise compose.dev.yaml builds
+# them from this checkout.
+COMPOSE_FILES := -f deploy/compose.yaml $(if $(PROD),,-f deploy/compose.dev.yaml) \
   $(if $(filter nvidia,$(GPU_VENDOR)),-f deploy/compose.nvidia.yaml) \
   $(if $(ACME_PROVIDER),-f deploy/compose.tls.yaml)
 COMPOSE ?= docker compose $(COMPOSE_FILES) --env-file deploy/.env

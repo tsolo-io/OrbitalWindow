@@ -50,6 +50,7 @@ nav = [
     { "0018 Files, groups, quotas" = "adr/0018-files-groups-and-quotas.md" },
     { "0019 SSH, help, logs, TLS" = "adr/0019-ssh-help-logs-and-tls.md" },
     { "0020 Desktop readiness, DB recovery" = "adr/0020-desktop-readiness-and-db-recovery.md" },
+    { "0021 Images, compose files" = "adr/0021-images-and-compose-files.md" },
   ] },
 ]
 

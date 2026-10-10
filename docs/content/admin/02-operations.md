@@ -65,12 +65,14 @@ it grows quickly (Docker rotates it at 3 × 10 MB).
 
 ## Updating OrbitalWindow
 
+Set `OW_VERSION` in `deploy/.env` to the new release (or keep `main` for the latest build), then:
+
 ```bash
-git pull
-make start
+git pull                 # only needed if the deploy/ files changed in the release
+make start PROD=1        # pulls the images and recreates only what changed
 ```
 
-`make start` rebuilds and recreates only what changed. Database changes are applied automatically
+On a development checkout, `git pull && make start` rebuilds the images from source instead. Database changes are applied automatically
 at start. Running desktops keep running; the web pages are unavailable for under a minute while the
 service restarts. The same command applies changes to `deploy/.env`. (`make restart` stops the
 whole stack first, which interrupts every service; it is rarely needed.)

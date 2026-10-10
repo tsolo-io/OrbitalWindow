@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: Build
+run-name: Tests and Build OrbitalWindow
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: "linux"
+    container:
+      image: gitea.tu.tsolo.net/tsolo/ubuntu:24-ci
+    steps:
+      - name: Check out repository code
+        uses: https://gitea.com/actions/checkout@v4
+      - name: Run tests and build
+        run: |
+          hatch run lint:check
+          # hatch run testing:test
+          make test
+          hatch build
+      - name: Make containers and publish
+        uses: https://gitea.tu.tsolo.net/Tsolo/container-build-publish-action@main
+        with:
+          registrypassword: ${{ secrets.REGISTRYPASSWORD }}
+
+      - name: Make Samba container and publish
+        uses: https://gitea.tu.tsolo.net/Tsolo/container-build-publish-action@main
+        with:
+          registrypassword: ${{ secrets.REGISTRYPASSWORD }}
+          context: deploy/samba
+          name: orbitalwindow-samba
