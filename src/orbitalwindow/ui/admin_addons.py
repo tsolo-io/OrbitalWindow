@@ -16,6 +16,14 @@ from .common import authenticate, frame, guarded, service
 
 @ui.page("/admin/addons")
 def admin_addons(request: Request) -> RedirectResponse | None:
+    """Render the admin add-ons page.
+
+    Args:
+        request: The incoming page request.
+
+    Returns:
+        A redirect if not logged in as an admin, else None (the page is rendered).
+    """
     auth = authenticate(request, admin=True)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -33,6 +41,7 @@ def admin_addons(request: Request) -> RedirectResponse | None:
         body = ui.column().classes("w-full gap-3")
 
         def render() -> None:
+            """Rebuild the list of loaded add-ons with their switches, then the invalid ones."""
             body.clear()
             settings = {r["key"]: r for r in svc.db.all("SELECT * FROM addon_settings")}
             catalog = svc.software.catalog
@@ -72,13 +81,29 @@ def admin_addons(request: Request) -> RedirectResponse | None:
                         ui.label(err.error).classes("text-sm text-negative")
 
         def _set(fn, key: str):
-            async def handler(e) -> None:
-                await run.io_bound(fn, actor, key, bool(e.value))
+            """Make a switch handler that saves one add-on flag.
+
+            Args:
+                fn: Service setter called as ``fn(actor, key, value)``.
+                key: Add-on key.
+
+            Returns:
+                An async value-change handler.
+            """
+
+            async def handler(event) -> None:
+                """Save the switch's new value.
+
+                Args:
+                    event: The value-change event of the switch.
+                """
+                await run.io_bound(fn, actor, key, bool(event.value))
                 ui.notify("Saved.")
 
             return handler
 
         async def on_reload() -> None:
+            """Reload the add-on definitions from disk, re-render and report errors."""
             errors = await run.io_bound(svc.reload_addons, actor)
             render()
             if errors:

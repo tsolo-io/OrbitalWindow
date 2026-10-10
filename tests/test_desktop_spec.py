@@ -19,6 +19,7 @@ USER = {
 
 
 def test_spec_snapshot(settings):
+    """The desktop container spec matches the expected snapshot."""
     spec = build_spec(
         USER, "ow-desktop:ubuntu-xfce", settings, GpuVendor.NVIDIA, "s3cret", session="a1b2c3d4"
     )
@@ -73,6 +74,7 @@ def test_spec_snapshot(settings):
 
 
 def test_unlimited_and_no_gpu(settings):
+    """No limits and no GPU leave out the limit and device options."""
     user = USER | {"cpus": None, "mem_gb": None}
     k = build_spec(user, "img", settings, GpuVendor.NONE, "x").kwargs
     assert "nano_cpus" not in k and "mem_limit" not in k
@@ -81,12 +83,14 @@ def test_unlimited_and_no_gpu(settings):
 
 
 def test_amd(settings):
+    """An AMD GPU passes /dev/dri and /dev/kfd without device requests."""
     k = build_spec(USER, "img", settings, GpuVendor.AMD, "x").kwargs
     assert k["devices"] == ["/dev/dri:/dev/dri:rwm", "/dev/kfd:/dev/kfd:rwm"]
     assert k["device_requests"] == []
 
 
 def test_state_mapping():
+    """Docker container states map to the right desktop states."""
     from orbitalwindow.desktops import DesktopState, _state_of
 
     assert _state_of({"Status": "running"}) is DesktopState.RUNNING
@@ -101,6 +105,7 @@ def test_state_mapping():
 
 
 def test_each_start_gets_its_own_path(settings):
+    """Every desktop start gets its own URL path."""
     from orbitalwindow.desktops import desktop_path
 
     assert desktop_path("user1") == "/desktop/user1/"

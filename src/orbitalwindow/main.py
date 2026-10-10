@@ -30,10 +30,27 @@ SECURITY_HEADERS = {
 
 
 def create_app(settings: Settings | None = None, service: Service | None = None) -> FastAPI:
+    """Create the FastAPI app with the HTTP routes and security headers (without the UI).
+
+    Args:
+        settings: Settings to use; read from the environment when None.
+        service: An existing service (e.g. in tests); created at startup when None.
+
+    Returns:
+        The app.
+    """
     settings = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Create and start the service if none was given, and stop it on shutdown.
+
+        Args:
+            app: The FastAPI app.
+
+        Yields:
+            Nothing; the app runs while suspended here.
+        """
         svc = app.state.service
         if svc is None:
             client = docker.DockerClient(base_url=settings.docker_host, version="auto", timeout=120)
@@ -58,6 +75,15 @@ def create_app(settings: Settings | None = None, service: Service | None = None)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next) -> Response:
+        """Add the security headers, and ``Cache-Control: no-store`` to dynamic responses.
+
+        Args:
+            request: The incoming request.
+            call_next: Handler for the rest of the middleware chain.
+
+        Returns:
+            The response with the headers added (existing ones are kept).
+        """
         response = await call_next(request)
         for key, value in SECURITY_HEADERS.items():
             # Pages under /desktop/ load in the named desktop tab; COOP there would clear its
@@ -74,6 +100,12 @@ def create_app(settings: Settings | None = None, service: Service | None = None)
 
 
 def mount_ui(app: FastAPI, settings: Settings) -> None:
+    """Register the NiceGUI pages and mount NiceGUI on the app.
+
+    Args:
+        app: The FastAPI app.
+        settings: The process-level settings.
+    """
     from .ui import (  # noqa: F401  (registers the pages)
         admin_addons,
         admin_groups,
@@ -96,6 +128,11 @@ def mount_ui(app: FastAPI, settings: Settings) -> None:
 
 
 def build() -> FastAPI:
+    """Build the complete app (HTTP routes and UI); the uvicorn factory.
+
+    Returns:
+        The app.
+    """
     settings = get_settings()
     app = create_app(settings)
     mount_ui(app, settings)
@@ -103,6 +140,7 @@ def build() -> FastAPI:
 
 
 def run() -> None:
+    """Configure logging and serve the app with uvicorn."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )

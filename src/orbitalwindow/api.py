@@ -40,8 +40,18 @@ class Access(IntEnum):
 def owner_access(
     user: SessionUser | None, forwarded_uri: str, kind: str = "desktop"
 ) -> tuple[Access, str | None]:
-    """Decide forwardAuth for ``/desktop/<owner>/…`` or ``/files/<owner>/…``. Only the owner
-    gets in; admins included."""
+    """Decide forwardAuth for ``/desktop/<owner>/…`` or ``/files/<owner>/…``.
+
+    Only the owner gets in; admins included.
+
+    Args:
+        user: The logged-in user, or None when there is no valid session.
+        forwarded_uri: The original request URI from Traefik's ``X-Forwarded-Uri``.
+        kind: Which route family to match: ``"desktop"`` or ``"files"``.
+
+    Returns:
+        The access decision and, when allowed, the owner's user name (otherwise None).
+    """
     match = OWNER_URI_RE[kind].match(forwarded_uri or "")
     if match is None:
         return Access.DENY, None
@@ -53,7 +63,15 @@ def owner_access(
 
 
 def safe_next(target: str | None, default: str = "/") -> str:
-    """Only allow local absolute paths as a post-login target (no open redirects)."""
+    """Only allow local absolute paths as a post-login target (no open redirects).
+
+    Args:
+        target: The requested post-login path.
+        default: Path to use when ``target`` is missing or not safe.
+
+    Returns:
+        ``target`` if it is a safe local path, otherwise ``default``.
+    """
     if not target or not NEXT_RE.fullmatch(target) or target.startswith("//"):
         return default
     parts = urlsplit(target)
@@ -63,7 +81,16 @@ def safe_next(target: str | None, default: str = "/") -> str:
 
 
 def same_origin(request: Request) -> bool:
-    """Reject cross-site form posts. Browsers send Origin on POST; require it to match Host."""
+    """Reject cross-site form posts.
+
+    Browsers send Origin on POST; require it to match Host.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        True if the request has an Origin header whose host matches the Host header.
+    """
     origin = request.headers.get("origin")
     if origin is None:
         return False
@@ -71,14 +98,37 @@ def same_origin(request: Request) -> bool:
 
 
 def svc(request: Request) -> Service:
+    """Return the application's service object.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        The ``Service`` stored on the app state.
+    """
     return request.app.state.service
 
 
 def current_user(request: Request) -> SessionUser | None:
+    """Return the user of the request's session cookie.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        The session user, or None when the cookie is missing or no longer valid.
+    """
     return svc(request).sessions.resolve(request.cookies.get(COOKIE_NAME))
 
 
 def set_session_cookie(request: Request, response: Response, token: str) -> None:
+    """Set the HttpOnly session cookie on a response.
+
+    Args:
+        request: The incoming request (used to reach the service settings).
+        response: The response to set the cookie on.
+        token: The signed session token.
+    """
     service = svc(request)
     response.set_cookie(
         COOKIE_NAME,
@@ -92,10 +142,26 @@ def set_session_cookie(request: Request, response: Response, token: str) -> None
 
 
 def client_ip(request: Request) -> str:
+    """Return the client's address.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        The client host, or ``"unknown"`` when it is not available.
+    """
     return request.client.host if request.client else "unknown"
 
 
 def _redirect(url: str) -> RedirectResponse:
+    """Return a 303 See Other redirect.
+
+    Args:
+        url: The redirect target.
+
+    Returns:
+        A redirect response with status 303.
+    """
     return RedirectResponse(url, status_code=303)
 
 
@@ -106,6 +172,17 @@ def login(
     password: Annotated[str, Form(max_length=256)] = "",
     next: Annotated[str, Form(max_length=512)] = "/",
 ) -> Response:
+    """Handle the login form: check the credentials and set the session cookie.
+
+    Args:
+        request: The incoming request.
+        username: The submitted user name.
+        password: The submitted password.
+        next: Where to go after a successful login.
+
+    Returns:
+        A redirect to ``next`` on success, or back to the login page with an error code.
+    """
     target = safe_next(next)
     if not same_origin(request):
         return _redirect("/login?error=origin")
@@ -122,8 +199,17 @@ def login(
 
 @router.post("/auth/logout")
 def logout(request: Request) -> Response:
-    """Log out everywhere: the session version is bumped, so tokens held by other tabs or
-    devices stop working too (not just this browser's cookie)."""
+    """Log out everywhere.
+
+    The session version is bumped, so tokens held by other tabs or devices stop working too
+    (not just this browser's cookie).
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        A redirect to the login page.
+    """
     response = _redirect("/login")
     if same_origin(request):
         user = current_user(request)
@@ -140,6 +226,17 @@ def change_password(
     new: Annotated[str, Form(max_length=256)] = "",
     confirm: Annotated[str, Form(max_length=256)] = "",
 ) -> Response:
+    """Handle the change-password form and re-issue the session cookie.
+
+    Args:
+        request: The incoming request.
+        current: The user's current password.
+        new: The new password.
+        confirm: The new password again.
+
+    Returns:
+        A redirect to the home page with a ``pw`` status code in the query string.
+    """
     user = current_user(request)
     if user is None:
         return _redirect("/login")
@@ -153,8 +250,8 @@ def change_password(
         return _redirect("/?pw=limit")
     try:
         ver, result = service.change_own_password(user.id, current, new)
-    except ValidationError as e:
-        if "current password" in str(e):
+    except ValidationError as exc:
+        if "current password" in str(exc):
             service.limiter.failure(*keys)
             return _redirect("/?pw=current")
         return _redirect("/?pw=weak")
@@ -164,6 +261,16 @@ def change_password(
 
 
 def _login_redirect(request: Request, uri: str) -> Response:
+    """Redirect a forwardAuth request to the login page, coming back to ``uri`` afterwards.
+
+    Args:
+        request: The forwardAuth request from Traefik.
+        uri: The original request URI to return to after login.
+
+    Returns:
+        An absolute 302 redirect to the login page, or a 401 response when the forwarded
+        protocol or host is not valid.
+    """
     # Traefik resolves a relative Location against the auth server, so make it absolute.
     proto = request.headers.get("x-forwarded-proto", "https")
     host = request.headers.get("x-forwarded-host", "")
@@ -174,18 +281,43 @@ def _login_redirect(request: Request, uri: str) -> Response:
 
 @router.get("/auth/desktop")
 def auth_desktop(request: Request) -> Response:
-    """Traefik forwardAuth for desktop routers. Also used for their WebSocket upgrades."""
+    """Traefik forwardAuth for desktop routers. Also used for their WebSocket upgrades.
+
+    Args:
+        request: The forwardAuth request from Traefik.
+
+    Returns:
+        200 for the owner, a login redirect without a session, otherwise 403.
+    """
     uri = request.headers.get("x-forwarded-uri", "")
     return _owner_response(request, uri, "desktop")
 
 
 @router.get("/auth/files")
 def auth_files(request: Request) -> Response:
-    """Traefik forwardAuth for file manager routers. ``X-OW-User`` logs the owner in there."""
+    """Traefik forwardAuth for file manager routers. ``X-OW-User`` logs the owner in there.
+
+    Args:
+        request: The forwardAuth request from Traefik.
+
+    Returns:
+        200 for the owner, a login redirect without a session, otherwise 403.
+    """
     return _owner_response(request, request.headers.get("x-forwarded-uri", ""), "files")
 
 
 def _owner_response(request: Request, uri: str, kind: str) -> Response:
+    """Build the forwardAuth response for an owner-only route.
+
+    Args:
+        request: The forwardAuth request from Traefik.
+        uri: The original request URI.
+        kind: Which route family to match: ``"desktop"`` or ``"files"``.
+
+    Returns:
+        200 with an ``X-OW-User`` header for the owner, a login redirect without a session,
+        otherwise 403.
+    """
     access, owner = owner_access(current_user(request), uri, kind)
     if access is Access.ALLOW:
         return PlainTextResponse("ok", headers={"X-OW-User": owner or ""})
@@ -196,7 +328,14 @@ def _owner_response(request: Request, uri: str, kind: str) -> Response:
 
 @router.get("/auth/admin")
 def auth_admin(request: Request) -> Response:
-    """Traefik forwardAuth for admin tools (cAdvisor, later Dozzle): admins only."""
+    """Traefik forwardAuth for admin tools (cAdvisor, later Dozzle): admins only.
+
+    Args:
+        request: The forwardAuth request from Traefik.
+
+    Returns:
+        200 with user headers for admins, a login redirect without a session, otherwise 403.
+    """
     user = current_user(request)
     if user is None:
         return _login_redirect(request, request.headers.get("x-forwarded-uri", ""))
@@ -207,4 +346,9 @@ def auth_admin(request: Request) -> Response:
 
 @router.get("/healthz", include_in_schema=False)
 def healthz() -> Response:
+    """Report that the server is up.
+
+    Returns:
+        A plain ``ok`` response.
+    """
     return PlainTextResponse("ok")

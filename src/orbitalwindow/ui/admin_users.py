@@ -70,25 +70,49 @@ ACTIONS_SLOT = """
 
 
 def _limits(row: dict) -> str:
+    """Format a user's CPU and RAM limits for the table.
+
+    Args:
+        row: User row with ``cpus`` and ``mem_gb``.
+
+    Returns:
+        For example ``2 CPU / 8 GB``; a missing limit shows as ``unlimited``.
+    """
     cpus = f"{row['cpus']:g} CPU" if row["cpus"] else "unlimited"
     mem = f"{row['mem_gb']:g} GB" if row["mem_gb"] else "unlimited"
     return f"{cpus} / {mem}"
 
 
 def show_result(title: str, result: Result) -> None:
-    """Show a generated password once, plus any notes or warnings."""
+    """Show a generated password once, plus any notes or warnings.
+
+    Args:
+        title: Dialog title.
+        result: Result of the service call, with an optional password and warnings.
+    """
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label(title).classes("text-h6")
         if result.password:
             ui.label("Give this password to the user. It is shown only once:")
             ui.code(result.password, language=None).classes("text-lg w-full")
-        for w in result.warnings:
-            ui.label(w).classes("text-sm text-grey-9")
+        for warning in result.warnings:
+            ui.label(warning).classes("text-sm text-grey-9")
         ui.button("Done", on_click=dialog.close).props("no-caps")
     dialog.open()
 
 
 def confirm(title: str, text: str, button: str, *, danger: bool = False) -> ui.dialog:
+    """Build a yes/cancel confirmation dialog.
+
+    Args:
+        title: Dialog title (the question).
+        text: Explanation below the title; nothing if empty.
+        button: Text of the confirming button.
+        danger: Whether to colour the confirming button as dangerous.
+
+    Returns:
+        The dialog; awaiting it gives True if confirmed, False if cancelled.
+    """
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label(title).classes("text-h6")
         if text:
@@ -103,6 +127,14 @@ def confirm(title: str, text: str, button: str, *, danger: bool = False) -> ui.d
 
 @ui.page("/admin/users")
 def admin_users(request: Request) -> RedirectResponse | None:
+    """Render the admin users page.
+
+    Args:
+        request: The incoming page request.
+
+    Returns:
+        A redirect if not logged in as an admin, else None (the page is rendered).
+    """
     auth = authenticate(request, admin=True)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -121,43 +153,57 @@ def admin_users(request: Request) -> RedirectResponse | None:
         )
 
         async def refresh() -> None:
+            """Reload the user table with desktop states and limits."""
             rows = await run.io_bound(svc.list_users)
             states = await run.io_bound(svc.desktops.states)
             table.rows = [
                 {
-                    "id": r["id"],
-                    "name": r["name"],
-                    "display_name": r["display_name"],
-                    "is_admin": r["is_admin"],
-                    "disabled": r["disabled"],
-                    "role": "admin" if r["is_admin"] else "user",
-                    "account": "disabled" if r["disabled"] else "active",
-                    "desktop": r["image_label"] or "–",
-                    "state": states.get(r["name"], DesktopState.STOPPED).value,
-                    "running": r["name"] in states,
-                    "limits": _limits(r),
-                    "cpus": r["cpus"],
-                    "mem_gb": r["mem_gb"],
-                    "quota_gb": r["quota_gb"],
+                    "id": row["id"],
+                    "name": row["name"],
+                    "display_name": row["display_name"],
+                    "is_admin": row["is_admin"],
+                    "disabled": row["disabled"],
+                    "role": "admin" if row["is_admin"] else "user",
+                    "account": "disabled" if row["disabled"] else "active",
+                    "desktop": row["image_label"] or "–",
+                    "state": states.get(row["name"], DesktopState.STOPPED).value,
+                    "running": row["name"] in states,
+                    "limits": _limits(row),
+                    "cpus": row["cpus"],
+                    "mem_gb": row["mem_gb"],
+                    "quota_gb": row["quota_gb"],
                 }
-                for r in rows
+                for row in rows
             ]
             table.update()
 
         async def call(fn: Callable[..., Any], *args: Any) -> Any:
-            """Run a service call; show validation errors; refresh the table afterwards."""
+            """Run a service call; show validation errors; refresh the table afterwards.
+
+            Args:
+                fn: Service function to run.
+                *args: Arguments for ``fn``.
+
+            Returns:
+                The result of ``fn``, or None if it raised a validation error.
+            """
             try:
                 return await run.io_bound(fn, *args)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return None
             finally:
                 await refresh()
 
         actor, me = auth.user.name, auth.user.id
 
-        async def on_action(e) -> None:
-            action, row = e.args["a"], e.args["row"]
+        async def on_action(event) -> None:
+            """Handle an entry of a user's Actions menu.
+
+            Args:
+                event: Table event with the action ``a`` and the user ``row``.
+            """
+            action, row = event.args["a"], event.args["row"]
             uid, name = row["id"], row["name"]
             if action == "password":
                 password_dialog(auth, uid, name)
@@ -212,10 +258,22 @@ def admin_users(request: Request) -> RedirectResponse | None:
 
 
 async def _open_create(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open the dialog to create a user.
+
+    Args:
+        auth: Session of the page.
+        refresh: Callback that reloads the user table.
+    """
     create_dialog(auth, refresh)
 
 
 def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open a dialog to create a user, with limits and grants of restricted add-ons.
+
+    Args:
+        auth: Session of the page.
+        refresh: Callback that reloads the user table.
+    """
     svc = service()
     images = {i["id"]: i["label"] for i in svc.enabled_images()}
     settings = svc.get_settings()
@@ -237,10 +295,16 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
         ui.label("A password is generated and shown once.").classes("text-caption text-grey-7")
 
         async def create() -> None:
+            """Create the user from the form and show the generated password."""
             if auth.check() is None:
                 return
 
             def work() -> Result:
+                """Create the user and grant the ticked add-ons (runs in a worker thread).
+
+                Returns:
+                    The result of creating the user.
+                """
                 result = svc.create_user(
                     actor=auth.user.name,
                     name=name.value or "",
@@ -260,8 +324,8 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
 
             try:
                 result = await run.io_bound(work)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             show_result(f"User {name.value.strip().lower()} created", result)
@@ -274,6 +338,13 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
 
 
 def password_dialog(auth: PageAuth, user_id: int, name: str) -> None:
+    """Open a dialog to reset a user's password (generated or entered).
+
+    Args:
+        auth: Session of the page.
+        user_id: Id of the user.
+        name: User name, for the dialog text.
+    """
     svc = service()
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label(f"Reset the password of {name}").classes("text-h6")
@@ -288,13 +359,14 @@ def password_dialog(auth: PageAuth, user_id: int, name: str) -> None:
         pw.bind_visibility_from(mode, "value", value="set")
 
         async def do_reset() -> None:
+            """Reset the password and show the new one if it was generated."""
             if auth.check() is None:
                 return
             new = pw.value if mode.value == "set" else None
             try:
                 result = await run.io_bound(svc.admin_set_password, auth.user.name, user_id, new)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             if result.password or result.warnings:
@@ -309,6 +381,13 @@ def password_dialog(auth: PageAuth, user_id: int, name: str) -> None:
 
 
 def limits_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open a dialog to set a user's CPU and RAM limits and disk quota.
+
+    Args:
+        auth: Session of the page.
+        row: Table row of the user.
+        refresh: Callback that reloads the user table.
+    """
     svc = service()
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label(f"Limits for {row['name']}").classes("text-h6")
@@ -324,13 +403,14 @@ def limits_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[Non
             .classes("text-caption text-grey-7")  # fmt: skip
 
         async def save() -> None:
+            """Save the entered limits and quota."""
             if auth.check() is None:
                 return
             try:
                 await run.io_bound(svc.set_limits, auth.user.name, row["id"], cpus.value, mem.value)
                 await run.io_bound(svc.set_quota, auth.user.name, row["id"], quota.value)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             ui.notify("Saved. The new limits apply at the next start.")
@@ -343,18 +423,26 @@ def limits_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[Non
 
 
 def rename_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[None]]) -> None:
+    """Open a dialog to change a user's full name.
+
+    Args:
+        auth: Session of the page.
+        row: Table row of the user.
+        refresh: Callback that reloads the user table.
+    """
     svc = service()
     with ui.dialog() as dialog, ui.card().classes("w-96"):
         ui.label(f"Name of {row['name']}").classes("text-h6")
         display = ui.input("Full name", value=row["display_name"])
 
         async def save() -> None:
+            """Save the entered full name."""
             if auth.check() is None:
                 return
             try:
                 await run.io_bound(svc.set_display_name, auth.user.name, row["id"], display.value)
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             await refresh()
@@ -368,6 +456,14 @@ def rename_dialog(auth: PageAuth, row: dict, refresh: Callable[[], Awaitable[Non
 def delete_dialog(
     auth: PageAuth, user_id: int, name: str, refresh: Callable[[], Awaitable[None]]
 ) -> None:
+    """Open a dialog to delete a user, optionally with the home folder, after typing the name.
+
+    Args:
+        auth: Session of the page.
+        user_id: Id of the user.
+        name: User name, which must be typed to confirm.
+        refresh: Callback that reloads the user table.
+    """
     svc = service()
     with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
         ui.label(f"Delete {name}?").classes("text-h6 text-negative")
@@ -379,6 +475,7 @@ def delete_dialog(
         typed = ui.input(f"Type {name} to confirm").props("autocapitalize=none")
 
         async def do_delete() -> None:
+            """Delete the user once the name was typed correctly, and show the result."""
             if auth.check() is None:
                 return
             if (typed.value or "").strip() != name:
@@ -388,8 +485,8 @@ def delete_dialog(
                 result = await run.io_bound(
                     svc.delete_user, auth.user.name, auth.user.id, user_id, also_home.value
                 )
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             dialog.close()
             show_result(f"{name} deleted", result)
@@ -402,7 +499,13 @@ def delete_dialog(
 
 
 def grants_dialog(auth: PageAuth, user_id: int, name: str) -> None:
-    """Grant or revoke restricted add-ons for one user."""
+    """Open a dialog to grant or revoke restricted add-ons for one user.
+
+    Args:
+        auth: Session of the page.
+        user_id: Id of the user.
+        name: User name, for the dialog title.
+    """
     svc = service()
     restricted = [a for a in svc.software.enabled_addons() if svc.software.is_restricted(a)]
     granted = svc.grants(user_id)
@@ -416,10 +519,16 @@ def grants_dialog(auth: PageAuth, user_id: int, name: str) -> None:
         for addon in restricted:
             box = ui.checkbox(addon.spec.label, value=addon.key in granted)
 
-            async def toggle(e, key: str = addon.key) -> None:
+            async def toggle(event, key: str = addon.key) -> None:
+                """Grant or revoke the add-on when its checkbox changes.
+
+                Args:
+                    event: Value-change event of the checkbox.
+                    key: Add-on key (bound per loop iteration).
+                """
                 if auth.check() is None:
                     return
-                if e.value:
+                if event.value:
                     await run.io_bound(svc.grant_addon, auth.user.name, user_id, key)
                     ui.notify("Granted. The user can now switch it on.")
                 else:

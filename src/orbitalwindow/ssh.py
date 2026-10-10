@@ -49,16 +49,37 @@ class PublicKey:
 
     @property
     def fingerprint(self) -> str:
+        """Return the OpenSSH SHA-256 fingerprint of the key.
+
+        Returns:
+            ``SHA256:<base64 digest>``.
+        """
         digest = base64.b64encode(hashlib.sha256(self.blob).digest()).decode().rstrip("=")
         return f"SHA256:{digest}"
 
     @property
     def line(self) -> str:
-        """The key without its comment (comments are user text; labels hold the name)."""
+        """Return the key without its comment (comments are user text; labels hold the name).
+
+        Returns:
+            ``<type> <base64 blob>``.
+        """
         return f"{self.type} {base64.b64encode(self.blob).decode()}"
 
 
 def _read_string(data: bytes, offset: int) -> tuple[bytes, int]:
+    """Read one length-prefixed SSH wire-format string.
+
+    Args:
+        data: The key blob.
+        offset: Where the 4-byte length starts.
+
+    Returns:
+        The string bytes and the offset just after them.
+
+    Raises:
+        ValueError: If the data ends too early.
+    """
     if offset + 4 > len(data):
         raise ValueError("truncated")
     (length,) = struct.unpack(">I", data[offset : offset + 4])
@@ -69,7 +90,18 @@ def _read_string(data: bytes, offset: int) -> tuple[bytes, int]:
 
 
 def parse_public_key(text: str) -> PublicKey:
-    """Validate one OpenSSH public key line, e.g. the contents of ``id_ed25519.pub``."""
+    """Validate one OpenSSH public key line, e.g. the contents of ``id_ed25519.pub``.
+
+    Args:
+        text: The pasted key.
+
+    Returns:
+        The parsed key.
+
+    Raises:
+        ValidationError: If the text is a private key, not a single key line, an unsupported
+            type, damaged, or an RSA key that is too short.
+    """
     if "PRIVATE KEY" in text:
         raise ValidationError("That is a private key. Never share it; paste the .pub file.")
     parts = text.strip().split(None, 2)
@@ -98,6 +130,18 @@ def parse_public_key(text: str) -> PublicKey:
 
 
 def validate_label(label: str, key: PublicKey) -> str:
+    """Return a valid name for a key, falling back to its comment or ``key``.
+
+    Args:
+        label: The name the user gave, possibly empty.
+        key: The parsed key.
+
+    Returns:
+        The trimmed name, at most 60 characters.
+
+    Raises:
+        ValidationError: If the name contains characters that are not allowed.
+    """
     label = (label or key.comment or "key").strip()[:60]
     if not LABEL_RE.fullmatch(label):
         raise ValidationError("The name may contain letters, digits, spaces and . @ ( ) + -")
@@ -105,9 +149,14 @@ def validate_label(label: str, key: PublicKey) -> str:
 
 
 def ensure_upstream_key(state_dir: Path, user: str) -> tuple[str, str]:
-    """The per-user key sshpiper uses to log in to the desktop. Created once (mode 600).
+    """Return the per-user key sshpiper uses to log in to the desktop. Created once (mode 600).
 
-    Returns ``(private_key_openssh, public_key_line)``.
+    Args:
+        state_dir: The service state folder; keys live in its ``ssh`` sub-folder.
+        user: OrbitalWindow user name.
+
+    Returns:
+        ``(private_key_openssh, public_key_line)``.
     """
     folder = state_dir / "ssh"
     folder.mkdir(parents=True, exist_ok=True)
@@ -131,14 +180,37 @@ def ensure_upstream_key(state_dir: Path, user: str) -> tuple[str, str]:
 
 
 def remove_upstream_key(state_dir: Path, user: str) -> None:
+    """Delete a user's upstream key pair, if present.
+
+    Args:
+        state_dir: The service state folder.
+        user: OrbitalWindow user name.
+    """
     for path in (state_dir / "ssh" / user, state_dir / "ssh" / f"{user}.pub"):
         path.unlink(missing_ok=True)
 
 
 def sshpiper_labels(user: str, authorized_keys: list[str], private_key: str) -> dict[str, str]:
-    """Labels on the desktop container that tell sshpiper how to route ``user``."""
+    """Return the labels on the desktop container that tell sshpiper how to route ``user``.
+
+    Args:
+        user: OrbitalWindow user name.
+        authorized_keys: The user's public key lines.
+        private_key: The upstream private key (OpenSSH format).
+
+    Returns:
+        The ``sshpiper.*`` labels.
+    """
 
     def b64(text: str) -> str:
+        """Base64-encode text.
+
+        Args:
+            text: The text to encode.
+
+        Returns:
+            The base64 string.
+        """
         return base64.b64encode(text.encode()).decode()
 
     return {

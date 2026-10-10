@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 
 def _exit_process() -> None:
+    """Flush logs and stderr, then exit the process immediately with status 70."""
     logging.shutdown()
     sys.stderr.flush()
     os._exit(70)
@@ -151,6 +152,11 @@ MIGRATIONS: list[str] = [
 
 class Database:
     def __init__(self, path: Path | str) -> None:
+        """Open (or create) the database and apply pending migrations.
+
+        Args:
+            path: Database file path, or ``":memory:"`` for an in-memory database.
+        """
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._con = duckdb.connect(str(path))
@@ -163,10 +169,12 @@ class Database:
         self._migrate()
 
     def close(self) -> None:
+        """Close the DuckDB connection."""
         with self._lock:
             self._con.close()
 
     def _migrate(self) -> None:
+        """Apply every migration in ``MIGRATIONS`` newer than the recorded schema version."""
         with self._lock:
             self._con.execute(
                 "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
@@ -180,7 +188,11 @@ class Database:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        """Run a block atomically. Nested use joins the outer transaction."""
+        """Run a block atomically. Nested use joins the outer transaction.
+
+        Yields:
+            Nothing; the block runs inside the transaction and is rolled back if it raises.
+        """
         with self._lock:
             # Only the thread holding the lock touches _depth, so a plain attribute is safe.
             self._depth += 1
@@ -199,9 +211,19 @@ class Database:
                 self._depth -= 1
 
     def _run(self, sql: str, params: list[Any] | None = None) -> duckdb.DuckDBPyConnection:
-        """Execute one statement. A DuckDB *fatal* error invalidates the database for the rest of
-        the process, so the process exits and Docker restarts it (DuckDB recovers from its WAL)
-        instead of failing every request until someone notices."""
+        """Execute one statement.
+
+        A DuckDB *fatal* error invalidates the database for the rest of the process, so the
+        process exits and Docker restarts it (DuckDB recovers from its WAL) instead of failing
+        every request until someone notices.
+
+        Args:
+            sql: SQL statement.
+            params: Positional query parameters.
+
+        Returns:
+            The DuckDB connection, ready to fetch results.
+        """
         try:
             return self._con.execute(sql, params or [])
         except duckdb.FatalException:
@@ -210,20 +232,53 @@ class Database:
             raise
 
     def execute(self, sql: str, params: list[Any] | None = None) -> None:
+        """Execute one statement under the lock, discarding any result.
+
+        Args:
+            sql: SQL statement.
+            params: Positional query parameters.
+        """
         with self._lock:
             self._run(sql, params)
 
     def all(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+        """Run a query and return every row.
+
+        Args:
+            sql: SQL query.
+            params: Positional query parameters.
+
+        Returns:
+            One dict per row, keyed by column name.
+        """
         with self._lock:
             cur = self._run(sql, params)
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
 
     def one(self, sql: str, params: list[Any] | None = None) -> dict[str, Any] | None:
+        """Run a query and return its first row.
+
+        Args:
+            sql: SQL query.
+            params: Positional query parameters.
+
+        Returns:
+            The first row as a dict keyed by column name, or None if there are no rows.
+        """
         rows = self.all(sql, params)
         return rows[0] if rows else None
 
     def scalar(self, sql: str, params: list[Any] | None = None) -> Any:
+        """Run a query and return the first column of its first row.
+
+        Args:
+            sql: SQL query.
+            params: Positional query parameters.
+
+        Returns:
+            The value, or None if there are no rows.
+        """
         with self._lock:
             row = self._run(sql, params).fetchone()
             return row[0] if row else None
@@ -231,7 +286,14 @@ class Database:
     # --- small helpers used across modules -------------------------------------------------
 
     def next_counter(self, name: str) -> int:
-        """Return the next value (1, 2, …) of a never-reused counter."""
+        """Return the next value (1, 2, …) of a never-reused counter.
+
+        Args:
+            name: Counter name.
+
+        Returns:
+            The new counter value.
+        """
         with self.transaction():
             value = self.scalar("SELECT value FROM counters WHERE name = ?", [name])
             if value is None:
@@ -243,10 +305,25 @@ class Database:
             return value
 
     def get_setting(self, key: str, default: str | None = None) -> str | None:
+        """Return a stored setting.
+
+        Args:
+            key: Setting name.
+            default: Value returned when the setting is not stored.
+
+        Returns:
+            The stored value, or ``default``.
+        """
         value = self.scalar("SELECT value FROM settings WHERE key = ?", [key])
         return default if value is None else value
 
     def set_setting(self, key: str, value: str) -> None:
+        """Store a setting, replacing any existing value.
+
+        Args:
+            key: Setting name.
+            value: New value.
+        """
         self.execute(
             "INSERT INTO settings VALUES (?, ?) "
             "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -254,6 +331,14 @@ class Database:
         )
 
     def audit(self, actor: str, action: str, target: str = "", detail: str = "") -> None:
+        """Append an entry to the audit log.
+
+        Args:
+            actor: Who performed the action.
+            action: What was done.
+            target: What it was done to.
+            detail: Free-form extra detail.
+        """
         self.execute(
             "INSERT INTO audit (actor, action, target, detail) VALUES (?, ?, ?, ?)",
             [actor, action, target, detail],

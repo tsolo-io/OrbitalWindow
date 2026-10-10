@@ -34,6 +34,14 @@ user help pages (also served at `/help`): `docs/content/user/`.
 - **Deployment files** live in `deploy/`, add-on definitions in `addons/`, docs in `docs/` (zensical: config `docs/zensical.toml`, pages in `docs/content/`).
 - **License:** Apache-2.0.
 
+### Code style
+- **Variable names:** no single-letter names in a `for` loop whose body spans lines or in a comprehension that
+  wraps over several lines; a one-line comprehension may keep short names. Exceptions are caught `as exc`.
+- **Docstrings:** document every function and method (private helpers and nested UI handlers too): a one-line
+  summary, a long description only if needed (after a blank line), then Google style `Args:` (no types; they
+  are in the signature), `Returns:` and other sections such as `Raises:` when relevant. Test functions only
+  need a one-line docstring.
+
 ## Environment facts
 - **Production:** single server, Ubuntu 24.04, mostly NVIDIA GPUs (some AMD), 2–3 users, LAN only.
 - **Test server:** Ubuntu 26.04, RTX 5080 (NVIDIA open kernel module), Docker 29 with nvidia-container-toolkit.

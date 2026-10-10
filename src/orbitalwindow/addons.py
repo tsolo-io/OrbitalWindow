@@ -47,6 +47,17 @@ class Mount(BaseModel):
     @field_validator("source")
     @classmethod
     def _source(cls, v: str) -> str:
+        """Check that the mount source is a relative path inside ``shared/``.
+
+        Args:
+            v: The source path, relative to ``$OW_ROOT``.
+
+        Returns:
+            The normalised path.
+
+        Raises:
+            ValueError: If the path is absolute, contains ``..`` or is outside ``shared/``.
+        """
         p = PurePosixPath(v)
         if p.is_absolute() or ".." in p.parts or not p.parts:
             raise ValueError("must be a path relative to OW_ROOT, without '..'")
@@ -57,6 +68,18 @@ class Mount(BaseModel):
     @field_validator("target")
     @classmethod
     def _target(cls, v: str) -> str:
+        """Check that the mount target is an absolute path outside the reserved locations.
+
+        Args:
+            v: The container path.
+
+        Returns:
+            The normalised path.
+
+        Raises:
+            ValueError: If the path is relative, contains ``..``, is ``/`` or lies inside one of
+                ``RESERVED_TARGETS``.
+        """
         p = PurePosixPath(v)
         if not p.is_absolute() or ".." in p.parts or str(p) == "/":
             raise ValueError("must be an absolute path such as /opt/matlab")
@@ -84,6 +107,17 @@ class AddonSpec(BaseModel):
     @field_validator("apt")
     @classmethod
     def _apt(cls, v: list[str]) -> list[str]:
+        """Check the apt package names.
+
+        Args:
+            v: The package names.
+
+        Returns:
+            The unchanged list.
+
+        Raises:
+            ValueError: If any name is not a valid package name.
+        """
         bad = [p for p in v if not APT_RE.fullmatch(p)]
         if bad:
             raise ValueError(f"not valid package names: {', '.join(bad)}")
@@ -92,6 +126,17 @@ class AddonSpec(BaseModel):
     @field_validator("launchers")
     @classmethod
     def _launchers(cls, v: list[str]) -> list[str]:
+        """Check the launcher file names.
+
+        Args:
+            v: The launcher file names.
+
+        Returns:
+            The unchanged list.
+
+        Raises:
+            ValueError: If a name does not look like ``ow-<name>.desktop``.
+        """
         bad = [name for name in v if not LAUNCHER_RE.fullmatch(name)]
         if bad:
             raise ValueError(f"launcher file names must look like ow-<name>.desktop: {bad}")
@@ -100,16 +145,40 @@ class AddonSpec(BaseModel):
     @field_validator("env")
     @classmethod
     def _env(cls, v: dict[str, str]) -> dict[str, str]:
-        for k in v:
-            if not ENV_RE.fullmatch(k):
-                raise ValueError(f"not a valid environment variable name: {k}")
-            if k in RESERVED_ENV:
-                raise ValueError(f"{k} is set by OrbitalWindow and can't be changed by an add-on")
+        """Check the environment variable names.
+
+        Args:
+            v: The environment variables.
+
+        Returns:
+            The unchanged mapping.
+
+        Raises:
+            ValueError: If a name is not valid or is one of ``RESERVED_ENV``.
+        """
+        for name in v:
+            if not ENV_RE.fullmatch(name):
+                raise ValueError(f"not a valid environment variable name: {name}")
+            if name in RESERVED_ENV:
+                raise ValueError(
+                    f"{name} is set by OrbitalWindow and can't be changed by an add-on"
+                )
         return v
 
     @field_validator("script")
     @classmethod
     def _script(cls, v: str | None) -> str | None:
+        """Check that the script is a plain file name in the add-on folder.
+
+        Args:
+            v: The script file name, or None.
+
+        Returns:
+            The unchanged value.
+
+        Raises:
+            ValueError: If the name contains a path or starts with a dot.
+        """
         if v is not None and (
             "/" in v or v.startswith(".") or not re.fullmatch(r"[A-Za-z0-9._-]+", v)
         ):
@@ -118,6 +187,14 @@ class AddonSpec(BaseModel):
 
     @model_validator(mode="after")
     def _unique_targets(self) -> AddonSpec:
+        """Check that no two mounts share a target.
+
+        Returns:
+            The validated spec.
+
+        Raises:
+            ValueError: If two mounts have the same target.
+        """
         targets = [m.target for m in self.mounts]
         if len(targets) != len(set(targets)):
             raise ValueError("two mounts have the same target")
@@ -132,11 +209,22 @@ class Addon:
 
     @property
     def key(self) -> str:
+        """Return the add-on key.
+
+        Returns:
+            The key from ``addon.yaml``.
+        """
         return self.spec.key
 
     @property
     def affects_image(self) -> bool:
-        """Add-ons with apt packages, a script or launchers are baked into the per-user image."""
+        """Tell whether the add-on changes the per-user image.
+
+        Add-ons with apt packages, a script or launchers are baked into the per-user image.
+
+        Returns:
+            True if the add-on has apt packages, a script or launchers.
+        """
         return bool(self.spec.apt or self.spec.script or self.spec.launchers)
 
 
@@ -154,36 +242,62 @@ class Catalog:
 
 
 def _hash_folder(folder: Path) -> str:
+    """Hash the names and contents of every file in a folder.
+
+    Args:
+        folder: The add-on folder.
+
+    Returns:
+        The SHA-256 hex digest.
+    """
     h = hashlib.sha256()
-    for f in sorted(p for p in folder.rglob("*") if p.is_file()):
-        h.update(str(f.relative_to(folder)).encode() + b"\0")
-        h.update(f.read_bytes() + b"\0")
+    for file in sorted(p for p in folder.rglob("*") if p.is_file()):
+        h.update(str(file.relative_to(folder)).encode() + b"\0")
+        h.update(file.read_bytes() + b"\0")
     return h.hexdigest()
 
 
-def _format_error(e: ValidationError) -> str:
+def _format_error(error: ValidationError) -> str:
+    """Turn a pydantic validation error into one readable line.
+
+    Args:
+        error: The validation error.
+
+    Returns:
+        ``location: message`` parts joined by ``; ``.
+    """
     parts = []
-    for err in e.errors():
+    for err in error.errors():
         loc = ".".join(str(x) for x in err["loc"]) or "addon.yaml"
         parts.append(f"{loc}: {err['msg']}")
     return "; ".join(parts)
 
 
 def load_addon(folder: Path) -> Addon:
-    """Load and validate one add-on folder. Raises ValueError with a readable message."""
+    """Load and validate one add-on folder.
+
+    Args:
+        folder: The add-on folder; its name must match the key.
+
+    Returns:
+        The loaded add-on.
+
+    Raises:
+        ValueError: With a readable message if the definition is missing or not valid.
+    """
     file = folder / ADDON_FILE
     if not file.is_file():
         raise ValueError(f"{ADDON_FILE} is missing")
     try:
         data: Any = yaml.safe_load(file.read_text())
-    except yaml.YAMLError as e:
-        raise ValueError(f"{ADDON_FILE} is not valid YAML: {e}") from e
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{ADDON_FILE} is not valid YAML: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{ADDON_FILE} must be a mapping")
     try:
         spec = AddonSpec.model_validate(data)
-    except ValidationError as e:
-        raise ValueError(_format_error(e)) from e
+    except ValidationError as exc:
+        raise ValueError(_format_error(exc)) from exc
     if spec.key != folder.name:
         raise ValueError(f"key '{spec.key}' must match the folder name '{folder.name}'")
     for name in [spec.script, *spec.launchers]:
@@ -193,6 +307,14 @@ def load_addon(folder: Path) -> Addon:
 
 
 def load_catalog(addons_dir: Path) -> Catalog:
+    """Load every add-on folder, collecting the ones that fail instead of stopping.
+
+    Args:
+        addons_dir: The folder holding one sub-folder per add-on.
+
+    Returns:
+        The valid add-ons by key and the errors of the invalid ones.
+    """
     catalog = Catalog()
     if not addons_dir.is_dir():
         log.warning("add-on folder %s does not exist", addons_dir)
@@ -202,9 +324,9 @@ def load_catalog(addons_dir: Path) -> Catalog:
             continue
         try:
             addon = load_addon(folder)
-        except (ValueError, OSError) as e:
-            catalog.errors.append(AddonError(folder.name, folder, str(e)))
-            log.warning("add-on %s skipped: %s", folder.name, e)
+        except (ValueError, OSError) as exc:
+            catalog.errors.append(AddonError(folder.name, folder, str(exc)))
+            log.warning("add-on %s skipped: %s", folder.name, exc)
             continue
         catalog.addons[addon.key] = addon
     return catalog

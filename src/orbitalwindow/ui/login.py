@@ -21,6 +21,16 @@ ERRORS = {
 
 @ui.page("/login")
 def login_page(request: Request, error: str = "", next: str = "/") -> RedirectResponse | None:
+    """Render the login page, or skip it when the visitor already has a valid session.
+
+    Args:
+        request: The incoming page request.
+        error: Key into ``ERRORS`` of a message to show after a failed login.
+        next: Path to go to after logging in; checked with ``safe_next``.
+
+    Returns:
+        A redirect to ``next`` if already logged in, else None (the page is rendered).
+    """
     target = safe_next(next)
     if service().sessions.resolve(request.cookies.get(COOKIE_NAME)):
         return RedirectResponse(target, status_code=303)

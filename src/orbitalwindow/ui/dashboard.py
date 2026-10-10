@@ -43,6 +43,15 @@ PW_MESSAGES = {
 
 @ui.page("/")
 def dashboard(request: Request, pw: str = "") -> RedirectResponse | None:
+    """Render the user dashboard.
+
+    Args:
+        request: The incoming page request.
+        pw: Key into ``PW_MESSAGES`` set after a password change; shows that message.
+
+    Returns:
+        A redirect to the login page if not logged in, else None (the page is rendered).
+    """
     auth = authenticate(request)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -60,6 +69,11 @@ def dashboard(request: Request, pw: str = "") -> RedirectResponse | None:
 
 
 def desktop_card(auth: PageAuth) -> None:
+    """Add the desktop card: status, start/stop/open, desktop choice and resource use.
+
+    Args:
+        auth: Session of the page.
+    """
     svc = service()
     user_id = auth.user.id
     open_url = desktop_path(auth.user.name)
@@ -98,6 +112,11 @@ def desktop_card(auth: PageAuth) -> None:
         busy = {"value": False}
 
         async def show_usage(running: bool) -> None:
+            """Show the desktop's CPU/RAM use (while running) and the shared GPU load.
+
+            Args:
+                running: Whether the desktop runs; its own use is shown only then.
+            """
             use = await run.io_bound(svc.usage_for, auth.user.name) if running else None
             gpus = await run.io_bound(svc.gpus.stats)
             usage_box.clear()
@@ -109,13 +128,15 @@ def desktop_card(auth: PageAuth) -> None:
                         f"Your desktop uses {use.cpu_cores:.1f} CPU cores and "
                         f"{fmt_bytes(use.mem_bytes)} of RAM (limit: {limit})."
                     ).classes("text-sm text-grey-8")
-                for g in gpus:
+                for gpu in gpus:
                     ui.label(
-                        f"GPU {g.index} ({g.name}), shared by everyone: {g.util_percent}% busy, "
-                        f"{fmt_bytes(g.mem_used)} of {fmt_bytes(g.mem_total)} memory in use."
+                        f"GPU {gpu.index} ({gpu.name}), shared by everyone: {gpu.util_percent}% "
+                        f"busy, {fmt_bytes(gpu.mem_used)} of {fmt_bytes(gpu.mem_total)} memory "
+                        "in use."
                     ).classes("text-sm text-grey-8")
 
         async def refresh() -> None:
+            """Update status, buttons, notes, usage and desktop choice from the current state."""
             user = await run.io_bound(svc.db.one, "SELECT * FROM users WHERE id = ?", [user_id])
             if user is None:
                 return
@@ -142,34 +163,51 @@ def desktop_card(auth: PageAuth) -> None:
                 picker.set_value(user["image_id"])
 
         async def act(label: str, fn, *args) -> None:
+            """Run a desktop action with the buttons disabled, then refresh.
+
+            Expected errors are shown to the user; unexpected ones are shown generically and
+            re-raised.
+
+            Args:
+                label: Name of the action for the generic error message.
+                fn: Service function to run.
+                *args: Arguments for ``fn``.
+            """
             busy["value"] = True
             await refresh()
             try:
                 await run.io_bound(fn, *args)
-            except (DesktopError, ValidationError) as e:
-                ui.notify(str(e), type="negative")
-            except Exception as e:
+            except (DesktopError, ValidationError) as exc:
+                ui.notify(str(exc), type="negative")
+            except Exception as exc:
                 ui.notify(
                     f"{label} failed. Please try again or tell your administrator.", type="negative"
                 )
-                raise e
+                raise exc
             finally:
                 busy["value"] = False
                 await refresh()
 
         async def on_start() -> None:
+            """Start the user's desktop."""
             await act("Start", svc.start_desktop, auth.user.name, user_id)
 
         async def on_stop() -> None:
+            """Stop the user's desktop."""
             await act("Stop", svc.stop_desktop, auth.user.name, user_id)
 
-        async def on_pick(e) -> None:
-            if e.value is None:
+        async def on_pick(event) -> None:
+            """Switch to the desktop image chosen in the picker, if it changed.
+
+            Args:
+                event: Value-change event of the picker.
+            """
+            if event.value is None:
                 return
             current = svc.db.scalar("SELECT image_id FROM users WHERE id = ?", [user_id])
-            if e.value != current:
+            if event.value != current:
                 await act(
-                    "Changing the desktop", svc.choose_image, auth.user.name, user_id, e.value
+                    "Changing the desktop", svc.choose_image, auth.user.name, user_id, event.value
                 )
 
         start_btn.on_click(guarded(auth, on_start))
@@ -180,6 +218,11 @@ def desktop_card(auth: PageAuth) -> None:
 
 
 def files_card(auth: PageAuth) -> None:
+    """Add the files card: where the user's folders are, and disk use.
+
+    Args:
+        auth: Session of the page.
+    """
     svc = service()
     host = svc.public_hostname()
     user_id = auth.user.id
@@ -200,6 +243,14 @@ def files_card(auth: PageAuth) -> None:
         usage_box = ui.column().classes("w-full gap-1")
 
         def place(title: str, desktop: str, share: str, note: str = "") -> None:
+            """Add one row describing a folder in the desktop and in Windows Explorer.
+
+            Args:
+                title: Name of the folder.
+                desktop: Path of the folder inside the desktop.
+                share: Samba share name.
+                note: Optional extra text below.
+            """
             with ui.row().classes("w-full items-start no-wrap gap-4"):
                 ui.label(title).classes("w-40 font-medium")
                 with ui.column().classes("gap-0"):
@@ -211,9 +262,9 @@ def files_card(auth: PageAuth) -> None:
         ui.separator()
         place("Home folder", "/config (your home)", auth.user.name)
         groups = svc.groups_of(user_id)
-        for g in groups:
-            note = g["description"] or "Shared with the other members of this group."
-            place(f"Group {g['name']}", f"/groups/{g['name']}", g["name"], note)
+        for group in groups:
+            note = group["description"] or "Shared with the other members of this group."
+            place(f"Group {group['name']}", f"/groups/{group['name']}", group["name"], note)
         days = svc.db.get_setting("scratch_retention_days") or "30"
         place(
             "Scratch",
@@ -229,6 +280,7 @@ def files_card(auth: PageAuth) -> None:
         ).classes("text-caption text-orange-9")
 
         async def refresh() -> None:
+            """Update the disk use display and the changed-groups note."""
             usage = await run.io_bound(svc.disk_usage_for, user_id)
             group_note.set_visibility(await run.io_bound(svc.group_restart_needed, user_id))
             usage_box.clear()
@@ -254,7 +306,13 @@ def files_card(auth: PageAuth) -> None:
 
 
 def ssh_card(auth: PageAuth) -> None:
-    """SSH keys and how to connect; only shown while the ssh add-on is switched on."""
+    """Add the SSH card: the keys and how to connect.
+
+    Only shown while the ssh add-on is switched on.
+
+    Args:
+        auth: Session of the page.
+    """
     svc = service()
     user_id = auth.user.id
     if not any(a.key == "ssh" for a in svc.software.active_addons(user_id)):
@@ -282,6 +340,7 @@ def ssh_card(auth: PageAuth) -> None:
             add_btn = ui.button("Add key").props("no-caps")
 
         def render_keys() -> None:
+            """Rebuild the list of SSH keys and update the restart note."""
             keys_box.clear()
             with keys_box:
                 keys = svc.ssh_keys(user_id)
@@ -289,31 +348,42 @@ def ssh_card(auth: PageAuth) -> None:
                     ui.label("No keys yet. Add the public key of each computer you use.").classes(
                         "text-sm text-grey-7"
                     )
-                for k in keys:
+                for key in keys:
                     with ui.row().classes("w-full items-center no-wrap gap-2"):
                         ui.icon("key")
                         with ui.column().classes("gap-0 grow"):
-                            ui.label(k["label"]).classes("font-medium")
-                            ui.label(k["fingerprint"]).classes("text-caption text-grey-7")
-                        ui.button(icon="delete", on_click=guarded(auth, _remove(k["id"])))\
+                            ui.label(key["label"]).classes("font-medium")
+                            ui.label(key["fingerprint"]).classes("text-caption text-grey-7")
+                        ui.button(icon="delete", on_click=guarded(auth, _remove(key["id"])))\
                             .props("flat round dense color=negative")  # fmt: skip
             restart_note.set_visibility(svc.ssh_restart_needed(user_id))
 
         def _remove(key_id: int):
+            """Make a click handler that removes one SSH key.
+
+            Args:
+                key_id: Id of the key to remove.
+
+            Returns:
+                An async click handler.
+            """
+
             async def handler() -> None:
+                """Remove the key and re-render the list."""
                 await run.io_bound(svc.remove_ssh_key, auth.user.name, user_id, key_id)
                 render_keys()
 
             return handler
 
         async def on_add() -> None:
+            """Add the pasted public key, clear the form and re-render the list."""
             try:
                 await run.io_bound(
                     svc.add_ssh_key, auth.user.name, user_id, key_label.value or "",
                     key_text.value or "",
                 )  # fmt: skip
-            except ValidationError as e:
-                ui.notify(str(e), type="negative")
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative")
                 return
             key_text.set_value("")
             key_label.set_value("")
@@ -325,6 +395,7 @@ def ssh_card(auth: PageAuth) -> None:
 
 
 def password_card() -> None:
+    """Add the "Change my password" form, which posts to ``/account/password``."""
     minimum = service().settings.min_password_length
     with (
         ui.expansion("Change my password", icon="key").classes("w-full bg-white"),
@@ -345,12 +416,22 @@ def password_card() -> None:
 @ui.page("/desktop/{name}")
 @ui.page("/desktop/{name}/{rest:path}")
 def desktop_redirect(request: Request, name: str, rest: str = "") -> RedirectResponse | None:
-    """``/desktop/<user>/`` and old ``/desktop/<user>/<session>/`` addresses.
+    """Handle ``/desktop/<user>/`` and old ``/desktop/<user>/<session>/`` addresses.
 
     Traefik only routes the running desktop's own path (``/desktop/<user>/<session>/``) to the
     container; anything else lands here. If the user's desktop runs, go to its current path;
     otherwise wait on this page and go there once it runs (a desktop tab left open across a
-    stop/start or a desktop switch recovers by itself)."""
+    stop/start or a desktop switch recovers by itself).
+
+    Args:
+        request: The incoming page request.
+        name: User name in the path.
+        rest: Rest of the path (for example an old session id).
+
+    Returns:
+        A redirect to the login page or to the desktop's current path, else None (the waiting
+        page is rendered).
+    """
     auth = authenticate(request)
     if isinstance(auth, RedirectResponse):
         return auth
@@ -370,6 +451,7 @@ def desktop_redirect(request: Request, name: str, rest: str = "") -> RedirectRes
             )
 
             async def wait_for_desktop() -> None:
+                """Go to the desktop's current path once it is running."""
                 if await run.io_bound(svc.desktop_state, auth.user.id) is DesktopState.RUNNING:
                     path = await run.io_bound(svc.desktops.current_path, name)
                     if path:

@@ -109,11 +109,18 @@ find . -xdev -mindepth 1 -depth -type d -empty -mtime +"$1" -print -delete
 
 class HostOps:
     def __init__(self, client: docker.DockerClient, root: str) -> None:
+        """Create the helper runner.
+
+        Args:
+            client: Docker client used to build and run the helper container.
+            root: Host path of ``$OW_ROOT``, mounted into the helper.
+        """
         self._client = client
         self._root = root
         self._image_ready = False
 
     def _ensure_image(self) -> None:
+        """Build the helper image unless it already exists."""
         if self._image_ready:
             return
         try:
@@ -132,6 +139,16 @@ class HostOps:
         self._image_ready = True
 
     def _run(self, script: str, *args: str, read_all: bool = False) -> str:
+        """Run a fixed shell script in a throw-away helper container.
+
+        Args:
+            script: The shell script (``sh -c``).
+            *args: Positional parameters for the script (``$1``, ``$2``, …).
+            read_all: Also grant ``DAC_READ_SEARCH`` so the script can read every file.
+
+        Returns:
+            The script's output.
+        """
         self._ensure_image()
         cmd = ["sh", "-c", script, "ow-helper", *args]
         log.debug("helper: %s", shlex.join(args))
@@ -153,28 +170,71 @@ class HostOps:
         return out.decode(errors="replace") if out else ""
 
     def prepare_layout(self, service_uid: int, scratch_days: int = 30) -> None:
+        """Create the folder layout under ``$OW_ROOT`` with its owners and modes.
+
+        Args:
+            service_uid: UID the service runs as; it owns the state folders.
+            scratch_days: Days after which scratch files are deleted (for the README).
+        """
         self._run(_LAYOUT, str(service_uid), str(scratch_days))
 
     def create_home(self, name: str, uid: int) -> None:
+        """Create a user's home folder.
+
+        Args:
+            name: OrbitalWindow user name.
+            uid: The user's UID/GID, which owns the folder.
+        """
         self._run(_HOME, name, str(uid))
 
     def remove_home(self, name: str) -> None:
+        """Delete a user's home folder and everything in it.
+
+        Args:
+            name: OrbitalWindow user name.
+        """
         self._run(_REMOVE_HOME, name)
 
     def create_group_dir(self, name: str, gid: int) -> None:
+        """Create a group folder (setgid, with a default ACL that keeps files group-writable).
+
+        Args:
+            name: The group name.
+            gid: The group's GID.
+        """
         self._run(_GROUP_DIR, name, str(gid))
 
     def remove_group_dir(self, name: str) -> None:
+        """Delete a group folder and everything in it.
+
+        Args:
+            name: The group name.
+        """
         self._run(_REMOVE_GROUP_DIR, name)
 
     def create_files_data(self, name: str, uid: int) -> None:
+        """Create a user's file manager data folder.
+
+        Args:
+            name: OrbitalWindow user name.
+            uid: The user's UID/GID, which owns the folder.
+        """
         self._run(_FILES_DATA, name, str(uid))
 
     def remove_files_data(self, name: str) -> None:
+        """Delete a user's file manager data folder and config file.
+
+        Args:
+            name: OrbitalWindow user name.
+        """
         self._run(_REMOVE_FILES_DATA, name)
 
     def disk_usage(self) -> dict[str, int]:
-        """``{"users/bob": bytes, "groups/labx": bytes, "shared/scratch": bytes}``."""
+        """Measure the disk usage of every home, group folder and the scratch folder.
+
+        Returns:
+            ``{"users/bob": bytes, "groups/labx": bytes, "shared/scratch": bytes}``.
+        """
         result: dict[str, int] = {}
         for line in self._run(_DU, read_all=True).splitlines():
             path, _, size = line.partition("\t")
@@ -183,6 +243,13 @@ class HostOps:
         return result
 
     def clean_scratch(self, days: int) -> list[str]:
-        """Delete scratch files untouched for ``days``; returns the removed paths."""
+        """Delete scratch files untouched for ``days``, then empty folders.
+
+        Args:
+            days: Age in days after which an unchanged file is deleted.
+
+        Returns:
+            The removed paths.
+        """
         out = self._run(_CLEAN_SCRATCH, str(days))
         return [line for line in out.splitlines() if line]

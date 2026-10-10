@@ -58,23 +58,50 @@ class DesktopError(RuntimeError):
 
 
 def container_name(user: str) -> str:
+    """Return the Docker container name of a user's desktop.
+
+    Args:
+        user: OrbitalWindow user name.
+
+    Returns:
+        ``ow-<user>``.
+    """
     return f"ow-{user}"
 
 
 def network_name(user: str) -> str:
+    """Return the name of a user's own Docker network.
+
+    Args:
+        user: OrbitalWindow user name.
+
+    Returns:
+        ``ow-net-<user>``.
+    """
     return f"ow-net-{user}"
 
 
 def desktop_path(user: str, session: str = "") -> str:
-    """``/desktop/<user>/`` (stable; OrbitalWindow redirects it to the running desktop) or, with a
-    start id, ``/desktop/<user>/<session>/`` where one particular container is served.
+    """Return the URL path of a user's desktop.
+
+    ``/desktop/<user>/`` is stable; OrbitalWindow redirects it to the running desktop. With a
+    start id, ``/desktop/<user>/<session>/`` is where one particular container is served.
 
     Each start gets a new path, so nothing the browser keeps per path (the stream client's
-    settings in localStorage, cached files) carries over to the next container."""
+    settings in localStorage, cached files) carries over to the next container.
+
+    Args:
+        user: OrbitalWindow user name.
+        session: Start id of a running desktop; empty for the stable path.
+
+    Returns:
+        ``/desktop/<user>/`` or ``/desktop/<user>/<session>/``.
+    """
     return f"/desktop/{user}/{session}/" if session else f"/desktop/{user}/"
 
 
 def new_session_id() -> str:
+    """Return a new random start id (8 hex characters) for a desktop's URL path."""
     return secrets.token_hex(4)
 
 
@@ -108,7 +135,24 @@ def build_spec(
     ssh: SshAccess | None = None,
     session: str = "",
 ) -> DesktopSpec:
-    """The container for ``user``. Add-on mounts and environment are applied here (no rebuild)."""
+    """Build the container spec for ``user``.
+
+    Add-on mounts and environment are applied here (no rebuild).
+
+    Args:
+        user: User row from the database.
+        image_ref: Docker image to run.
+        settings: Service settings.
+        gpu_vendor: GPU vendor whose devices are passed through.
+        secret: Password for the desktop; also sent by Traefik as HTTP basic auth.
+        addons: Add-ons enabled for this start (mounts and environment).
+        groups: Group rows whose folders are mounted under ``/groups``.
+        ssh: SSH gateway access, or None for no SSH.
+        session: Start id for the URL path; a new one is generated when empty.
+
+    Returns:
+        The desktop container spec.
+    """
     name = user["name"]
     cname = container_name(name)
     net = network_name(name)
@@ -158,8 +202,11 @@ def build_spec(
         str(root / "shared" / "scratch"): {"bind": "/scratch", "mode": "rw"},
         str(root / "shared" / "data"): {"bind": "/shared", "mode": "ro"},
     }
-    for g in groups:
-        volumes[str(root / "groups" / g["name"])] = {"bind": f"/groups/{g['name']}", "mode": "rw"}
+    for group in groups:
+        volumes[str(root / "groups" / group["name"])] = {
+            "bind": f"/groups/{group['name']}",
+            "mode": "rw",
+        }
     if ssh is not None:
         # The only key the desktop's sshd accepts; the gateway checks the user's own keys.
         volumes[str(ssh.upstream_pub)] = {"bind": "/etc/ow/upstream.pub", "mode": "ro"}
@@ -168,9 +215,9 @@ def build_spec(
     environment["OW_GROUPS"] = " ".join(f"{g['name']}:{g['gid']}" for g in groups)
     labels[LABEL_GROUPS] = ",".join(g["name"] for g in groups)
     for addon in addons:
-        for m in addon.spec.mounts:
-            mode = "ro" if m.read_only else "rw"
-            volumes[str(root / m.source)] = {"bind": m.target, "mode": mode}
+        for mount in addon.spec.mounts:
+            mode = "ro" if mount.read_only else "rw"
+            volumes[str(root / mount.source)] = {"bind": mount.target, "mode": mode}
         for key, value in addon.spec.env.items():
             environment.setdefault(key, value)
 
@@ -205,7 +252,14 @@ def build_spec(
 
 
 def _state_of(state: dict[str, Any]) -> DesktopState:
-    """Map Docker's ``State`` to ours. Running counts only once the healthcheck has passed."""
+    """Map Docker's ``State`` to ours. Running counts only once the healthcheck has passed.
+
+    Args:
+        state: The ``State`` section of a container's Docker attributes.
+
+    Returns:
+        The desktop state.
+    """
     status = state.get("Status")
     if status == "running":
         health = (state.get("Health") or {}).get("Status")
@@ -217,6 +271,13 @@ def _state_of(state: dict[str, Any]) -> DesktopState:
 
 class Desktops:
     def __init__(self, client: docker.DockerClient, db: Database, settings: Settings) -> None:
+        """Create the desktop manager.
+
+        Args:
+            client: Docker client.
+            db: Service database.
+            settings: Service settings.
+        """
         self._client = client
         self._db = db
         self._settings = settings
@@ -225,9 +286,18 @@ class Desktops:
     # --- queries -----------------------------------------------------------------------------
 
     def gpu_vendor(self) -> GpuVendor:
+        """Return the configured GPU vendor (NVIDIA unless set otherwise)."""
         return GpuVendor(self._db.get_setting("gpu_vendor", GpuVendor.NVIDIA))
 
     def state(self, user: str) -> DesktopState:
+        """Return the state of a user's desktop.
+
+        Args:
+            user: OrbitalWindow user name.
+
+        Returns:
+            The desktop state; STOPPED when there is no container.
+        """
         try:
             container = self._client.containers.get(container_name(user))
         except docker.errors.NotFound:
@@ -235,20 +305,33 @@ class Desktops:
         return _state_of(container.attrs.get("State", {}))
 
     def states(self) -> dict[str, DesktopState]:
-        """State of every managed desktop, in one Docker call (for admin pages and reconcile)."""
+        """Return the state of every managed desktop, in one Docker call.
+
+        Used by admin pages and reconcile.
+
+        Returns:
+            Desktop state by user name, for every user with a desktop container.
+        """
         result: dict[str, DesktopState] = {}
-        for c in self._client.containers.list(
+        for container in self._client.containers.list(
             all=True, filters={"label": [f"{LABEL_MANAGED}=true", f"{LABEL_ROLE}=desktop"]}
         ):
-            user = c.labels.get(LABEL_USER)
+            user = container.labels.get(LABEL_USER)
             if user:
-                result[user] = _state_of(c.attrs.get("State", {}))
+                result[user] = _state_of(container.attrs.get("State", {}))
         return result
 
     # --- lifecycle ---------------------------------------------------------------------------
 
     def addons_in_use(self, user: str) -> set[str]:
-        """Keys of the add-ons the running desktop was started with."""
+        """Return the keys of the add-ons the running desktop was started with.
+
+        Args:
+            user: OrbitalWindow user name.
+
+        Returns:
+            Add-on keys; empty when there is no container.
+        """
         try:
             container = self._client.containers.get(container_name(user))
         except docker.errors.NotFound:
@@ -256,7 +339,15 @@ class Desktops:
         return {k for k in container.labels.get(LABEL_ADDONS, "").split(",") if k}
 
     def current_path(self, user: str) -> str | None:
-        """URL path of the user's running desktop (``/desktop/<user>/<session>/``), or None."""
+        """Return the URL path of the user's running desktop.
+
+        Args:
+            user: OrbitalWindow user name.
+
+        Returns:
+            ``/desktop/<user>/<session>/``, or None when there is no container or it has no
+            start id.
+        """
         try:
             container = self._client.containers.get(container_name(user))
         except docker.errors.NotFound:
@@ -265,7 +356,14 @@ class Desktops:
         return desktop_path(user, session) if session else None
 
     def groups_in_use(self, user: str) -> set[str] | None:
-        """Groups the running desktop was started with; None when it is not running."""
+        """Return the groups the running desktop was started with.
+
+        Args:
+            user: OrbitalWindow user name.
+
+        Returns:
+            Group names, or None when there is no container.
+        """
         try:
             container = self._client.containers.get(container_name(user))
         except docker.errors.NotFound:
@@ -280,12 +378,27 @@ class Desktops:
         groups: Sequence[dict[str, Any]] = (),
         ssh: SshAccess | None = None,
     ) -> None:
+        """Start a fresh desktop container for a user, replacing any existing one.
+
+        Also clears the user's ``stopped_by_admin`` flag.
+
+        Args:
+            user: User row from the database.
+            image_ref: Docker image to run.
+            addons: Add-ons enabled for this start.
+            groups: Group rows whose folders are mounted.
+            ssh: SSH gateway access, or None for no SSH.
+
+        Raises:
+            DesktopError: The account is disabled, an add-on's mount source is not installed,
+                or the container could not start.
+        """
         name = user["name"]
         if user["disabled"]:
             raise DesktopError("This account is disabled.")
         for addon in addons:
-            for m in addon.spec.mounts:
-                if not (self._settings.root / m.source).is_dir():
+            for mount in addon.spec.mounts:
+                if not (self._settings.root / mount.source).is_dir():
                     raise DesktopError(
                         f"{addon.spec.label} is not installed on the server yet. "
                         "Switch it off, or ask your administrator."
@@ -318,12 +431,17 @@ class Desktops:
             )
             try:
                 container.start()
-            except docker.errors.APIError as e:
+            except docker.errors.APIError as exc:
                 container.remove(force=True)
-                raise DesktopError(f"The desktop could not start: {e.explanation}") from e
+                raise DesktopError(f"The desktop could not start: {exc.explanation}") from exc
             self._db.execute("UPDATE users SET stopped_by_admin = false WHERE id = ?", [user["id"]])
 
     def stop(self, user: dict[str, Any]) -> None:
+        """Remove a user's desktop container and network. The home folder stays.
+
+        Args:
+            user: User row from the database.
+        """
         name = user["name"]
         with self._locks[name]:
             self._remove_container(name)
@@ -332,10 +450,23 @@ class Desktops:
     # --- helpers -----------------------------------------------------------------------------
 
     def _remove_container(self, name: str) -> None:
+        """Force-remove a user's desktop container, if there is one.
+
+        Args:
+            name: OrbitalWindow user name.
+        """
         with contextlib.suppress(docker.errors.NotFound):
             self._client.containers.get(container_name(name)).remove(force=True)
 
     def _ensure_network(self, name: str) -> Any:
+        """Return a user's own network, creating it if needed.
+
+        Args:
+            name: OrbitalWindow user name.
+
+        Returns:
+            The Docker network.
+        """
         net_name = network_name(name)
         nets = self._client.networks.list(names=[net_name])
         for net in nets:
@@ -348,33 +479,54 @@ class Desktops:
         )
 
     def _connect_traefik(self, network: Any) -> None:
+        """Connect the Traefik container to a network, if not already connected.
+
+        Args:
+            network: Docker network.
+        """
         self._connect(network, self._settings.traefik_container)
 
     def _connect(self, network: Any, container: str) -> None:
+        """Connect a container to a network, if not already connected.
+
+        Args:
+            network: Docker network.
+            container: Name of the container to connect.
+        """
         network.reload()
         if any(c.name == container for c in network.containers):
             return
         try:
             network.connect(container)
-        except docker.errors.APIError as e:
-            if "already exists" not in str(e):
+        except docker.errors.APIError as exc:
+            if "already exists" not in str(exc):
                 raise
 
     def _remove_network(self, name: str) -> None:
+        """Disconnect every container from a user's network and remove it.
+
+        Args:
+            name: OrbitalWindow user name.
+        """
         for net in self._client.networks.list(names=[network_name(name)]):
             if net.name != network_name(name):
                 continue
             net.reload()
-            for c in net.containers:
+            for container in net.containers:
                 try:
-                    net.disconnect(c, force=True)
-                except docker.errors.APIError as e:
-                    log.warning("disconnect %s from %s: %s", c.name, net.name, e)
+                    net.disconnect(container, force=True)
+                except docker.errors.APIError as exc:
+                    log.warning("disconnect %s from %s: %s", container.name, net.name, exc)
             net.remove()
 
     def ensure_traefik_connected(self) -> int:
         """Reconnect Traefik to every user network (desktop or file manager) that has a member.
-        Returns the number of networks fixed."""
+
+        Also connects sshpiper to desktop networks whose desktop has SSH access.
+
+        Returns:
+            The number of networks fixed.
+        """
         fixed = 0
         traefik = self._settings.traefik_container
         for net in self._client.networks.list(filters={"label": f"{LABEL_MANAGED}=true"}):
@@ -392,6 +544,6 @@ class Desktops:
                     try:
                         self._connect(net, sshpiper)
                         fixed += 1
-                    except docker.errors.APIError as e:
-                        log.warning("could not connect %s to %s: %s", sshpiper, net.name, e)
+                    except docker.errors.APIError as exc:
+                        log.warning("could not connect %s to %s: %s", sshpiper, net.name, exc)
         return fixed
