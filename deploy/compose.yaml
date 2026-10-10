@@ -138,6 +138,7 @@ services:
       TZ: ${TZ:-Etc/UTC}
       CONTROL_ADMIN_PASSWORD: ${CONTROL_ADMIN_PASSWORD:-}
       DOCKER_HOST: tcp://socket-proxy-rw:2375
+      OW_LLMFIT_IMAGE: ${OW_LLMFIT_IMAGE:-ghcr.io/alexsjones/llmfit:1.1.15}
     volumes:
       # Same path inside and outside, so mount sources we give Docker are valid host paths.
       - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}

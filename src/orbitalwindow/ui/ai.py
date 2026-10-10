@@ -8,6 +8,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
+from ..fit import Estimate, Verdict
 from ..users import ValidationError
 from .common import authenticate, frame, guarded, service
 
@@ -15,9 +16,26 @@ MODEL_COLUMNS = [
     {"name": "repo", "label": "Model", "field": "repo", "align": "left"},
     {"name": "size", "label": "Size", "field": "size", "align": "right"},
     {"name": "modified", "label": "Downloaded", "field": "modified", "align": "left"},
+    {"name": "fit", "label": "GPU fit", "field": "fit", "align": "left"},
     {"name": "path", "label": "Folder", "field": "path", "align": "left"},
     {"name": "actions", "label": "", "field": "actions", "align": "right"},
 ]
+SUGGESTION_COLUMNS = [
+    {"name": "repo", "label": "Model", "field": "repo", "align": "left"},
+    {"name": "params", "label": "Parameters", "field": "params", "align": "right"},
+    {"name": "category", "label": "Kind", "field": "category", "align": "left"},
+    {"name": "license", "label": "Licence", "field": "license", "align": "left"},
+    {"name": "score", "label": "llmfit score", "field": "score", "align": "right"},
+    {"name": "actions", "label": "", "field": "actions", "align": "right"},
+]
+FIT_COLORS = "{fits: 'positive', busy: 'orange', tight: 'orange', 'too-big': 'negative'}"
+FIT_LABELS = {
+    "fits": "fits",
+    "busy": "fits (GPU busy)",
+    "tight": "tight",
+    "too-big": "too big",
+    "unknown": "unknown",
+}
 DOWNLOAD_COLUMNS = [
     {"name": "repo", "label": "Model", "field": "repo", "align": "left"},
     {"name": "status", "label": "Status", "field": "status", "align": "left"},
@@ -32,6 +50,34 @@ STATUS_COLORS = (
 )
 
 
+def fit_details(estimate: Estimate, verdict: Verdict, gpu_total: float | None) -> None:
+    """Add the GPU memory estimate and the verdict to the current container.
+
+    Args:
+        estimate: The memory estimate.
+        verdict: How it compares with the GPU.
+        gpu_total: Memory of the GPU, for the longest context that fits; None without a GPU.
+    """
+    parts = f"weights {gb(estimate.weights)}"
+    if estimate.kv_cache is not None:
+        parts += f" + cache {gb(estimate.kv_cache)} for {estimate.context:,} tokens"
+    parts += f" + overhead {gb(estimate.overhead)}"
+    ui.label(f"GPU memory needed: about {gb(estimate.total)} ({parts})")
+    colors = {"fits": "text-positive", "too-big": "text-negative"}
+    color = colors.get(verdict.level, "text-orange-9")
+    ui.label(verdict.text).classes(color)
+    if estimate.shape is None:
+        ui.label(
+            "The model's configuration couldn't be read, so the cache isn't included."
+        ).classes("text-caption text-grey-7")
+    elif gpu_total:
+        longest = estimate.max_context(gpu_total)
+        if longest:
+            ui.label(f"Longest context that fits: {longest:,} tokens.").classes(
+                "text-caption text-grey-7"
+            )
+
+
 def gb(size: int | None) -> str:
     """Format a byte count in GB for the page.
 
@@ -43,7 +89,7 @@ def gb(size: int | None) -> str:
     """
     if size is None:
         return "–"
-    return f"{size / 1e9:.1f} GB" if size >= 1e8 else f"{size / 1e6:.0f} MB"
+    return f"{size / 1024**3:.1f} GB" if size >= 1024**3 / 10 else f"{size / 1024**2:.0f} MB"
 
 
 @ui.page("/ai")
@@ -138,6 +184,37 @@ def ai_page(request: Request) -> RedirectResponse | None:
             </q-td>
             """,
         )
+        models.add_slot(
+            "body-cell-fit",
+            f"""
+            <q-td :props="props">
+              <q-badge :color="{FIT_COLORS}[props.row.fit_level] || 'grey'" :label="props.row.fit">
+                <q-tooltip>{{{{ props.row.fit_text }}}}</q-tooltip>
+              </q-badge>
+            </q-td>
+            """,
+        )
+
+        with ui.expansion("Suggestions from llmfit", icon="lightbulb").classes("w-full"):
+            ui.label(
+                "Ideas for models that suit this server's GPU, from llmfit's catalogue (only "
+                "well-known publishers). llmfit scores compressed models for llama.cpp, so use "
+                "Inspect for the real size and fit with vLLM. Finding them takes a few seconds."
+            ).classes("text-caption text-grey-7")
+            suggest_btn = ui.button("Show suggestions", icon="lightbulb").props("no-caps outline")
+            suggestions = ui.table(columns=SUGGESTION_COLUMNS, rows=[], row_key="repo").classes(
+                "w-full"
+            )
+            suggestions.set_visibility(False)
+            suggestions.add_slot(
+                "body-cell-actions",
+                """
+                <q-td :props="props">
+                  <q-btn flat dense no-caps icon="search" label="Inspect"
+                         @click="$parent.$emit('pick', props.row)" />
+                </q-td>
+                """,
+            )
 
         with ui.expansion("Hugging Face token", icon="key").classes("w-full"):
             ui.label(
@@ -164,6 +241,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
         async def refresh() -> None:
             """Reload storage, downloads and the model list."""
             library, space, rows = await run.io_bound(svc.model_library)
+            fits = await run.io_bound(lambda: [svc.fit_for_local(model) for model in library])
             space_label.set_text(
                 f"{gb(space.free)} free of {gb(space.total)} "
                 f"· models use {gb(sum(m.bytes for m in library))}"
@@ -174,9 +252,12 @@ def ai_page(request: Request) -> RedirectResponse | None:
                     "repo": model.repo,
                     "size": gb(model.bytes),
                     "modified": model.modified.strftime("%Y-%m-%d %H:%M"),
+                    "fit": f"{FIT_LABELS[verdict.level]} · {gb(estimate.total)}",
+                    "fit_level": verdict.level,
+                    "fit_text": verdict.text,
                     "path": str(model.path),
                 }
-                for model in library
+                for model, (estimate, verdict) in zip(library, fits, strict=True)
             ]
             models.update()
             downloads.rows = [
@@ -242,6 +323,46 @@ def ai_page(request: Request) -> RedirectResponse | None:
                     ui.label(
                         "This model has no safetensors weights and can't be used by the AI session."
                     ).classes("text-negative")
+                    return
+                spinner = ui.spinner()
+            estimate, verdict = await run.io_bound(svc.fit_for_download, info)
+            gpu = await run.io_bound(svc.model_gpu)
+            spinner.delete()
+            with info_box:
+                fit_details(estimate, verdict, gpu.total if gpu else None)
+
+        async def on_suggest() -> None:
+            """Run llmfit (or use its recent answer) and show the suggestions."""
+            suggest_btn.props("loading")
+            try:
+                picked = await run.io_bound(svc.model_suggestions)
+            except ValidationError as exc:
+                ui.notify(str(exc), type="negative", multi_line=True)
+                return
+            finally:
+                suggest_btn.props(remove="loading")
+            suggestions.rows = [
+                {
+                    "repo": item.repo,
+                    "params": f"{item.params_b:.1f} B" if item.params_b else "–",
+                    "category": item.category,
+                    "license": item.license,
+                    "score": f"{item.score:.0f}",
+                }
+                for item in picked
+            ]
+            suggestions.set_visibility(True)
+            suggestions.update()
+
+        async def on_pick(event) -> None:
+            """Put a suggested model in the download form and inspect it.
+
+            Args:
+                event: Table event with the suggestion row.
+            """
+            repo_in.set_value(event.args["repo"])
+            rev_in.set_value("")
+            await on_inspect()
 
         async def on_download() -> None:
             """Queue the download of the model in the form."""
@@ -304,6 +425,8 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 show_token_state()
 
         inspect_btn.on_click(guarded(auth, on_inspect))
+        suggest_btn.on_click(guarded(auth, on_suggest))
+        suggestions.on("pick", guarded(auth, on_pick))
         download_btn.on_click(guarded(auth, on_download))
         downloads.on("cancel", guarded(auth, on_cancel))
         downloads.on("resume", guarded(auth, on_resume))

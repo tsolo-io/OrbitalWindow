@@ -29,7 +29,7 @@ def size(value: float | None) -> str:
     """
     if value is None:
         return "–"
-    for unit, factor in (("TB", 1e12), ("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+    for unit, factor in (("TB", 1024**4), ("GB", 1024**3), ("MB", 1024**2), ("kB", 1024)):
         if value >= factor:
             return f"{value / factor:.1f} {unit}"
     return f"{value:.0f} B"

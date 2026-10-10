@@ -18,6 +18,7 @@ from typing import Any
 import docker
 
 from . import disk
+from . import fit as fit_mod
 from . import groups as groups_mod
 from . import models as models_mod
 from . import ssh as ssh_mod
@@ -46,6 +47,7 @@ from .models import HubClient, LocalModel, ModelLibrary, RepoInfo, Space
 from .reconcile import reconcile
 from .samba import Samba, SambaError
 from .software import Software
+from .suggestions import LlmFit, Suggestion, SuggestionError
 from .users import ValidationError, validate_password
 
 log = logging.getLogger(__name__)
@@ -107,6 +109,7 @@ class Service:
         self.node_exporter = NodeExporter(settings.node_exporter_url)
         self.models = ModelLibrary(settings.models_dir)
         self.hub = HubClient()
+        self.llmfit = LlmFit(client, settings.llmfit_image)
         self.downloads = Downloader(client, self.db, self.models, os.getuid(), self.hf_token)
         self._reconcile_stop = threading.Event()
 
@@ -662,7 +665,8 @@ class Service:
         free = self.models.space().free
         if needed > free:
             raise ValidationError(
-                f"{info.repo} needs {needed / 1e9:.1f} GB but only {free / 1e9:.1f} GB is free."
+                f"{info.repo} needs {needed / 1024**3:.1f} GB but only {free / 1024**3:.1f} GB "
+                "is free."
             )
         download_id = self.downloads.queue(info, actor)
         self.db.audit(actor, "ai.download", info.repo, info.revision)
@@ -696,6 +700,61 @@ class Service:
             raise ValidationError(f"{repo} is being downloaded. Cancel the download first.")
         self.models.delete(repo)
         self.db.audit(actor, "ai.model.delete", repo)
+
+    def model_gpu(self) -> fit_mod.Gpu | None:
+        """Return the GPU a model would run on: the one with the most memory.
+
+        Returns:
+            Its name, total and free memory, or None without NVML (no NVIDIA GPU).
+        """
+        stats = self.gpus.stats()
+        if not stats:
+            return None
+        best = max(stats, key=lambda gpu: gpu.mem_total)
+        return fit_mod.Gpu(best.name, float(best.mem_total), float(best.mem_total - best.mem_used))
+
+    def fit_for_download(self, info: RepoInfo) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
+        """Estimate whether an inspected model fits on the GPU.
+
+        Args:
+            info: The inspected model.
+
+        Returns:
+            The memory estimate and the verdict for the GPU.
+        """
+        weights = sum(size for path, size in info.files if path.endswith(".safetensors"))
+        config = self.hub.config(info.repo, info.revision, self.hf_token())
+        estimate = fit_mod.estimate(weights, config)
+        return estimate, fit_mod.verdict(estimate.total, self.model_gpu())
+
+    def fit_for_local(self, model: LocalModel) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
+        """Estimate whether a downloaded model fits on the GPU.
+
+        Args:
+            model: The downloaded model.
+
+        Returns:
+            The memory estimate and the verdict for the GPU.
+        """
+        estimate = fit_mod.estimate(model.weights, model.config())
+        return estimate, fit_mod.verdict(estimate.total, self.model_gpu())
+
+    def model_suggestions(self) -> list[Suggestion]:
+        """Return llmfit's model suggestions for the GPU.
+
+        Returns:
+            Suggestions, best first.
+
+        Raises:
+            ValidationError: Without GPU information, or when llmfit fails.
+        """
+        gpu = self.model_gpu()
+        if gpu is None:
+            raise ValidationError("Suggestions need the GPU's memory, which needs an NVIDIA GPU.")
+        try:
+            return self.llmfit.suggest(gpu.total)
+        except SuggestionError as exc:
+            raise ValidationError(str(exc)) from exc
 
     def model_library(self) -> tuple[list[LocalModel], Space, list[dict[str, Any]]]:
         """Return what the AI page shows: downloaded models, disk space and downloads.

@@ -11,6 +11,7 @@ inference engine needs are downloaded (``INCLUDE``); duplicate original checkpoi
 
 import contextlib
 import fnmatch
+import json
 import os
 import re
 import shutil
@@ -192,6 +193,27 @@ class HubClient:
         except (ValueError, KeyError, TypeError) as exc:
             raise ValidationError(f"Unexpected answer from Hugging Face: {exc}") from exc
 
+    def config(self, repo: str, revision: str, token: str | None) -> dict[str, Any] | None:
+        """Fetch a model's ``config.json``.
+
+        Args:
+            repo: Model id, already validated.
+            revision: Commit, branch or tag, already validated.
+            token: Hugging Face token, or None (gated models need one).
+
+        Returns:
+            The parsed configuration, or None if it can't be read.
+        """
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        try:
+            response = self._client.get(
+                f"/{repo}/resolve/{revision}/config.json", headers=headers, follow_redirects=True
+            )
+            data = response.json() if response.status_code == 200 else None
+        except httpx2.HTTPError, ValueError:
+            return None
+        return data if isinstance(data, dict) else None
+
 
 @dataclass(frozen=True)
 class LocalModel:
@@ -199,6 +221,27 @@ class LocalModel:
     path: Path
     bytes: int
     modified: datetime
+
+    @property
+    def weights(self) -> int:
+        """Return the size of the model's safetensors files.
+
+        Returns:
+            Bytes.
+        """
+        return sum(file.stat().st_size for file in self.path.rglob("*.safetensors"))
+
+    def config(self) -> dict[str, Any] | None:
+        """Read the model's ``config.json``.
+
+        Returns:
+            The parsed configuration, or None if it can't be read.
+        """
+        try:
+            data = json.loads((self.path / "config.json").read_text())
+        except OSError, ValueError:
+            return None
+        return data if isinstance(data, dict) else None
 
 
 @dataclass(frozen=True)

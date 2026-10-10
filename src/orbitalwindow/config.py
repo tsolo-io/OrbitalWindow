@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     cadvisor_url: str = "http://cadvisor:8080/admin/cadvisor"
     # Prometheus node-exporter on the host (installed by the admin), for the server status page.
     node_exporter_url: str = "http://host.docker.internal:9100/metrics"
+    # llmfit image for model suggestions; change the tag to follow llmfit releases.
+    llmfit_image: str = "ghcr.io/alexsjones/llmfit:1.1.15"
 
     cookie_secure: bool = True
     session_hours: int = 12
