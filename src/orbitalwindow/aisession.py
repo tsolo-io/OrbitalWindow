@@ -35,6 +35,10 @@ ROUTER = "ow-ai-api"
 API_PREFIX = "/v1"
 MOUNT = "/models"
 MIN_CONTEXT = 256
+# Requests vLLM serves at once (its default is 256): plenty for a few people and a benchmark.
+# Hybrid models such as Qwen3.5 need a state block per request and fail to start when the GPU
+# share has fewer blocks than this; fewer also means fewer CUDA graphs to capture at start.
+MAX_SEQS = 16
 LABEL_REPO = "ow.ai.repo"
 LABEL_SESSION = "ow.ai.session"
 # vLLM's tool call parser per model family (config.json ``model_type``). Open WebUI asks the model
@@ -46,6 +50,8 @@ TOOL_PARSERS = {
     "qwen3": "hermes",
     "qwen3_moe": "hermes",
     "qwen3_next": "hermes",
+    "qwen3_5": "qwen3_coder",
+    "qwen3_5_moe": "qwen3_coder",
     "llama": "llama3_json",
     "mistral": "mistral",
     "gpt_oss": "openai",
@@ -66,22 +72,46 @@ class SessionRequest:
     gpu_share: float
     public: bool  # route /v1 through Traefik
     tool_parser: str = ""  # vLLM tool call parser; empty: no tool calling
+    reasoning_parser: str = ""  # vLLM reasoning parser; empty: thinking stays in the answer
 
 
-def tool_parser(config: dict[str, Any], repo: str) -> str:
+def tool_parser(config: dict[str, Any], repo: str, template: str = "") -> str:
     """Pick vLLM's tool call parser for a model.
 
     Args:
         config: The model's ``config.json``.
         repo: Model id (Qwen3 coder models use their own parser).
+        template: The model's chat template; Qwen's XML tool format (``<function=…>``) needs
+            the ``qwen3_coder`` parser whatever the model type.
 
     Returns:
         The parser name, or an empty string for a family without a known parser.
     """
     model_type = str(config.get("model_type", ""))
+    if model_type.startswith("qwen") and "<function=" in template:
+        return "qwen3_coder"
     if model_type.startswith("qwen3") and "coder" in repo.lower():
         return "qwen3_coder"
     return TOOL_PARSERS.get(model_type, "")
+
+
+def reasoning_parser(config: dict[str, Any], template: str) -> str:
+    """Pick vLLM's reasoning parser for a model that thinks before it answers.
+
+    The parser moves the thinking out of the answer into its own field, which Open WebUI shows
+    folded. Qwen3.5's template opens ``<think>`` in the prompt, so without the parser the chat
+    shows the thinking as part of the answer.
+
+    Args:
+        config: The model's ``config.json``.
+        template: The model's chat template.
+
+    Returns:
+        The parser name, or an empty string.
+    """
+    if str(config.get("model_type", "")).startswith("qwen3") and "<think>" in template:
+        return "qwen3"
+    return ""
 
 
 def session_spec(
@@ -128,12 +158,15 @@ def session_spec(
             str(request.context),
             "--gpu-memory-utilization",
             f"{request.gpu_share:.2f}",
+            "--max-num-seqs",
+            str(MAX_SEQS),
         ]
         + (
             ["--enable-auto-tool-choice", "--tool-call-parser", request.tool_parser]
             if request.tool_parser
             else []
-        ),  # fmt: skip
+        )
+        + (["--reasoning-parser", request.reasoning_parser] if request.reasoning_parser else []),
         "name": CONTAINER,
         "hostname": CONTAINER,
         "detach": True,

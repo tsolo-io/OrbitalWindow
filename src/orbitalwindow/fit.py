@@ -25,7 +25,7 @@ GIB = 1024**3  # GPU memory is shown in binary units, as nvidia-smi and the admi
 class Shape:
     """What the KV cache size depends on, from the model's ``config.json``."""
 
-    layers: int
+    layers: int  # layers with a KV cache (hybrid models: only the full attention ones)
     kv_heads: int
     head_dim: int
     kv_bytes: int  # per value
@@ -44,7 +44,8 @@ class Shape:
 def shape_from_config(config: dict[str, Any]) -> Shape | None:
     """Read the attention shape from a model configuration.
 
-    Multimodal models keep the language model's settings in ``text_config``.
+    Multimodal models keep the language model's settings in ``text_config``. Layers listed as
+    anything but ``full_attention`` in ``layer_types`` have no KV cache.
 
     Args:
         config: The parsed ``config.json``.
@@ -55,6 +56,11 @@ def shape_from_config(config: dict[str, Any]) -> Shape | None:
     text = config.get("text_config") or config
     try:
         layers = int(text["num_hidden_layers"])
+        # Hybrid models (Qwen3.5, Qwen3-Next) mix full attention with linear attention layers,
+        # whose state doesn't grow with the context: only the full attention layers count.
+        kinds = text.get("layer_types")
+        if isinstance(kinds, list) and "full_attention" in kinds:
+            layers = kinds.count("full_attention")
         heads = int(text["num_attention_heads"])
         kv_heads = int(text.get("num_key_value_heads") or heads)
         head_dim = int(text.get("head_dim") or int(text["hidden_size"]) // heads)

@@ -22,7 +22,8 @@ safetensors weights as they are. Its full list is mostly re-uploads and communit
     - weights = the size of the safetensors files;
     - KV cache = 2 × layers × KV heads × head dim × 2 bytes per token (from `config.json`,
       including `text_config` of multimodal models), for 8,192 tokens or the model's maximum if
-      that is lower;
+      that is lower. Hybrid models (Qwen3.5, LFM2) list their layers in `layer_types`; only the
+      `full_attention` ones have a KV cache, so only they count;
     - overhead = 1.5 GB + 5 % of the weights.
   - It is compared with the GPU that has the most memory (NVML). The levels are:
     - **fits**: within the 90 % vLLM uses by default;

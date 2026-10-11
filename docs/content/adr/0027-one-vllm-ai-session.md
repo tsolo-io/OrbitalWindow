@@ -21,14 +21,23 @@ calling it.
   once well. Checked on the RTX 5080 (Blackwell): the official image works.
 - **Container `ow-ai-model`:**
   - Arguments: `<models>/<org>/<name> --served-model-name <org>/<name> --max-model-len
-    <context> --gpu-memory-utilization <share>`.
-  - **Tool calling:** for model families with a known vLLM parser (Qwen 2/3: `hermes`, Qwen3
-    coder: `qwen3_coder`, Llama 3: `llama3_json`, Mistral, gpt-oss, Granite, OLMo 3, Gemma 4),
-    also `--enable-auto-tool-choice --tool-call-parser <parser>`, picked from `model_type` in
-    `config.json`. Open WebUI sends its built-in tools with every chat, and without these flags
+    <context> --gpu-memory-utilization <share> --max-num-seqs 16`.
+  - **At most 16 requests at once** (vLLM's default is 256): plenty for a few people and a
+    benchmark (8 at a time). Hybrid models such as Qwen3.5 need a state block per request and
+    refuse to start when the GPU share holds fewer blocks than that; fewer requests also means
+    fewer CUDA graphs to capture at start.
+  - **Tool calling:** for model families with a known vLLM parser (Qwen 2/3: `hermes`, Qwen3.5
+    and Qwen3 coder: `qwen3_coder`, Llama 3: `llama3_json`, Mistral, gpt-oss, Granite, OLMo 3,
+    Gemma 4), also `--enable-auto-tool-choice --tool-call-parser <parser>`, picked from
+    `model_type` in `config.json`. A Qwen chat template with the XML tool format (`<function=…>`)
+    always gets `qwen3_coder`. Open WebUI sends its built-in tools with every chat, and without these flags
     vLLM refuses the request ("auto" tool choice requires …). For other families, Open WebUI is
     started with `DEFAULT_MODEL_PARAMS={"function_calling": "legacy"}`, so it describes tools in the
     prompt instead.
+  - **Thinking:** Qwen3 models whose template uses `<think>` also get `--reasoning-parser qwen3`.
+    vLLM then returns the thinking apart from the answer, and Open WebUI shows it folded. Qwen3.5's
+    template opens `<think>` in the prompt, so without the parser the thinking appears in the
+    answer.
   - Models are mounted read-only, and Hugging Face is set offline. The chosen GPU comes in through
     `device_ids`.
   - A named volume `ow-vllm-cache` holds compiled kernels, so later starts are faster.

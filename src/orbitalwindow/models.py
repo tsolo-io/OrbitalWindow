@@ -243,6 +243,21 @@ class LocalModel:
             return None
         return data if isinstance(data, dict) else None
 
+    def chat_template(self) -> str:
+        """Read the model's chat template (``chat_template.jinja`` or ``tokenizer_config.json``).
+
+        Returns:
+            The template, or an empty string if there is none.
+        """
+        with contextlib.suppress(OSError):
+            return (self.path / "chat_template.jinja").read_text()
+        try:
+            data = json.loads((self.path / "tokenizer_config.json").read_text())
+        except OSError, ValueError:
+            return ""
+        template = data.get("chat_template") if isinstance(data, dict) else None
+        return template if isinstance(template, str) else ""
+
 
 @dataclass(frozen=True)
 class Space:
