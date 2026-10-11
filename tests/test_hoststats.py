@@ -113,5 +113,5 @@ def test_read_ok_and_errors():
 
 def test_formatting():
     """Sizes and uptimes are short and readable."""
-    assert size(1.5e9) == "1.5 GB" and size(512) == "512 B" and size(None) == "–"
+    assert size(1.5 * 1024**3) == "1.5 GB" and size(512) == "512 B" and size(None) == "–"
     assert duration(3 * 86400 + 7200) == "3 days 2 h" and duration(3720) == "1 h 2 min"
