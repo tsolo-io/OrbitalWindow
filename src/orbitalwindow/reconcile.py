@@ -72,6 +72,11 @@ def reconcile(svc: Service, now: datetime | None = None) -> None:
             except docker.errors.APIError as exc:
                 log.warning("could not remove network %s: %s", net.name, exc)
 
+    try:
+        svc.ai.ensure_connected()
+    except docker.errors.DockerException as exc:
+        log.warning("could not reconnect Traefik to the AI session: %s", exc)
+
     fixed = svc.desktops.ensure_traefik_connected()
     if fixed:
         log.info("reconnected Traefik to %d user network(s)", fixed)

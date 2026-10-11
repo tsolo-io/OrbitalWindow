@@ -11,6 +11,7 @@ and never touch Docker or the DB directly.
 import logging
 import os
 import re
+import secrets
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,7 @@ from . import groups as groups_mod
 from . import models as models_mod
 from . import ssh as ssh_mod
 from . import users as users_mod
+from .aisession import MIN_CONTEXT, AiSessions, SessionRequest, SessionState
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
 from .builds import TAG_RE, Builder, desktop_image_ref
@@ -110,6 +112,7 @@ class Service:
         self.models = ModelLibrary(settings.models_dir)
         self.hub = HubClient()
         self.llmfit = LlmFit(client, settings.llmfit_image)
+        self.ai = AiSessions(client, self.db, settings)
         self.downloads = Downloader(client, self.db, self.models, os.getuid(), self.hf_token)
         self._reconcile_stop = threading.Event()
 
@@ -698,6 +701,9 @@ class Service:
         repo = models_mod.validate_repo(repo)
         if self.downloads.busy(repo):
             raise ValidationError(f"{repo} is being downloaded. Cancel the download first.")
+        state = self.ai.state()
+        if state.repo == repo and state.status in ("starting", "running"):
+            raise ValidationError(f"{repo} is running in the AI session. Stop the session first.")
         self.models.delete(repo)
         self.db.audit(actor, "ai.model.delete", repo)
 
@@ -755,6 +761,181 @@ class Service:
             return self.llmfit.suggest(gpu.total)
         except SuggestionError as exc:
             raise ValidationError(str(exc)) from exc
+
+    # --- AI: session ------------------------------------------------------------------------
+
+    def ai_api_key(self) -> str:
+        """Return the AI session's API key, creating it on first use.
+
+        Returns:
+            The key (``ow-`` and 43 random characters).
+        """
+        path = self.settings.ai_api_key_path
+        try:
+            key = path.read_text().strip()
+        except FileNotFoundError:
+            key = ""
+        if not key:
+            key = self._write_ai_api_key()
+        return key
+
+    def _write_ai_api_key(self) -> str:
+        """Generate a new API key and store it (mode 600).
+
+        Returns:
+            The new key.
+        """
+        key = "ow-" + secrets.token_urlsafe(32)
+        path = self.settings.ai_api_key_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as out:
+            out.write(key + "\n")
+        return key
+
+    def new_ai_api_key(self, actor: str) -> None:
+        """Replace the AI session's API key (it takes effect at the next session start).
+
+        Args:
+            actor: Name recorded in the audit log (the key itself is never logged).
+        """
+        self._write_ai_api_key()
+        self.db.audit(actor, "ai.api_key", detail="replaced")
+
+    def ai_api_public(self) -> bool:
+        """Tell whether the session's API is reachable from outside the server (``/v1``).
+
+        Returns:
+            The setting; off by default.
+        """
+        return self.db.get_setting("ai_api_public") == "true"
+
+    def set_ai_api_public(self, actor: str, public: bool) -> None:
+        """Make the session's API reachable from outside the server, or not (next start).
+
+        Args:
+            actor: Name recorded in the audit log.
+            public: True to route ``/v1`` to the session through Traefik.
+        """
+        self.db.set_setting("ai_api_public", "true" if public else "false")
+        self.db.audit(actor, "ai.api_public", detail="on" if public else "off")
+
+    def ai_api_url(self) -> str:
+        """Return the address of the session's OpenAI-compatible API.
+
+        Returns:
+            ``https://<host>/v1``.
+        """
+        return f"https://{self.public_hostname()}/v1"
+
+    def ai_session(self) -> tuple[SessionState, str]:
+        """Return the AI session's state and, while it starts, the end of its log.
+
+        Returns:
+            The state and the log tail (empty unless starting).
+        """
+        state = self.ai.state()
+        return state, self.ai.log_tail() if state.status == "starting" else ""
+
+    def session_defaults(self, repo: str, context: int = fit_mod.DEFAULT_CONTEXT) -> dict[str, Any]:
+        """Suggest session settings for a downloaded model.
+
+        The GPU share covers the estimate with a little room to spare (more cache means more
+        people can chat at once), between 30 % and 90 %.
+
+        Args:
+            repo: Model id.
+            context: Context length to plan for.
+
+        Returns:
+            ``context`` (capped at the model's maximum), ``max_context``, ``gpu_share``, the
+            ``estimate`` and the ``verdict``.
+
+        Raises:
+            ValidationError: If the model is not downloaded.
+        """
+        model = self._local_model(repo)
+        estimate = fit_mod.estimate(model.weights, model.config(), context)
+        gpu = self.model_gpu()
+        share = 0.9
+        if gpu is not None:
+            share = min(max(round((estimate.total / gpu.total + 0.1) * 20) / 20, 0.3), 0.9)
+        return {
+            "context": estimate.context,
+            "max_context": estimate.shape.max_context if estimate.shape else None,
+            "gpu_share": share,
+            "estimate": estimate,
+            "verdict": fit_mod.verdict(estimate.total, gpu),
+        }
+
+    def _local_model(self, repo: str) -> LocalModel:
+        """Return a downloaded model.
+
+        Args:
+            repo: Model id.
+
+        Returns:
+            The model.
+
+        Raises:
+            ValidationError: If it is not downloaded (or still downloading).
+        """
+        repo = models_mod.validate_repo(repo)
+        model = next((m for m in self.models.models() if m.repo == repo), None)
+        if model is None or self.downloads.busy(repo):
+            raise ValidationError(f"{repo} is not downloaded.")
+        return model
+
+    def start_ai_session(
+        self, actor: str, repo: str, gpu_index: Any, context: Any, gpu_share: Any
+    ) -> int:
+        """Start the AI session with a downloaded model.
+
+        Args:
+            actor: Name recorded in the audit log.
+            repo: Model id.
+            gpu_index: NVIDIA GPU number.
+            context: Context length in tokens.
+            gpu_share: Share of the GPU's memory vLLM may use (0.1–0.95).
+
+        Returns:
+            The session id.
+
+        Raises:
+            ValidationError: For a model that isn't downloaded, an unknown GPU, values out of range,
+                or when a session is already running.
+        """
+        model = self._local_model(repo)
+        gpus = self.gpus.stats()
+        if not gpus:
+            raise ValidationError("The AI session needs an NVIDIA GPU (NVML is not available).")
+        index = _int_in(gpu_index, 0, max(g.index for g in gpus), "GPU")
+        if index not in {g.index for g in gpus}:
+            raise ValidationError("Unknown GPU.")
+        shape = fit_mod.shape_from_config(model.config() or {})
+        top = shape.max_context if shape and shape.max_context else 1_048_576
+        tokens = _int_in(context, MIN_CONTEXT, top, "Context length")
+        try:
+            share = round(float(gpu_share), 2)
+        except TypeError, ValueError:
+            raise ValidationError("The GPU share must be a number.") from None
+        if not 0.1 <= share <= 0.95:
+            raise ValidationError("The GPU share must be between 10 % and 95 %.")
+        request = SessionRequest(model.repo, index, tokens, share, self.ai_api_public())
+        session_id = self.ai.start(request, self.ai_api_key(), actor)
+        self.db.audit(
+            actor, "ai.session.start", model.repo, f"gpu={index} context={tokens} share={share}"
+        )
+        return session_id
+
+    def stop_ai_session(self, actor: str) -> None:
+        """Stop the AI session (frees the GPU memory).
+
+        Args:
+            actor: Name recorded in the audit log.
+        """
+        repo = self.ai.stop()
+        self.db.audit(actor, "ai.session.stop", repo or "")
 
     def model_library(self) -> tuple[list[LocalModel], Space, list[dict[str, Any]]]:
         """Return what the AI page shows: downloaded models, disk space and downloads.

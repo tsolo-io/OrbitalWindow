@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     node_exporter_url: str = "http://host.docker.internal:9100/metrics"
     # llmfit image for model suggestions; change the tag to follow llmfit releases.
     llmfit_image: str = "ghcr.io/alexsjones/llmfit:1.1.15"
+    # vLLM image for the AI session (CUDA 13; tens of GB, pulled on first start).
+    vllm_image: str = "vllm/vllm-openai:v0.30.0"
 
     cookie_secure: bool = True
     session_hours: int = 12
@@ -103,6 +105,15 @@ class Settings(BaseSettings):
             ``<state_dir>/hf_token``.
         """
         return self.state_dir / "hf_token"
+
+    @property
+    def ai_api_key_path(self) -> Path:
+        """Return the file holding the AI session's API key.
+
+        Returns:
+            ``<state_dir>/ai_api_key``.
+        """
+        return self.state_dir / "ai_api_key"
 
     @property
     def models_dir(self) -> Path:
