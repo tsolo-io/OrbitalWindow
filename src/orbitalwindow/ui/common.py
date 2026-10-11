@@ -2,12 +2,16 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared page pieces: the service handle, session checks and the page frame."""
+"""Shared page pieces: the service handle, session checks, the page frame and local times."""
 
+import functools
 import inspect
+import logging
 from collections.abc import Callable
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -15,6 +19,8 @@ from nicegui import ui
 
 from ..auth import COOKIE_NAME, SessionUser
 from ..service import Service
+
+log = logging.getLogger(__name__)
 
 _service: Service | None = None
 
@@ -37,6 +43,43 @@ def service() -> Service:
     """
     assert _service is not None, "service not initialised"
     return _service
+
+
+@functools.cache
+def _zone(name: str) -> tzinfo:
+    """Look up a time zone, falling back to UTC for an unknown name.
+
+    Args:
+        name: IANA name such as ``Africa/Johannesburg``.
+
+    Returns:
+        The time zone.
+    """
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError, ValueError:
+        log.warning("unknown time zone %r: showing times in UTC", name)
+        return UTC
+
+
+def local_time(value: datetime | None, fmt: str = "%Y-%m-%d %H:%M", empty: str = "") -> str:
+    """Format a timestamp in the server's time zone (``TZ``).
+
+    The database stores naive UTC (ADR 0009); pages show every time through this function.
+
+    Args:
+        value: A naive UTC or a time zone aware timestamp, or None.
+        fmt: ``strftime`` format.
+        empty: What to show for None.
+
+    Returns:
+        The formatted local time.
+    """
+    if value is None:
+        return empty
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(_zone(service().settings.tz)).strftime(fmt)
 
 
 class PageAuth:

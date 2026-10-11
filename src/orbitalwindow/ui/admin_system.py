@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..metrics import fmt_bytes
-from .common import authenticate, frame, guarded, service
+from .common import authenticate, frame, guarded, local_time, service
 
 DESKTOP_COLUMNS = [
     {"name": "name", "label": "User", "field": "name", "sortable": True, "align": "left"},
@@ -27,10 +27,10 @@ DISK_COLUMNS = [
     {"name": "used", "label": "Used", "field": "used", "align": "right"},
     {"name": "quota", "label": "Quota", "field": "quota", "align": "right"},
     {"name": "percent", "label": "Of quota", "field": "percent", "align": "right"},
-    {"name": "measured", "label": "Measured (UTC)", "field": "measured", "align": "right"},
+    {"name": "measured", "label": "Measured", "field": "measured", "align": "right"},
 ]
 AUDIT_COLUMNS = [
-    {"name": "ts", "label": "Time (UTC)", "field": "ts", "align": "left"},
+    {"name": "ts", "label": "Time", "field": "ts", "align": "left"},
     {"name": "actor", "label": "Who", "field": "actor", "align": "left"},
     {"name": "action", "label": "Action", "field": "action", "align": "left"},
     {"name": "target", "label": "Target", "field": "target", "align": "left"},
@@ -106,9 +106,7 @@ def admin_system(request: Request) -> RedirectResponse | None:
                     "quota": f"{entry.quota_gb:g} GB" if entry.quota_gb else "–",
                     "percent": f"{entry.fraction:.0%}" if entry.fraction is not None else "–",
                     "warning": entry.warning,
-                    "measured": entry.measured_at.strftime("%Y-%m-%d %H:%M")
-                    if entry.measured_at
-                    else "",
+                    "measured": local_time(entry.measured_at),
                 }
                 for entry in usage
             ]
@@ -171,7 +169,7 @@ def admin_system(request: Request) -> RedirectResponse | None:
             """Reload the audit log table, filtered by the search text."""
             rows = await run.io_bound(svc.audit_log, search.value or "", 500)
             audit.rows = [
-                row | {"i": index, "ts": row["ts"].strftime("%Y-%m-%d %H:%M:%S")}
+                row | {"i": index, "ts": local_time(row["ts"], "%Y-%m-%d %H:%M:%S")}
                 for index, row in enumerate(rows)
             ]
             audit.update()

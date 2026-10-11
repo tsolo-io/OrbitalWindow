@@ -13,7 +13,7 @@ from ..aisession import SessionState
 from ..fit import GIB
 from ..service import Service
 from ..users import ValidationError
-from .common import PageAuth, guarded
+from .common import PageAuth, guarded, local_time
 
 STATUS_COLORS = {"running": "positive", "starting": "orange", "failed": "negative"}
 LOADING = " · loading, this can take several minutes"
@@ -137,7 +137,7 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
         badge.set_text(state.status)
         badge.props(f"color={STATUS_COLORS.get(state.status, 'grey')}")
         if state.status in ("starting", "running"):
-            started = state.started_at.strftime("%Y-%m-%d %H:%M") if state.started_at else ""
+            started = local_time(state.started_at)
             status.set_text(
                 f"{state.repo} on GPU {state.gpu_index} · {state.context:,} tokens · "
                 f"{state.gpu_share:.0%} of the GPU · started by {state.started_by} {started}"

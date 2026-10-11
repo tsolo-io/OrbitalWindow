@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..benchmarks import task_results
-from .common import authenticate, frame, guarded, service
+from .common import authenticate, frame, guarded, local_time, service
 
 COLUMNS = [
     {"name": "repo", "label": "Model", "field": "repo", "align": "left", "sortable": True},
@@ -116,7 +116,7 @@ def benchmarks_page(request: Request) -> RedirectResponse | None:
                     "plus": percent(row["plus_score"]),
                     "base": percent(row["base_score"]),
                     "status": row["status"],
-                    "when": row["created_at"].strftime("%Y-%m-%d %H:%M"),
+                    "when": local_time(row["created_at"]),
                     "duration": duration(row["seconds"]),
                     "settings": settings_text(row),
                 }
@@ -168,7 +168,7 @@ def benchmark_report(request: Request, bench_id: int) -> RedirectResponse | None
                         ui.label(label).classes("text-caption text-grey-7")
                         ui.label(value).classes("text-h6")
             ui.label(
-                f"Status {row['status']} · run {row['created_at']:%Y-%m-%d %H:%M} by "
+                f"Status {row['status']} · run {local_time(row['created_at'])} by "
                 f"{row['started_by']} · took {duration(row['seconds'])} · {settings_text(row)}"
             ).classes("text-grey-8")
             if row["error"]:

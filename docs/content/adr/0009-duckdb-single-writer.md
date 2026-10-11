@@ -20,7 +20,9 @@ process. Within a process, a single connection is not safe to use from several t
 - Schema changes are numbered migrations in `db.MIGRATIONS`, applied at startup. A released
   migration is never edited.
 - Timestamps are naive UTC `TIMESTAMP` columns (the session time zone is pinned to UTC).
-  `TIMESTAMPTZ` results would need `pytz` just to read them.
+  `TIMESTAMPTZ` results would need `pytz` just to read them. Pages show them in the server's time
+  zone (`TZ`) through `ui.common.local_time`; a test stops pages from formatting times directly
+  (#32).
 - UIDs, MACs and GIDs come from monotonic counters (`counters` table), so numbers are never reused,
   even after a user is deleted.
 
