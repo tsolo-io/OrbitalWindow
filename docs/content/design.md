@@ -196,8 +196,9 @@ env: {}                     # extra container environment
 
 ### TLS with a domain
 - **Name:** `desk.<domain>` resolves to the server's LAN IP (a public record pointing to a private IP is fine, or split DNS).
-- **Certificate:** Traefik certresolver `le` with a DNS-01 challenge, so the server never needs to be reachable from the internet. The provider token lives in `deploy/.env`.
-- **Until the provider is known:** keep Traefik's self-signed default. Switching only touches the Traefik flags and adds the token.
+- **Certificate:** Traefik certresolver `le` with a DNS-01 challenge, so the server never needs to be reachable from the internet. The provider token lives in `deploy/acme.env`; setting `OW_ACME_DNS_PROVIDER` in `deploy/.env` adds `compose.tls.yaml` (ADR 0019).
+- **Until the provider is known:** keep Traefik's self-signed default. DNS-01 is built but untested, since no domain exists yet. Route53 and a Cloudflare zone per research station are both being considered.
+- **Remote access** (from home, only where a university approves) is an open question and not built. Options discussed on 2026-10-11: Cloudflare Tunnel with Access, Microsoft Entra Application Proxy, Tailscale or NetBird, or a self-hosted relay on AWS (Pangolin, or WireGuard with Traefik). Whichever is chosen, OrbitalWindow's own login stays on for LAN users.
 - **Samba and SSH** use the same hostname (`\\desk.<domain>\<user>`, `ssh -p 2222 <user>@desk.<domain>`).
 
 ### AI models (ticket #15, ADR 0024)
@@ -211,7 +212,9 @@ env: {}                     # extra container environment
   suggestions.
 - **Session (#17, ADR 0027):** one vLLM container `ow-ai-model` on internal network `ow-ai`, with an
   API key from `state/ai_api_key`. `/v1` goes through Traefik only when switched on; it is in the
-  `ai_sessions` history.
+  `ai_sessions` history. vLLM gets a tool-call parser and, for Qwen3 thinking models, a reasoning
+  parser chosen from `config.json` and the chat template (#30, #31); `--max-num-seqs 16` lets
+  hybrid models such as Qwen3.5 start. The fit counts only full-attention layers for the KV cache.
 - **Chat (#18, ADR 0028):** Open WebUI `ow-openwebui` on port 8443 (Traefik entrypoint `ai`)
   while the session runs. It signs users in from the forwardAuth headers `X-OW-Email`/`Name`/`Role`
   and offers per-user API keys (`Bearer sk-…` skips forwardAuth). Its data is in `state/openwebui`.
@@ -221,7 +224,8 @@ env: {}                     # extra container environment
 
 ### Server status (ticket #22, ADR 0025)
 - Page `/status` for every user: host name, uptime, load, CPU, memory, swap, disk space, disk and
-  network traffic, and GPUs (NVML).
+  network traffic, GPUs (NVML), and temperatures (#33): hwmon chips from node-exporter averaged per
+  chip with the hottest sensor and critical limit, GPU temperature and slowdown limit from NVML.
 - **Source:** Prometheus node-exporter on the host (admin installs it), at `OW_NODE_EXPORTER_URL`
   (default `http://host.docker.internal:9100/metrics`, via `extra_hosts: host-gateway`).
 - Read only by an open page, every 5 s; rates come from the page's previous read. Nothing is
