@@ -26,10 +26,12 @@ if [ -e "$TARGET/bin/matlab" ]; then
 fi
 # docker creates $TARGET for the bind mount, so this works without sudo for the docker group.
 
-docker run --rm \
+docker run --rm -e DEBIAN_FRONTEND=noninteractive \
     -v "$TARGET:/opt/matlab" \
     "$IMAGE" bash -euc '
-apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates unzip >/dev/null
+# mpm unpacks a binary that needs libatomic1, which is not in the base image.
+apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+    curl ca-certificates unzip libatomic1 >/dev/null
 curl -fsSL -o /tmp/mpm https://www.mathworks.com/mpm/glnxa64/mpm
 chmod +x /tmp/mpm
 /tmp/mpm install --release="$0" --destination=/opt/matlab --products "$@"
