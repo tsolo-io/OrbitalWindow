@@ -28,6 +28,7 @@ from .aisession import MIN_CONTEXT, AiSessions, SessionRequest, SessionState
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
 from .builds import TAG_RE, Builder, desktop_image_ref
+from .chat import Chat
 from .config import Settings
 from .db import Database
 from .desktops import (
@@ -113,6 +114,7 @@ class Service:
         self.hub = HubClient()
         self.llmfit = LlmFit(client, settings.llmfit_image)
         self.ai = AiSessions(client, self.db, settings)
+        self.chat = Chat(client, settings)
         self.downloads = Downloader(client, self.db, self.models, os.getuid(), self.hf_token)
         self._reconcile_stop = threading.Event()
 
@@ -923,6 +925,8 @@ class Service:
             raise ValidationError("The GPU share must be between 10 % and 95 %.")
         request = SessionRequest(model.repo, index, tokens, share, self.ai_api_public())
         session_id = self.ai.start(request, self.ai_api_key(), actor)
+        # Open WebUI starts alongside (its image may need pulling: don't hold up the page).
+        threading.Thread(target=self.sync_chat, name="ow-chat", daemon=True).start()
         self.db.audit(
             actor, "ai.session.start", model.repo, f"gpu={index} context={tokens} share={share}"
         )
@@ -935,7 +939,38 @@ class Service:
             actor: Name recorded in the audit log.
         """
         repo = self.ai.stop()
+        self.sync_chat()
         self.db.audit(actor, "ai.session.stop", repo or "")
+
+    def sync_chat(self) -> None:
+        """Run the chat (Open WebUI) while the AI session starts or runs; remove it otherwise.
+
+        Problems are logged, not raised: this also runs from the reconcile loop.
+        """
+        try:
+            wanted = self.ai.state().status in ("starting", "running")
+            self.chat.ensure(wanted, self.ai_api_key(), self.public_hostname())
+        except docker.errors.DockerException as exc:
+            log.warning("AI chat: %s", exc)
+
+    def chat_url(self) -> str:
+        """Return the address of the chat.
+
+        Returns:
+            ``https://<host>:<chat port>/``.
+        """
+        return f"https://{self.public_hostname()}:{self.settings.chat_port}/"
+
+    def chat_ready(self) -> bool:
+        """Tell whether the chat can be opened (Open WebUI is up and the model is running).
+
+        Returns:
+            True when both are ready.
+        """
+        try:
+            return self.ai.state().status == "running" and self.chat.ready()
+        except docker.errors.DockerException:
+            return False
 
     def model_library(self) -> tuple[list[LocalModel], Space, list[dict[str, Any]]]:
         """Return what the AI page shows: downloaded models, disk space and downloads.

@@ -43,6 +43,10 @@ services:
       - --entrypoints.websecure.http.tls=true
       # Desktop streams are long-lived WebSockets; don't time them out.
       - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0
+      # The AI chat (Open WebUI) can't run under a path, so it gets its own port.
+      - --entrypoints.ai.address=:8443
+      - --entrypoints.ai.http.tls=true
+      - --entrypoints.ai.transport.respondingtimeouts.readtimeout=0
       - --log.level=INFO
       # Access log (JSON, to `docker logs ow-traefik`) for troubleshooting; see deploy/.env.
       - --accesslog=${OW_TRAEFIK_ACCESS_LOG:-false}
@@ -53,6 +57,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "8443:8443"
     volumes:
       - ./traefik/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
       - traefik-certs:/certs:ro
@@ -140,6 +145,7 @@ services:
       DOCKER_HOST: tcp://socket-proxy-rw:2375
       OW_LLMFIT_IMAGE: ${OW_LLMFIT_IMAGE:-ghcr.io/alexsjones/llmfit:1.1.15}
       OW_VLLM_IMAGE: ${OW_VLLM_IMAGE:-vllm/vllm-openai:v0.30.0}
+      OW_OPENWEBUI_IMAGE: ${OW_OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.11.4}
     volumes:
       # Same path inside and outside, so mount sources we give Docker are valid host paths.
       - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}
@@ -176,6 +182,13 @@ services:
       # Admin-only tools (cAdvisor, later Dozzle).
       traefik.http.middlewares.ow-auth-admin.forwardauth.address: http://orbitalwindow:8000/auth/admin
       traefik.http.middlewares.ow-auth-admin.forwardauth.authResponseHeaders: Remote-User
+      # The AI chat (Open WebUI, labels set by OrbitalWindow on ow-openwebui): every logged-in user.
+      traefik.http.middlewares.ow-auth-ai.forwardauth.address: http://orbitalwindow:8000/auth/ai
+      traefik.http.middlewares.ow-auth-ai.forwardauth.authResponseHeaders: X-OW-Email,X-OW-Name,X-OW-Role
+      # API-key requests to the chat skip forwardAuth; strip the user headers instead.
+      traefik.http.middlewares.ow-chat-strip.headers.customrequestheaders.X-OW-Email: ""
+      traefik.http.middlewares.ow-chat-strip.headers.customrequestheaders.X-OW-Name: ""
+      traefik.http.middlewares.ow-chat-strip.headers.customrequestheaders.X-OW-Role: ""
 
   # Container metrics from cgroups only: no Docker or containerd socket, not privileged.
   # OrbitalWindow maps container IDs to names itself (see ADR 0017).

@@ -35,6 +35,8 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
             ui.label("AI session").classes("text-h6")
             badge = ui.badge("stopped", color="grey")
         status = ui.label().classes("text-body1")
+        chat_link = ui.link("Open the chat", svc.chat_url(), new_tab=True).classes("text-body1")
+        chat_link.set_visibility(False)
         log_view = ui.code("").classes("w-full text-xs")
         log_view.set_visibility(False)
         stop_btn = ui.button("Stop the session", icon="stop", color="negative").props("no-caps")
@@ -128,7 +130,10 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
 
     async def refresh() -> None:
         """Reload the session state, its log, the model and GPU choices."""
-        state, log_text = await run.io_bound(svc.ai_session)
+        result = await run.io_bound(svc.ai_session)
+        if result is None:  # None: the page closed or the app is stopping
+            return
+        state, log_text = result
         badge.set_text(state.status)
         badge.props(f"color={STATUS_COLORS.get(state.status, 'grey')}")
         if state.status in ("starting", "running"):
@@ -146,10 +151,14 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
         log_view.set_content(shown_log)
         log_view.set_visibility(bool(shown_log))
         active = state.status in ("starting", "running")
+        chat_link.set_visibility(state.status == "running" and await run.io_bound(svc.chat_ready))
         stop_btn.set_visibility(active)
         form.set_visibility(not active)
         if not active:
-            library, _, _ = await run.io_bound(svc.model_library)
+            result = await run.io_bound(svc.model_library)
+            if result is None:  # None: the page closed or the app is stopping
+                return
+            library = result[0]
             options = [model.repo for model in library]
             if options != model_in.options:
                 keep = model_in.value if model_in.value in options else None
