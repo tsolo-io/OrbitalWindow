@@ -31,7 +31,9 @@ LABEL_SPEC = "ow.spec"
 DATA_MOUNT = "/data"
 
 
-def chat_spec(settings: Settings, api_key: str, secret_key: str, hostname: str) -> dict[str, Any]:
+def chat_spec(
+    settings: Settings, api_key: str, secret_key: str, hostname: str, tools: bool = True
+) -> dict[str, Any]:
     """Build the ``containers.run`` arguments for Open WebUI.
 
     Args:
@@ -39,6 +41,8 @@ def chat_spec(settings: Settings, api_key: str, secret_key: str, hostname: str) 
         api_key: The AI session's API key, for Open WebUI's connection to vLLM.
         secret_key: Open WebUI's own signing key (kept so sign-ins survive a recreate).
         hostname: Host name users reach OrbitalWindow on.
+        tools: Whether vLLM can call tools for the model; if not, Open WebUI describes tools in
+            the prompt instead of sending them (vLLM refuses those requests).
 
     Returns:
         Keyword arguments for ``client.containers.run`` (including ``image``).
@@ -95,6 +99,8 @@ def chat_spec(settings: Settings, api_key: str, secret_key: str, hostname: str) 
         "ENABLE_PERSISTENT_CONFIG": "false",
         "TZ": settings.tz,
     }
+    if not tools:
+        environment["DEFAULT_MODEL_PARAMS"] = '{"function_calling": "legacy"}'
     kwargs: dict[str, Any] = {
         "image": settings.openwebui_image,
         "name": CONTAINER,
@@ -166,15 +172,17 @@ class Chat:
         health = container.attrs.get("State", {}).get("Health", {}).get("Status")
         return container.status == "running" and health in ("healthy", None)
 
-    def ensure(self, wanted: bool, api_key: str, hostname: str) -> None:
+    def ensure(self, wanted: bool, api_key: str, hostname: str, tools: bool = True) -> None:
         """Run Open WebUI while the AI session runs, and remove it otherwise.
 
-        A container whose settings changed (a new API key, image or host name) is recreated.
+        A container whose settings changed (a new API key, image, host name or tool calling) is
+        recreated.
 
         Args:
             wanted: Whether the AI session is starting or running.
             api_key: The AI session's API key.
             hostname: Host name users reach OrbitalWindow on.
+            tools: Whether vLLM can call tools for the session's model.
         """
         container = self._container()
         if not wanted:
@@ -182,7 +190,7 @@ class Chat:
                 log.info("stopping the AI chat")
                 container.remove(force=True)
             return
-        spec = chat_spec(self._settings, api_key, self.secret_key(), hostname)
+        spec = chat_spec(self._settings, api_key, self.secret_key(), hostname, tools)
         if container is not None:
             if container.labels.get(LABEL_SPEC) == spec["labels"][LABEL_SPEC]:
                 if container.status != "running":

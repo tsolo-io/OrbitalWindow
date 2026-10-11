@@ -32,6 +32,17 @@ def test_spec_signs_in_through_orbitalwindow_headers():
     assert spec["network"] == "ow-ai"
 
 
+def test_spec_without_tool_calling_uses_prompt_tools():
+    """When vLLM can't call tools for the model, Open WebUI describes tools in the prompt."""
+    assert "DEFAULT_MODEL_PARAMS" not in chat_spec(SETTINGS, "k", "s", "desk.test")["environment"]
+    spec = chat_spec(SETTINGS, "k", "s", "desk.test", tools=False)
+    assert spec["environment"]["DEFAULT_MODEL_PARAMS"] == '{"function_calling": "legacy"}'
+    assert (
+        spec["labels"][LABEL_SPEC]
+        != chat_spec(SETTINGS, "k", "s", "desk.test")["labels"][LABEL_SPEC]
+    )
+
+
 def test_spec_routes_browser_and_api_key_requests():
     """Browsers go through forwardAuth; requests with an Open WebUI key skip it."""
     labels = chat_spec(SETTINGS, "k", "s", "desk.test")["labels"]
