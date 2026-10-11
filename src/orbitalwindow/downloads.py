@@ -12,6 +12,7 @@ the size of the model folder against the expected total from the Hub.
 
 import io
 import logging
+import re
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -53,8 +54,12 @@ def download_command(repo: str, revision: str) -> list[str]:
     return [*cmd, "--format", "quiet"]
 
 
+# Terminal colour codes in hf's output.
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _log_tail(text: str, lines: int = 15) -> str:
-    """Return the end of a container log without ``hf``'s update hints.
+    """Return the end of a container log without ``hf``'s update hints and colour codes.
 
     Args:
         text: The container log.
@@ -63,7 +68,11 @@ def _log_tail(text: str, lines: int = 15) -> str:
     Returns:
         The last lines that are not hints.
     """
-    kept = [line for line in text.splitlines() if line.strip() and "Hint:" not in line]
+    kept = [
+        line
+        for line in ANSI_RE.sub("", text).splitlines()
+        if line.strip() and "Hint:" not in line and "hf update" not in line
+    ]
     return "\n".join(kept[-lines:])
 
 
@@ -303,7 +312,12 @@ class Downloader:
                 [f"Could not prepare the download tool: {exc}", row["id"]],
             )
             return
-        environment = {"HF_HUB_DISABLE_TELEMETRY": "1", "HOME": "/tmp"}
+        # The hf version is pinned in the image: no update check (its notice ends up in errors).
+        environment = {
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+            "HF_HUB_DISABLE_UPDATE_CHECK": "1",
+            "HOME": "/tmp",
+        }
         token = self._token()
         if token:
             environment["HF_TOKEN"] = token

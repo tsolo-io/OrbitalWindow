@@ -24,7 +24,14 @@ from . import groups as groups_mod
 from . import models as models_mod
 from . import ssh as ssh_mod
 from . import users as users_mod
-from .aisession import MIN_CONTEXT, AiSessions, SessionRequest, SessionState, tool_parser
+from .aisession import (
+    MIN_CONTEXT,
+    AiSessions,
+    SessionRequest,
+    SessionState,
+    reasoning_parser,
+    tool_parser,
+)
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
 from .benchmarks import ACTIVE as BENCH_ACTIVE
@@ -940,13 +947,15 @@ class Service:
             raise ValidationError("The GPU share must be a number.") from None
         if not 0.1 <= share <= 0.95:
             raise ValidationError("The GPU share must be between 10 % and 95 %.")
+        config, template = model.config() or {}, model.chat_template()
         request = SessionRequest(
             model.repo,
             index,
             tokens,
             share,
             self.ai_api_public(),
-            tool_parser(model.config() or {}, model.repo),
+            tool_parser(config, model.repo, template),
+            reasoning_parser(config, template),
         )
         session_id = self.ai.start(request, self.ai_api_key(), actor)
         # Open WebUI starts alongside (its image may need pulling: don't hold up the page).
@@ -990,7 +999,9 @@ class Service:
             True when vLLM has a tool call parser for it.
         """
         model = next((m for m in self.models.models() if m.repo == repo), None) if repo else None
-        return model is not None and bool(tool_parser(model.config() or {}, model.repo))
+        if model is None:
+            return False
+        return bool(tool_parser(model.config() or {}, model.repo, model.chat_template()))
 
     def chat_url(self) -> str:
         """Return the address of the chat.

@@ -47,6 +47,23 @@ def test_shape_from_nested_text_config_and_defaults():
     assert fit.shape_from_config({"architectures": ["X"]}) is None
 
 
+def test_hybrid_models_count_only_full_attention_layers():
+    """Linear attention layers (Qwen3.5) have no KV cache."""
+    kinds = ["linear_attention"] * 3 + ["full_attention"]
+    config = {
+        "model_type": "qwen3_5",
+        "text_config": {
+            "num_hidden_layers": 32,
+            "num_attention_heads": 16,
+            "num_key_value_heads": 4,
+            "head_dim": 256,
+            "layer_types": kinds * 8,
+        },
+    }
+    shape = fit.shape_from_config(config)
+    assert shape.layers == 8 and shape.kv_per_token == 2 * 8 * 4 * 256 * 2
+
+
 def test_estimate_parts_and_total():
     """Weights + cache for 8k tokens + overhead; the context is capped at the model's maximum."""
     estimate = fit.estimate(16.4e9, QWEN3_8B)
@@ -211,3 +228,13 @@ def test_suggestions_need_a_gpu(service, monkeypatch):
     monkeypatch.setattr(service.gpus, "stats", lambda: [])
     with pytest.raises(ValidationError, match="NVIDIA"):
         service.model_suggestions()
+
+
+def test_chat_template_from_file_or_tokenizer_config(tmp_path):
+    """The chat template comes from chat_template.jinja, else tokenizer_config.json."""
+    model = LocalModel("a/b", tmp_path, 0, None)
+    assert model.chat_template() == ""
+    (tmp_path / "tokenizer_config.json").write_text(json.dumps({"chat_template": "{{ old }}"}))
+    assert model.chat_template() == "{{ old }}"
+    (tmp_path / "chat_template.jinja").write_text("{{ new }}")
+    assert model.chat_template() == "{{ new }}"

@@ -305,7 +305,10 @@ def test_failed_download_keeps_log_tail(downloader):
     downloader.step()
     container = downloader._client.containers.current
     container.status, container.attrs["State"]["ExitCode"] = "exited", 1
-    container._log = b"Hint: update hf\n401 Client Error: gated repo\n"
+    container._log = (
+        b"To update, run: hf update\x1b[0m\n"
+        b"Hint: update hf\n\x1b[31m401 Client Error: gated repo\x1b[0m\n"
+    )
     downloader.step()
     row = downloader._db.one("SELECT * FROM model_downloads WHERE id = ?", [download_id])
     assert row["status"] == "failed" and row["error"] == "401 Client Error: gated repo"

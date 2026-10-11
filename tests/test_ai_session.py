@@ -15,6 +15,7 @@ from orbitalwindow.aisession import (
     AiSessions,
     SessionRequest,
     clean_log,
+    reasoning_parser,
     session_spec,
     tool_parser,
 )
@@ -43,7 +44,14 @@ def test_spec_private_session():
     command = spec["command"]
     assert command[:3] == ["/models/Qwen/Qwen3-0.6B", "--served-model-name", "Qwen/Qwen3-0.6B"]
     assert "--api-key" not in spec["command"] and spec["environment"]["VLLM_API_KEY"] == "ow-key"
-    assert spec["command"][-4:] == ["--max-model-len", "8192", "--gpu-memory-utilization", "0.50"]
+    assert spec["command"][-6:] == [
+        "--max-model-len",
+        "8192",
+        "--gpu-memory-utilization",
+        "0.50",
+        "--max-num-seqs",
+        "16",
+    ]
     assert spec["volumes"]["/srv/ow/shared/models"] == {"bind": "/models", "mode": "ro"}
     assert spec["device_requests"][0]["DeviceIDs"] == ["0"]
     assert spec["environment"]["HF_HUB_OFFLINE"] == "1"
@@ -71,6 +79,9 @@ def test_tool_parser_by_model_family():
     assert tool_parser({"model_type": "qwen3_moe"}, "Qwen/Qwen3-Coder-30B-A3B") == "qwen3_coder"
     assert tool_parser({"model_type": "llama"}, "meta-llama/Llama-3.1-8B-Instruct") == "llama3_json"
     assert tool_parser({"model_type": "gpt_oss"}, "openai/gpt-oss-20b") == "openai"
+    assert tool_parser({"model_type": "qwen3_5"}, "Qwen/Qwen3.5-4B") == "qwen3_coder"
+    xml = "<tool_call>\n<function=example_function_name>"
+    assert tool_parser({"model_type": "qwen3"}, "someone/qwen-tuned", xml) == "qwen3_coder"
     assert tool_parser({"model_type": "phi3"}, "microsoft/Phi-3") == ""
     assert tool_parser({}, "a/b") == ""
     assert (
@@ -80,6 +91,16 @@ def test_tool_parser_by_model_family():
     request = SessionRequest("a/b", 0, 4096, 0.5, False, "hermes")
     command = session_spec(request, Settings(root="/x"), "k", 1)["command"]
     assert command[-3:] == ["--enable-auto-tool-choice", "--tool-call-parser", "hermes"]
+
+
+def test_reasoning_parser_for_thinking_qwen_models():
+    """Qwen3 models with <think> in their template get the qwen3 reasoning parser."""
+    assert reasoning_parser({"model_type": "qwen3_5"}, "{{ '<think>\\n' }}") == "qwen3"
+    assert reasoning_parser({"model_type": "qwen3"}, "no thinking here") == ""
+    assert reasoning_parser({"model_type": "llama"}, "<think>") == ""
+    request = SessionRequest("a/b", 0, 4096, 0.5, False, "", "qwen3")
+    command = session_spec(request, Settings(root="/x"), "k", 1)["command"]
+    assert command[-2:] == ["--reasoning-parser", "qwen3"] and "--tool-call-parser" not in command
 
 
 def test_clean_log_drops_progress_bars():
