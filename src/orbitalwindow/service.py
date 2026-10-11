@@ -24,7 +24,7 @@ from . import groups as groups_mod
 from . import models as models_mod
 from . import ssh as ssh_mod
 from . import users as users_mod
-from .aisession import MIN_CONTEXT, AiSessions, SessionRequest, SessionState
+from .aisession import MIN_CONTEXT, AiSessions, SessionRequest, SessionState, tool_parser
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
 from .benchmarks import ACTIVE as BENCH_ACTIVE
@@ -940,7 +940,14 @@ class Service:
             raise ValidationError("The GPU share must be a number.") from None
         if not 0.1 <= share <= 0.95:
             raise ValidationError("The GPU share must be between 10 % and 95 %.")
-        request = SessionRequest(model.repo, index, tokens, share, self.ai_api_public())
+        request = SessionRequest(
+            model.repo,
+            index,
+            tokens,
+            share,
+            self.ai_api_public(),
+            tool_parser(model.config() or {}, model.repo),
+        )
         session_id = self.ai.start(request, self.ai_api_key(), actor)
         # Open WebUI starts alongside (its image may need pulling: don't hold up the page).
         threading.Thread(target=self.sync_chat, name="ow-chat", daemon=True).start()
@@ -965,10 +972,25 @@ class Service:
         Problems are logged, not raised: this also runs from the reconcile loop.
         """
         try:
-            wanted = self.ai.state().status in ("starting", "running")
-            self.chat.ensure(wanted, self.ai_api_key(), self.public_hostname())
+            state = self.ai.state()
+            wanted = state.status in ("starting", "running")
+            self.chat.ensure(
+                wanted, self.ai_api_key(), self.public_hostname(), self._model_tools(state.repo)
+            )
         except docker.errors.DockerException as exc:
             log.warning("AI chat: %s", exc)
+
+    def _model_tools(self, repo: str) -> bool:
+        """Tell whether the session's model can call tools through vLLM.
+
+        Args:
+            repo: Model id, or an empty string without a session.
+
+        Returns:
+            True when vLLM has a tool call parser for it.
+        """
+        model = next((m for m in self.models.models() if m.repo == repo), None) if repo else None
+        return model is not None and bool(tool_parser(model.config() or {}, model.repo))
 
     def chat_url(self) -> str:
         """Return the address of the chat.

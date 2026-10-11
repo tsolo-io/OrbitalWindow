@@ -11,11 +11,19 @@ import docker
 import pytest
 
 from orbitalwindow import aisession
-from orbitalwindow.aisession import AiSessions, SessionRequest, clean_log, session_spec
+from orbitalwindow.aisession import (
+    AiSessions,
+    SessionRequest,
+    clean_log,
+    session_spec,
+    tool_parser,
+)
+from orbitalwindow.config import Settings
 from orbitalwindow.metrics import GpuStat
 from orbitalwindow.users import ValidationError
 
 CONFIG = {
+    "model_type": "qwen3",
     "num_hidden_layers": 28,
     "num_attention_heads": 16,
     "num_key_value_heads": 8,
@@ -55,6 +63,23 @@ def test_spec_public_session_routes_v1():
     assert labels["traefik.docker.network"] == "ow-ai"
     assert labels["traefik.http.services.ow-ai-api.loadbalancer.server.port"] == "8000"
     assert spec["device_requests"][0]["DeviceIDs"] == ["1"]
+
+
+def test_tool_parser_by_model_family():
+    """Known families get vLLM's tool call parser; others none (and no tool flags)."""
+    assert tool_parser({"model_type": "qwen3"}, "Qwen/Qwen3-8B") == "hermes"
+    assert tool_parser({"model_type": "qwen3_moe"}, "Qwen/Qwen3-Coder-30B-A3B") == "qwen3_coder"
+    assert tool_parser({"model_type": "llama"}, "meta-llama/Llama-3.1-8B-Instruct") == "llama3_json"
+    assert tool_parser({"model_type": "gpt_oss"}, "openai/gpt-oss-20b") == "openai"
+    assert tool_parser({"model_type": "phi3"}, "microsoft/Phi-3") == ""
+    assert tool_parser({}, "a/b") == ""
+    assert (
+        "--enable-auto-tool-choice"
+        not in session_spec(REQUEST, Settings(root="/x"), "k", 1)["command"]
+    )
+    request = SessionRequest("a/b", 0, 4096, 0.5, False, "hermes")
+    command = session_spec(request, Settings(root="/x"), "k", 1)["command"]
+    assert command[-3:] == ["--enable-auto-tool-choice", "--tool-call-parser", "hermes"]
 
 
 def test_clean_log_drops_progress_bars():
@@ -227,6 +252,8 @@ def test_start_session_validates_and_audits(service, model_on_disk):
     service.start_ai_session("boss", "Qwen/Qwen3-0.6B", "0", "8192", 0.5)
     _, kwargs = service.ai._client.runs[0]
     assert kwargs["environment"]["VLLM_API_KEY"] == service.ai_api_key()
+    assert kwargs["command"][-2:] == ["--tool-call-parser", "hermes"]
+    assert service._model_tools("Qwen/Qwen3-0.6B") and not service._model_tools("")
     assert service.db.scalar("SELECT count(*) FROM audit WHERE action = 'ai.session.start'") == 1
     with pytest.raises(ValidationError, match="running in the AI session"):
         service.delete_model("boss", "Qwen/Qwen3-0.6B")

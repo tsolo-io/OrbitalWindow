@@ -37,6 +37,23 @@ MOUNT = "/models"
 MIN_CONTEXT = 256
 LABEL_REPO = "ow.ai.repo"
 LABEL_SESSION = "ow.ai.session"
+# vLLM's tool call parser per model family (config.json ``model_type``). Open WebUI asks the model
+# to call tools, which vLLM refuses without a parser; for other families the chat falls back to
+# prompt-based tools.
+TOOL_PARSERS = {
+    "qwen2": "hermes",
+    "qwen2_moe": "hermes",
+    "qwen3": "hermes",
+    "qwen3_moe": "hermes",
+    "qwen3_next": "hermes",
+    "llama": "llama3_json",
+    "mistral": "mistral",
+    "gpt_oss": "openai",
+    "granite": "granite",
+    "granitemoehybrid": "granite4",
+    "olmo3": "olmo3",
+    "gemma4": "gemma4",
+}
 # Progress bars and blank lines in vLLM's log are noise on the page.
 NOISE_RE = re.compile(r"\r|it/s\]|s/it\]|^\s*$")
 
@@ -48,6 +65,23 @@ class SessionRequest:
     context: int
     gpu_share: float
     public: bool  # route /v1 through Traefik
+    tool_parser: str = ""  # vLLM tool call parser; empty: no tool calling
+
+
+def tool_parser(config: dict[str, Any], repo: str) -> str:
+    """Pick vLLM's tool call parser for a model.
+
+    Args:
+        config: The model's ``config.json``.
+        repo: Model id (Qwen3 coder models use their own parser).
+
+    Returns:
+        The parser name, or an empty string for a family without a known parser.
+    """
+    model_type = str(config.get("model_type", ""))
+    if model_type.startswith("qwen3") and "coder" in repo.lower():
+        return "qwen3_coder"
+    return TOOL_PARSERS.get(model_type, "")
 
 
 def session_spec(
@@ -94,7 +128,12 @@ def session_spec(
             str(request.context),
             "--gpu-memory-utilization",
             f"{request.gpu_share:.2f}",
-        ],  # fmt: skip
+        ]
+        + (
+            ["--enable-auto-tool-choice", "--tool-call-parser", request.tool_parser]
+            if request.tool_parser
+            else []
+        ),  # fmt: skip
         "name": CONTAINER,
         "hostname": CONTAINER,
         "detach": True,
