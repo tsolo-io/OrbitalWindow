@@ -7,7 +7,7 @@
 # MathWorks Package Manager (mpm). No licence is needed to install: each user activates their
 # own licence in their desktop the first time they start MATLAB. Runs in a throwaway container.
 #
-# Usage: sudo OW_ROOT=/srv/orbitalwindow scripts/install-matlab.sh [product ...]
+# Usage: make install-matlab [PRODUCTS="…"]   (in deploy/; or OW_ROOT=… sh scripts/install-matlab.sh [product ...])
 #   default products: MATLAB Parallel_Computing_Toolbox   (about 8 GB)
 #   RELEASE=R2026b                                        MATLAB release
 set -eu
@@ -24,7 +24,7 @@ if [ -e "$TARGET/bin/matlab" ]; then
     echo "MATLAB is already installed in $TARGET. Remove it first to reinstall." >&2
     exit 1
 fi
-mkdir -p "$TARGET"
+# docker creates $TARGET for the bind mount, so this works without sudo for the docker group.
 
 docker run --rm \
     -v "$TARGET:/opt/matlab" \

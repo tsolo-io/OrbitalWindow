@@ -261,9 +261,10 @@ deploy/
   Dockerfile              image for the service (python:3.14-slim)
   image/                  desktop base image: Dockerfile + root/ (custom-cont-init.d/50-ow-setup)
   samba/                  Samba image: Dockerfile, smb.conf, entrypoint, ow-sync, ow-passwd
+  Makefile                start/stop/update, install-conda/-matlab, backup (what a server runs)
+  scripts/                install-conda.sh, install-matlab.sh (shared software), backup.sh
 addons/                   add-on definitions (README.md documents the format)
   matlab/ python-science/ vscode/ devtools/ rstudio/ ssh/
-scripts/                  install-conda.sh, install-matlab.sh (shared software), backup.sh
 docs/                     zensical.toml + content/ (design.md, poc-learnings.md, admin guide, user/ help pages)
 ```
 - **Names:** containers `ow-<user>` (desktop) and `ow-files-<user>`, network `ow-net-<user>`, images `ow-desktop:<tag>` and `ow-user-<name>:latest`, labels `ow.managed=true` and `ow.user=<user>`, cookie `ow_session`.

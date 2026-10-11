@@ -2,28 +2,26 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Development and test stack around deploy/compose.yaml.
+# Development: tests, lint, and the stack built from this checkout.
 #
 #   make test       run pytest
 #   make format     fix lint issues and format the code (ruff)
 #   make lint       check lint and formatting without changing files
 #   make start      build and start the whole stack from this checkout (needs deploy/.env)
 #   make start PROD=1  start it from the published images instead
+#   make update     rebuild (or with PROD=1 pull) and recreate what changed
 #   make stop       stop and remove the stack (data under $OW_ROOT is kept)
 #   make restart    stop, rebuild and start
 #   make logs       follow the OrbitalWindow service log
 #   make status     show the stack's containers
+#
+# The stack targets run deploy/Makefile, the one servers use, which picks the compose files from
+# deploy/.env. Its other targets (install-conda, install-matlab, backup, …) run there:
+# `make -C deploy help`.
 
-GPU_VENDOR := $(shell sed -n 's/^OW_GPU_VENDOR=//p' deploy/.env 2>/dev/null)
-ACME_PROVIDER := $(shell sed -n 's/^OW_ACME_DNS_PROVIDER=//p' deploy/.env 2>/dev/null)
-# PROD=1 uses the published images (deploy/compose.yaml only); otherwise compose.dev.yaml builds
-# them from this checkout.
-COMPOSE_FILES := -f deploy/compose.yaml $(if $(PROD),,-f deploy/compose.dev.yaml) \
-  $(if $(filter nvidia,$(GPU_VENDOR)),-f deploy/compose.nvidia.yaml) \
-  $(if $(ACME_PROVIDER),-f deploy/compose.tls.yaml)
-COMPOSE ?= docker compose $(COMPOSE_FILES) --env-file deploy/.env
-SERVICE ?= orbitalwindow
-.PHONY: test format lint start stop restart logs status
+# PROD=1 uses the published images; otherwise compose.dev.yaml builds them from this checkout.
+DEPLOY := $(MAKE) -C deploy $(if $(PROD),,DEV=1)
+.PHONY: test format lint start update stop restart logs status
 
 -include .tidy/*.mk
 
@@ -37,22 +35,20 @@ format: ## Fix lint issues and format the code (ruff)
 lint: ## Check lint and formatting without changing files (ruff)
 	hatch run lint:check
 
-start: deploy/.env ## Build and start the stack
-	$(COMPOSE) up -d --build
-	@echo "OrbitalWindow: https://$$(grep -E '^OW_HOSTNAME=' deploy/.env | cut -d= -f2)/"
+start: ## Build and start the stack
+	$(DEPLOY) start
+
+update: ## Rebuild (PROD=1: pull) and recreate what changed
+	$(DEPLOY) update
 
 stop: ## Stop and remove the stack (data under OW_ROOT is kept)
-	$(COMPOSE) down
+	$(DEPLOY) stop
 
-restart: stop start ## Stop, rebuild and start
+restart: ## Stop, rebuild and start
+	$(DEPLOY) restart
 
 logs: ## Follow the OrbitalWindow service log
-	$(COMPOSE) logs -f $(SERVICE)
+	$(DEPLOY) logs
 
 status: ## Show the stack's containers
-	$(COMPOSE) ps
-
-deploy/.env:
-	@echo "Missing deploy/.env. Copy deploy/.env.example and fill it in:" >&2
-	@echo "  cp deploy/.env.example deploy/.env && chmod 600 deploy/.env" >&2
-	@exit 1
+	$(DEPLOY) status

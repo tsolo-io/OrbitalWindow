@@ -27,7 +27,7 @@ user help pages (also served at `/help`): `docs/content/user/`.
 - **Hatch environments** (wrapped by the `Makefile`; `make help` lists targets):
   - `make test`: pytest (built-in `hatch-test` env).
   - `make format` / `make lint` (or `hatch run lint:fmt` / `hatch run lint:check`): ruff.
-  - `make start` / `stop` / `logs` / `status`: the compose stack in `deploy/` (needs `deploy/.env`).
+  - `make start` / `update` / `stop` / `logs` / `status`: the compose stack, run through `deploy/Makefile` (needs `deploy/.env`).
   - `hatch run docs:build` / `hatch run docs:serve`: zensical, run as `zensical build -f docs/zensical.toml`.
 - **Database:** DuckDB, single writer (the service process). Docker access through the Docker SDK (`docker` package)
   via a socket proxy. Never mount the raw socket into anything except the proxies.
@@ -36,6 +36,8 @@ user help pages (also served at `/help`): `docs/content/user/`.
   `gitea.tu.tsolo.net/kuat/orbitalwindow{,-samba}` (`:nightly` on every push, `:main`, `:<git tag>`).
 - **Compose:** `deploy/compose.yaml` is the production stack (published images, `OW_VERSION`);
   `deploy/compose.dev.yaml` overrides it to build from the checkout. `make start` = dev, `make start PROD=1` = prod.
+- **Servers** need only a copy of `deploy/`: `deploy/Makefile` (`make init`, `start`, `update`, `install-conda`,
+  `install-matlab`, `backup`, `export-cert`) picks the compose files from `.env`; scripts are in `deploy/scripts/` (ADR 0023).
 - **Deployment files** live in `deploy/`, add-on definitions in `addons/`, docs in `docs/` (zensical: config `docs/zensical.toml`, pages in `docs/content/`).
 - **License:** Apache-2.0.
 

@@ -11,7 +11,7 @@
 # many UIDs). The OrbitalWindow service is stopped for a few seconds while state/ is copied, so the
 # DuckDB file is consistent; running desktops are not affected.
 #
-# Usage: OW_ROOT=/srv/orbitalwindow scripts/backup.sh <backup folder> [days to keep, default 14]
+# Usage: make backup DEST=<backup folder> [KEEP=14]   (in deploy/; or OW_ROOT=… sh scripts/backup.sh <folder> [days])
 set -eu
 
 DEST=${1:?usage: backup.sh <backup folder> [days to keep]}

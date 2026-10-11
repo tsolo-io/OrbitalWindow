@@ -54,8 +54,8 @@ env: {}                     # extra environment for the desktop container
 
 | Key | What | Needs on the server |
 |---|---|---|
-| `matlab` (restricted) | MATLAB runtime libraries, launcher, `/opt/matlab` | `scripts/install-matlab.sh` |
-| `python-science` | conda in every shell, JupyterLab and Spyder launchers, `/opt/conda` | `scripts/install-conda.sh` |
+| `matlab` (restricted) | MATLAB runtime libraries, launcher, `/opt/matlab` | `make install-matlab` (deploy folder) |
+| `python-science` | conda in every shell, JupyterLab and Spyder launchers, `/opt/conda` | `make install-conda` (deploy folder) |
 | `vscode` | Visual Studio Code from Microsoft's repository | – |
 | `devtools` | build-essential, cmake, gfortran, pkg-config, git-gui, gitk, git-lfs | – |
 | `rstudio` | R from Ubuntu, RStudio Desktop from Posit | – |

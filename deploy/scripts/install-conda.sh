@@ -7,7 +7,7 @@
 # Desktops mount it read-only at /opt/conda, so it is installed at that same path (conda
 # installs are not relocatable). Runs in a throwaway container: the host needs only Docker.
 #
-# Usage: sudo OW_ROOT=/srv/orbitalwindow scripts/install-conda.sh
+# Usage: make install-conda   (in deploy/; or OW_ROOT=/srv/orbitalwindow sh scripts/install-conda.sh)
 #   SCIENCE_PACKAGES="python=3.13 numpy"  override the packages of the "science" environment
 #   FORCE=1                               reinstall over an existing install
 set -eu
@@ -22,7 +22,7 @@ if [ -e "$TARGET/bin/conda" ] && [ "${FORCE:-0}" != 1 ]; then
     echo "Miniforge is already installed in $TARGET (set FORCE=1 to reinstall)." >&2
     exit 1
 fi
-mkdir -p "$TARGET"
+# docker creates $TARGET for the bind mount, so this works without sudo for the docker group.
 
 docker run --rm -i \
     -e SCIENCE_PACKAGES="$SCIENCE_PACKAGES" \
