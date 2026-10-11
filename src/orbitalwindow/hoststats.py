@@ -10,6 +10,7 @@ they appear from the second refresh on.
 """
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 
 import httpx2
@@ -24,6 +25,21 @@ SKIP_DISK_RE = re.compile(
 SKIP_NET_RE = re.compile(r"^(lo|veth.*|br-.*|docker\d*|virbr.*|vnet.*|cali.*|flannel.*|cni.*)$")
 SKIP_FSTYPES = frozenset({"tmpfs", "overlay", "squashfs", "nsfs", "ramfs", "vfat", "fuse.lxcfs"})
 SKIP_MOUNT_PREFIXES = ("/boot", "/run", "/snap", "/var/snap", "/dev", "/sys")
+# Plain names for hwmon chips (node_hwmon_chip_names ``chip_name`` without a trailing number).
+CHIP_LABELS = {
+    "coretemp": "CPU",
+    "k10temp": "CPU",
+    "zenpower": "CPU",
+    "nvme": "NVMe disk",
+    "drivetemp": "Disk",
+    "acpitz": "Motherboard",
+    "pch": "Chipset",
+    "amdgpu": "AMD GPU",
+    "iwlwifi": "Wi-Fi",
+}
+# Readings outside this range are unconnected or broken sensors (and bogus limits).
+TEMP_RANGE = (0.0, 150.0)
+TEMP_WARN_MARGIN = 10.0  # warm when the hottest sensor is this close to the critical limit
 
 Labels = tuple[tuple[str, str], ...]
 Metrics = dict[str, list[tuple[dict[str, str], float]]]
@@ -91,6 +107,44 @@ class Filesystem:
 
 
 @dataclass(frozen=True)
+class ChipTemp:
+    """The temperature sensors of one hwmon chip (CPU package, disk, …)."""
+
+    chip: str  # node-exporter's chip id, e.g. platform_coretemp_0
+    label: str
+    average: float
+    hottest: float
+    sensors: int
+    critical: float | None  # lowest critical limit of its sensors
+
+    @property
+    def level(self) -> str:
+        """Tell how close the chip is to its critical limit.
+
+        Returns:
+            See ``temperature_level``.
+        """
+        return temperature_level(self.hottest, self.critical)
+
+
+def temperature_level(hottest: float, limit: float | None) -> str:
+    """Rate a temperature against its limit.
+
+    Args:
+        hottest: Degrees Celsius.
+        limit: The critical (or slowdown) temperature, or None if unknown.
+
+    Returns:
+        ``hot`` at or above the limit, ``warm`` within ``TEMP_WARN_MARGIN`` of it, else ``ok``.
+    """
+    if limit is None:
+        return "ok"
+    if hottest >= limit:
+        return "hot"
+    return "warm" if hottest >= limit - TEMP_WARN_MARGIN else "ok"
+
+
+@dataclass(frozen=True)
 class Sample:
     """The counters and gauges of one read of node-exporter."""
 
@@ -112,6 +166,7 @@ class Sample:
     disk_busy: dict[str, float] = field(default_factory=dict)  # io_time seconds
     net_rx: dict[str, float] = field(default_factory=dict)  # bytes, per interface
     net_tx: dict[str, float] = field(default_factory=dict)
+    temperatures: tuple[ChipTemp, ...] = ()
 
 
 def _by_device(metrics: Metrics, name: str, skip: re.Pattern[str]) -> dict[str, float]:
@@ -161,6 +216,49 @@ def _filesystems(metrics: Metrics) -> tuple[Filesystem, ...]:
     return tuple(sorted(by_device.values(), key=lambda fs: fs.mountpoint))
 
 
+def _temperatures(metrics: Metrics) -> tuple[ChipTemp, ...]:
+    """Group the hwmon temperature sensors by chip and average them.
+
+    Args:
+        metrics: Parsed samples.
+
+    Returns:
+        One entry per chip with readings, sorted by label.
+    """
+    low, high = TEMP_RANGE
+    names = {
+        labels.get("chip", ""): labels.get("chip_name", "")
+        for labels, _ in metrics.get("node_hwmon_chip_names", [])
+    }
+    readings: dict[str, list[float]] = {}
+    for labels, value in metrics.get("node_hwmon_temp_celsius", []):
+        if low < value < high:
+            readings.setdefault(labels.get("chip", ""), []).append(value)
+    limits: dict[str, float] = {}
+    for labels, value in metrics.get("node_hwmon_temp_crit_celsius", []):
+        chip = labels.get("chip", "")
+        if low < value < high:
+            limits[chip] = min(value, limits.get(chip, value))
+    bases = {chip: re.sub(r"_\d+$", "", names.get(chip) or chip) for chip in readings}
+    counts = Counter(bases.values())
+    chips = []
+    for chip, values in readings.items():
+        label = CHIP_LABELS.get(bases[chip], bases[chip])
+        if counts[bases[chip]] > 1:  # two NVMe disks, two CPU sockets, several ACPI zones
+            label = f"{label} {chip.rsplit('_', 1)[-1]}"
+        chips.append(
+            ChipTemp(
+                chip,
+                label,
+                sum(values) / len(values),
+                max(values),
+                len(values),
+                limits.get(chip),
+            )
+        )
+    return tuple(sorted(chips, key=lambda temp: temp.label))
+
+
 def sample(metrics: Metrics) -> Sample:
     """Pick the values the status page shows out of parsed node-exporter output.
 
@@ -202,6 +300,7 @@ def sample(metrics: Metrics) -> Sample:
         disk_busy=_by_device(metrics, "node_disk_io_time_seconds_total", SKIP_DISK_RE),
         net_rx=_by_device(metrics, "node_network_receive_bytes_total", SKIP_NET_RE),
         net_tx=_by_device(metrics, "node_network_transmit_bytes_total", SKIP_NET_RE),
+        temperatures=_temperatures(metrics),
     )
 
 

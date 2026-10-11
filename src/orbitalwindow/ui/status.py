@@ -12,10 +12,12 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
-from ..hoststats import NodeExporterError, Sample, rates
+from ..hoststats import ChipTemp, NodeExporterError, Sample, rates, temperature_level
 from .common import authenticate, frame, guarded, service
 
 REFRESH_SECONDS = 5.0
+TEMP_COLORS = {"ok": "", "warm": "text-warning", "hot": "text-negative"}
+TEMP_WORDS = {"ok": "", "warm": " · warm", "hot": " · too hot"}
 
 
 def size(value: float | None) -> str:
@@ -123,6 +125,7 @@ def status_page(request: Request) -> RedirectResponse | None:
                     usage(current, rate)
                 if gpus:
                     gpu_card(gpus)
+                temperatures(current.temperatures if current else (), gpus)
                 if current is not None:
                     traffic(rate)
 
@@ -194,6 +197,51 @@ def status_page(request: Request) -> RedirectResponse | None:
                         gpu.mem_used / gpu.mem_total if gpu.mem_total else 0,
                         f"{size(gpu.mem_used)} used of {size(gpu.mem_total)}",
                     )
+
+        def temperatures(chips: tuple[ChipTemp, ...], gpus: list) -> None:
+            """Add the temperatures card (left out when the server reports none).
+
+            Args:
+                chips: hwmon chips from node-exporter.
+                gpus: GPU statistics from NVML.
+            """
+            rows = [
+                (
+                    chip.label,
+                    chip.average,
+                    chip.level,
+                    " · ".join(
+                        part
+                        for part in (
+                            f"average of {chip.sensors} sensors" if chip.sensors > 1 else "",
+                            f"hottest {chip.hottest:.0f} °C" if chip.sensors > 1 else "",
+                            f"critical at {chip.critical:.0f} °C" if chip.critical else "",
+                        )
+                        if part
+                    ),
+                )
+                for chip in chips
+            ] + [
+                (
+                    f"GPU {gpu.index}: {gpu.name}",
+                    gpu.temperature,
+                    temperature_level(gpu.temperature, gpu.slowdown),
+                    f"slows down at {gpu.slowdown} °C" if gpu.slowdown else "",
+                )
+                for gpu in gpus
+                if gpu.temperature is not None
+            ]
+            if not rows:
+                return
+            with ui.card().classes("w-full gap-2"):
+                ui.label("Temperatures").classes("text-h6")
+                for label, degrees, level, detail in rows:
+                    with ui.row().classes("w-full items-baseline gap-x-3 gap-y-0"):
+                        ui.label(label).classes("text-body1 w-64 shrink-0")
+                        ui.label(f"{degrees:.0f} °C{TEMP_WORDS[level]}").classes(
+                            f"text-body1 text-weight-medium w-28 shrink-0 {TEMP_COLORS[level]}"
+                        )
+                        ui.label(detail).classes("text-caption text-grey-7")
 
         def traffic(rate) -> None:
             """Add the disk and network traffic card.

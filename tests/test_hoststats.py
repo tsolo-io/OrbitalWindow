@@ -115,3 +115,50 @@ def test_formatting():
     """Sizes and uptimes are short and readable."""
     assert size(1.5 * 1024**3) == "1.5 GB" and size(512) == "512 B" and size(None) == "–"
     assert duration(3 * 86400 + 7200) == "3 days 2 h" and duration(3720) == "1 h 2 min"
+
+
+HWMON = """\
+node_hwmon_chip_names{chip="nvme_nvme0",chip_name="nvme"} 1
+node_hwmon_chip_names{chip="platform_coretemp_0",chip_name="coretemp"} 1
+node_hwmon_chip_names{chip="thermal_thermal_zone0",chip_name="acpitz_0"} 1
+node_hwmon_chip_names{chip="thermal_thermal_zone1",chip_name="acpitz_1"} 1
+node_hwmon_chip_names{chip="platform_nct6775_656",chip_name="nct6798"} 1
+node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp1"} 40.85
+node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp2"} 45.85
+node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp1"} 92
+node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp2"} 40
+node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp3"} 44
+node_hwmon_temp_celsius{chip="thermal_thermal_zone0",sensor="temp0"} 27.8
+node_hwmon_temp_celsius{chip="thermal_thermal_zone1",sensor="temp0"} 29.8
+node_hwmon_temp_celsius{chip="platform_nct6775_656",sensor="temp1"} 35
+node_hwmon_temp_celsius{chip="platform_nct6775_656",sensor="temp2"} -62
+node_hwmon_temp_celsius{chip="platform_nct6775_656",sensor="temp3"} 0
+node_hwmon_temp_crit_celsius{chip="nvme_nvme0",sensor="temp1"} 80.85
+node_hwmon_temp_crit_celsius{chip="platform_coretemp_0",sensor="temp1"} 100
+node_hwmon_temp_crit_celsius{chip="platform_coretemp_0",sensor="temp2"} 100
+node_hwmon_temp_max_celsius{chip="nvme_nvme0",sensor="temp2"} 65261.85
+"""
+
+
+def test_temperatures_grouped_and_averaged_per_chip():
+    """Sensors are averaged per chip with plain names; broken readings are left out."""
+    temps = {temp.label: temp for temp in sample(parse(HWMON)).temperatures}
+    assert list(temps) == ["CPU", "Motherboard zone0", "Motherboard zone1", "NVMe disk", "nct6798"]
+    cpu = temps["CPU"]
+    assert cpu.average == pytest.approx(58.67, abs=0.01)
+    assert (cpu.hottest, cpu.sensors, cpu.critical) == (92, 3, 100)
+    assert cpu.level == "warm"  # the hottest core is within 10 °C of the limit
+    assert temps["NVMe disk"].average == pytest.approx(43.35)
+    assert temps["NVMe disk"].critical == pytest.approx(80.85) and temps["NVMe disk"].level == "ok"
+    assert temps["nct6798"].sensors == 1 and temps["nct6798"].critical is None
+    assert sample(parse("node_load1 1\n")).temperatures == ()
+
+
+def test_temperature_levels():
+    """ok below the warning margin, warm close to the limit, hot at it; no limit is ok."""
+    from orbitalwindow.hoststats import temperature_level
+
+    assert temperature_level(70, 90) == "ok"
+    assert temperature_level(80, 90) == "warm"
+    assert temperature_level(90, 90) == "hot"
+    assert temperature_level(120, None) == "ok"

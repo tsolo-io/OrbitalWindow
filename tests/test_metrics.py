@@ -74,3 +74,23 @@ def test_fmt_bytes():
     assert fmt_bytes(None) == "unlimited"
     assert fmt_bytes(3 * 1024**3) == "3.0 GB"
     assert fmt_bytes(200 * 1024**2) == "200 MB"
+
+
+def test_gpu_temperature_and_slowdown_from_nvml():
+    """Temperature and slowdown threshold come from NVML; unsupported reads are None."""
+    from types import SimpleNamespace
+
+    def unsupported(*args):
+        """Fail like NVML does for a value the GPU doesn't report."""
+        raise RuntimeError("Not Supported")
+
+    gpus = GpuMetrics()
+    gpus._nvml = SimpleNamespace(
+        NVML_TEMPERATURE_GPU=0,
+        NVML_TEMPERATURE_THRESHOLD_SLOWDOWN=1,
+        nvmlDeviceGetTemperature=lambda handle, sensor: 61,
+        nvmlDeviceGetTemperatureThreshold=lambda handle, kind: 88,
+    )
+    assert gpus._temperatures("gpu0") == (61, 88)
+    gpus._nvml.nvmlDeviceGetTemperatureThreshold = unsupported
+    assert gpus._temperatures("gpu0") == (61, None)
