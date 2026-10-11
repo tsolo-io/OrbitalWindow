@@ -11,7 +11,7 @@ from nicegui import run, ui
 from ..fit import Estimate, Verdict
 from ..users import ValidationError
 from .ai_session import session_card
-from .common import authenticate, frame, guarded, service
+from .common import authenticate, frame, guarded, local_time, service
 
 MODEL_COLUMNS = [
     {"name": "repo", "label": "Model", "field": "repo", "align": "left"},
@@ -293,7 +293,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 {
                     "repo": model.repo,
                     "size": gb(model.bytes),
-                    "modified": model.modified.strftime("%Y-%m-%d %H:%M"),
+                    "modified": local_time(model.modified),
                     "fit": f"{FIT_LABELS[verdict.level]} · {gb(estimate.total)}",
                     "fit_level": verdict.level,
                     "fit_text": verdict.text,
@@ -316,7 +316,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
                     "fraction": row["bytes_done"] / row["bytes_total"] if row["bytes_total"] else 0,
                     "progress": f"{gb(row['bytes_done'])} of {gb(row['bytes_total'])}",
                     "requested_by": row["requested_by"],
-                    "when": (row["started_at"] or row["created_at"]).strftime("%Y-%m-%d %H:%M"),
+                    "when": local_time(row["started_at"] or row["created_at"]),
                 }
                 for row in rows
             ]

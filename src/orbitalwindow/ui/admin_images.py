@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..users import ValidationError
-from .common import authenticate, frame, guarded, service
+from .common import authenticate, frame, guarded, local_time, service
 from .software import show_build_log
 
 COLUMNS = [
@@ -90,13 +90,7 @@ def admin_images(request: Request) -> RedirectResponse | None:
             """Reload the image table."""
             rows = await run.io_bound(svc.list_images)
             table.rows = [
-                row
-                | {
-                    "built_at": row["built_at"].strftime("%Y-%m-%d %H:%M")
-                    if row["built_at"]
-                    else "–"
-                }
-                for row in rows
+                row | {"built_at": local_time(row["built_at"], empty="–")} for row in rows
             ]
             table.update()
 
