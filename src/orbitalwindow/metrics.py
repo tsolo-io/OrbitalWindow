@@ -37,6 +37,8 @@ class GpuStat:
     util_percent: int
     mem_used: int
     mem_total: int
+    temperature: int | None = None  # degrees Celsius
+    slowdown: int | None = None  # the GPU slows itself down from this temperature
 
 
 class ContainerMetrics:
@@ -138,6 +140,29 @@ class GpuMetrics:
         self._nvml, self._ready = pynvml, True
         return True
 
+    def _temperatures(self, handle: Any) -> tuple[int | None, int | None]:
+        """Read a GPU's temperature and slowdown threshold; not every GPU reports both.
+
+        Args:
+            handle: NVML device handle.
+
+        Returns:
+            Degrees Celsius (temperature, slowdown threshold), None where unknown.
+        """
+        nv = self._nvml
+        values: list[int | None] = []
+        for read in (
+            lambda: nv.nvmlDeviceGetTemperature(handle, nv.NVML_TEMPERATURE_GPU),
+            lambda: nv.nvmlDeviceGetTemperatureThreshold(
+                handle, nv.NVML_TEMPERATURE_THRESHOLD_SLOWDOWN
+            ),
+        ):
+            try:
+                values.append(int(read()))
+            except Exception:  # NVMLError_NotSupported and friends
+                values.append(None)
+        return values[0], values[1]
+
     def stats(self) -> list[GpuStat]:
         """Return utilisation and memory of every GPU, cached for ``CACHE_SECONDS``.
 
@@ -163,6 +188,7 @@ class GpuMetrics:
                             int(util.gpu),
                             int(mem.used),
                             int(mem.total),
+                            *self._temperatures(handle),
                         )
                     )
             except Exception as exc:

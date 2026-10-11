@@ -32,6 +32,12 @@ it. The page must not cache or preload: nothing is read unless someone has the p
   - traffic per whole disk and per physical network interface (partitions, loop devices, `lo`,
     `veth*`, `br-*` and `docker*` are left out);
   - GPU load and memory from NVML, which the service already reads for the admin page.
+  - temperatures (#33): node-exporter's `node_hwmon_temp_celsius` grouped by chip and averaged,
+    with the hottest sensor and the chip's lowest critical limit (`node_hwmon_temp_crit_celsius`).
+    Chips get plain names (CPU, NVMe disk, Motherboard, …), with a number when there are several.
+    Readings outside 0–150 °C are unconnected sensors and are left out, as are the `max` limits,
+    which some disks report as 65,000 °C. NVIDIA GPUs add their temperature and slowdown threshold
+    from NVML. A chip shows *warm* within 10 °C of its limit and *too hot* at it.
 - **Without node-exporter**, the page says that an administrator needs to install it. Admins also
   see the URL and the error.
 - **Access:** every logged-in user, linked as **Server status** in the header.

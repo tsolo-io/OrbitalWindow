@@ -35,5 +35,5 @@ You can close the browser tab at any time; your desktop keeps running until you 
 - The graphics card (GPU) is shared by everyone who is working. If a program reports that the GPU is
   out of memory, try again a little later or close GPU programs you no longer need.
   **Server status** (at the top of the page) shows how busy the server is: CPU, memory, disk
-  space, GPU load and GPU memory.
+  space, GPU load and GPU memory, and temperatures.
 - Forgotten your password? Ask your administrator to reset it.
