@@ -53,6 +53,8 @@ class Settings(BaseSettings):
 
     # cAdvisor serves its UI and API under --url_base_prefix (the path Traefik routes to it).
     cadvisor_url: str = "http://cadvisor:8080/admin/cadvisor"
+    # Prometheus node-exporter on the host (installed by the admin), for the server status page.
+    node_exporter_url: str = "http://host.docker.internal:9100/metrics"
 
     cookie_secure: bool = True
     session_hours: int = 12

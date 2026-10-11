@@ -40,6 +40,7 @@ from .disk import Usage as DiskUsage
 from .downloads import Downloader
 from .files import FileManagers, files_container_name
 from .hostops import HostOps
+from .hoststats import NodeExporter
 from .metrics import ContainerMetrics, GpuMetrics, Usage
 from .models import HubClient, LocalModel, ModelLibrary, RepoInfo, Space
 from .reconcile import reconcile
@@ -103,6 +104,7 @@ class Service:
         self.builder.on_base_ready = self._rebuild_users_of
         self.metrics = ContainerMetrics(settings.cadvisor_url)
         self.gpus = GpuMetrics()
+        self.node_exporter = NodeExporter(settings.node_exporter_url)
         self.models = ModelLibrary(settings.models_dir)
         self.hub = HubClient()
         self.downloads = Downloader(client, self.db, self.models, os.getuid(), self.hf_token)
