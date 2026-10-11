@@ -27,6 +27,8 @@ from . import users as users_mod
 from .aisession import MIN_CONTEXT, AiSessions, SessionRequest, SessionState
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
+from .benchmarks import ACTIVE as BENCH_ACTIVE
+from .benchmarks import SUITES, Benchmarker
 from .builds import TAG_RE, Builder, desktop_image_ref
 from .chat import Chat
 from .config import Settings
@@ -115,6 +117,15 @@ class Service:
         self.llmfit = LlmFit(client, settings.llmfit_image)
         self.ai = AiSessions(client, self.db, settings)
         self.chat = Chat(client, settings)
+        self.benchmarks = Benchmarker(
+            client,
+            self.db,
+            settings.state_dir / "benchmarks",
+            os.getuid(),
+            session=lambda: self.ai.state(),
+            start_session=self._start_session_for_benchmark,
+            api_key=self.ai_api_key,
+        )
         self.downloads = Downloader(client, self.db, self.models, os.getuid(), self.hf_token)
         self._reconcile_stop = threading.Event()
 
@@ -143,6 +154,7 @@ class Service:
             log.warning("could not update the scratch README: %s", exc)
         self.builder.start()
         self.downloads.start()
+        self.benchmarks.start()
         if not self.db.scalar("SELECT count(*) FROM images"):
             try:
                 self.add_image("system", self.settings.default_desktop)
@@ -185,6 +197,7 @@ class Service:
         self._reconcile_stop.set()
         self.builder.stop()
         self.downloads.stop()
+        self.benchmarks.stop()
 
     def _reconcile_loop(self) -> None:
         """Run ``reconcile`` every ``reconcile_seconds`` until ``stop`` is called.
@@ -706,6 +719,10 @@ class Service:
         state = self.ai.state()
         if state.repo == repo and state.status in ("starting", "running"):
             raise ValidationError(f"{repo} is running in the AI session. Stop the session first.")
+        if self.db.scalar(
+            f"SELECT count(*) FROM benchmarks WHERE repo = ? AND status IN {BENCH_ACTIVE!r}", [repo]
+        ):
+            raise ValidationError(f"{repo} is being benchmarked. Cancel the benchmark first.")
         self.models.delete(repo)
         self.db.audit(actor, "ai.model.delete", repo)
 
@@ -971,6 +988,113 @@ class Service:
             return self.ai.state().status == "running" and self.chat.ready()
         except docker.errors.DockerException:
             return False
+
+    # --- AI: benchmarks -----------------------------------------------------------------------
+
+    def _start_session_for_benchmark(self, repo: str) -> None:
+        """Start the AI session for a benchmark, with the suggested settings on the largest GPU.
+
+        Args:
+            repo: Model id.
+
+        Raises:
+            ValidationError: If the session can't be started.
+        """
+        gpus = self.gpus.stats()
+        if not gpus:
+            raise ValidationError("The AI session needs an NVIDIA GPU (NVML is not available).")
+        defaults = self.session_defaults(repo)
+        index = max(gpus, key=lambda gpu: gpu.mem_total).index
+        self.start_ai_session("benchmark", repo, index, defaults["context"], defaults["gpu_share"])
+
+    def queue_benchmark(self, actor: str, repo: str, suite: str, replace: bool = False) -> int:
+        """Queue a benchmark of a downloaded model; it starts the model if needed.
+
+        Args:
+            actor: Name recorded in the audit log.
+            repo: Model id.
+            suite: ``humaneval`` or ``mbpp``.
+            replace: Stop another model that is running in the AI session.
+
+        Returns:
+            The benchmark id.
+
+        Raises:
+            ValidationError: For a model that isn't downloaded, an unknown suite, a benchmark that
+                is already waiting, or another running model when ``replace`` is false.
+        """
+        model = self._local_model(repo)
+        state = self.ai.state()
+        if state.status in ("starting", "running") and state.repo != model.repo:
+            if not replace:
+                raise ValidationError(
+                    f"{state.repo} is running in the AI session. The benchmark would replace it."
+                )
+            self.stop_ai_session(actor)
+        bench_id = self.benchmarks.queue(model.repo, suite, actor)
+        self.db.audit(actor, "ai.benchmark", model.repo, suite)
+        return bench_id
+
+    def cancel_benchmark(self, actor: str, bench_id: int) -> None:
+        """Cancel a waiting or running benchmark.
+
+        Args:
+            actor: Name recorded in the audit log.
+            bench_id: The benchmark.
+
+        Raises:
+            ValidationError: If it isn't waiting or running.
+        """
+        repo = self.benchmarks.cancel(bench_id)
+        self.db.audit(actor, "ai.benchmark.cancel", repo, str(bench_id))
+
+    def list_benchmarks(self, limit: int = 500) -> list[dict[str, Any]]:
+        """Return benchmarks, active ones first, then newest first.
+
+        Args:
+            limit: Maximum number of rows.
+
+        Returns:
+            Benchmark rows with ``suite_label`` and ``seconds`` (run time) added.
+        """
+        rows = self.db.all(
+            "SELECT *, epoch(coalesce(finished_at, now())) - epoch(started_at) AS seconds "
+            f"FROM benchmarks ORDER BY status IN {BENCH_ACTIVE!r} DESC, id DESC LIMIT ?",
+            [limit],
+        )
+        return [row | {"suite_label": SUITES[row["suite"]].label} for row in rows]
+
+    def get_benchmark(self, bench_id: int) -> dict[str, Any] | None:
+        """Return one benchmark.
+
+        Args:
+            bench_id: The benchmark.
+
+        Returns:
+            The row (with ``suite_label`` and ``seconds``), or None.
+        """
+        row = self.db.one(
+            "SELECT *, epoch(coalesce(finished_at, now())) - epoch(started_at) AS seconds "
+            "FROM benchmarks WHERE id = ?",
+            [bench_id],
+        )
+        return row | {"suite_label": SUITES[row["suite"]].label} if row else None
+
+    def latest_benchmarks(self) -> dict[str, list[dict[str, Any]]]:
+        """Return each model's latest finished result per suite (for the headline).
+
+        Returns:
+            Rows by model id, one per suite.
+        """
+        latest: dict[str, list[dict[str, Any]]] = {}
+        rows = self.db.all(
+            "SELECT * FROM benchmarks WHERE status = 'done' ORDER BY finished_at DESC"
+        )
+        for row in rows:
+            entries = latest.setdefault(row["repo"], [])
+            if all(entry["suite"] != row["suite"] for entry in entries):
+                entries.append(row | {"suite_label": SUITES[row["suite"]].label})
+        return latest
 
     def model_library(self) -> tuple[list[LocalModel], Space, list[dict[str, Any]]]:
         """Return what the AI page shows: downloaded models, disk space and downloads.

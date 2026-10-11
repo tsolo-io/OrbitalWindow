@@ -60,6 +60,7 @@ nav = [
     { "0026 Model fit, llmfit" = "adr/0026-model-fit-estimate-and-llmfit.md" },
     { "0027 One vLLM AI session" = "adr/0027-one-vllm-ai-session.md" },
     { "0028 Open WebUI chat" = "adr/0028-open-webui-chat.md" },
+    { "0029 Coding benchmarks" = "adr/0029-coding-benchmarks.md" },
   ] },
 ]
 

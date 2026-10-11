@@ -183,6 +183,32 @@ MIGRATIONS: list[str] = [
         stopped_at TIMESTAMP
     );
     """,
+    # 8: coding benchmarks of models (EvalPlus)
+    """
+    CREATE SEQUENCE seq_benchmarks START 1;
+    CREATE TABLE benchmarks (
+        id INTEGER PRIMARY KEY DEFAULT nextval('seq_benchmarks'),
+        repo VARCHAR NOT NULL,
+        suite VARCHAR NOT NULL,         -- humaneval | mbpp
+        status VARCHAR NOT NULL,        -- queued | starting | generating | evaluating | cancelling
+                                        -- | done | failed | cancelled
+        done INTEGER NOT NULL DEFAULT 0,
+        total INTEGER NOT NULL,
+        tasks INTEGER,
+        base_pass INTEGER,
+        plus_pass INTEGER,
+        base_score DOUBLE,
+        plus_score DOUBLE,
+        gpu_index INTEGER,              -- session settings the model ran with
+        context INTEGER,
+        gpu_share DOUBLE,
+        error VARCHAR NOT NULL DEFAULT '',
+        started_by VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        started_at TIMESTAMP,
+        finished_at TIMESTAMP
+    );
+    """,
 ]
 
 

@@ -14,7 +14,7 @@ from typing import Annotated
 from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Form, Request, Response
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 
 from .auth import COOKIE_NAME, SessionUser
 from .service import Service
@@ -342,6 +342,37 @@ def auth_admin(request: Request) -> Response:
     if not user.is_admin:
         return PlainTextResponse("Forbidden", status_code=403)
     return PlainTextResponse("ok", headers={"X-OW-User": user.name, "Remote-User": user.name})
+
+
+BENCH_FILES = {
+    "samples.jsonl": "application/x-ndjson",
+    "raw.jsonl": "application/x-ndjson",
+    "samples_eval_results.json": "application/json",
+}
+
+
+@router.get("/benchmarks/{bench_id}/files/{name}")
+def benchmark_file(request: Request, bench_id: int, name: str) -> Response:
+    """Download a file of a benchmark (any logged-in user).
+
+    Args:
+        request: The request.
+        bench_id: The benchmark.
+        name: One of the files in ``BENCH_FILES``.
+
+    Returns:
+        The file, a redirect to the login page without a session, or 404.
+    """
+    if current_user(request) is None:
+        return RedirectResponse(f"/login?next=/benchmarks/{bench_id}", status_code=303)
+    path = svc(request).benchmarks.folder(bench_id) / name
+    if name not in BENCH_FILES or not path.is_file():
+        return PlainTextResponse("Not found", status_code=404)
+    return FileResponse(
+        path,
+        media_type=BENCH_FILES[name],
+        filename=f"benchmark-{bench_id}-{name}",
+    )
 
 
 CHAT_EMAIL_DOMAIN = "orbitalwindow.local"
