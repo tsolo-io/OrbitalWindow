@@ -49,6 +49,12 @@ ACTIONS_SLOT = """
           <q-item-section avatar><q-icon name="admin_panel_settings" /></q-item-section>
           <q-item-section>{{ props.row.is_admin ? 'Remove administrator rights'
                                                 : 'Make administrator' }}</q-item-section></q-item>
+        <q-item v-if="!props.row.is_admin" clickable
+                @click="$parent.$emit('act', {a: 'ai', row: props.row})">
+          <q-item-section avatar><q-icon name="smart_toy" /></q-item-section>
+          <q-item-section>{{ props.row.is_ai_manager ? 'Remove AI manager rights'
+                                                     : 'Make AI manager' }}</q-item-section>
+        </q-item>
         <q-separator />
         <q-item v-if="props.row.running" clickable
                 @click="$parent.$emit('act', {a: 'stop', row: props.row})">
@@ -67,6 +73,20 @@ ACTIONS_SLOT = """
   </q-btn>
 </q-td>
 """
+
+
+def _role(row: dict) -> str:
+    """Return the role shown in the users table.
+
+    Args:
+        row: User row with ``is_admin`` and ``is_ai_manager``.
+
+    Returns:
+        ``admin``, ``AI manager`` or ``user``.
+    """
+    if row["is_admin"]:
+        return "admin"
+    return "AI manager" if row["is_ai_manager"] else "user"
 
 
 def _limits(row: dict) -> str:
@@ -162,8 +182,9 @@ def admin_users(request: Request) -> RedirectResponse | None:
                     "name": row["name"],
                     "display_name": row["display_name"],
                     "is_admin": row["is_admin"],
+                    "is_ai_manager": bool(row["is_ai_manager"]),
                     "disabled": row["disabled"],
-                    "role": "admin" if row["is_admin"] else "user",
+                    "role": _role(row),
                     "account": "disabled" if row["disabled"] else "active",
                     "desktop": row["image_label"] or "–",
                     "state": states.get(row["name"], DesktopState.STOPPED).value,
@@ -221,6 +242,15 @@ def admin_users(request: Request) -> RedirectResponse | None:
                 )
                 if await confirm(title, "", "Yes"):
                     await call(svc.set_admin, actor, me, uid, not row["is_admin"])
+            elif action == "ai":
+                title = (
+                    f"Remove AI manager rights from {name}?"
+                    if row["is_ai_manager"]
+                    else f"Make {name} an AI manager?"
+                )
+                text = "AI managers download models and run the AI session on the AI page."
+                if await confirm(title, text, "Yes"):
+                    await call(svc.set_ai_manager, actor, uid, not row["is_ai_manager"])
             elif action == "stop":
                 if await confirm(
                     f"Stop the desktop of {name}?",

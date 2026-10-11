@@ -102,6 +102,16 @@ class SessionUser:
     name: str
     display_name: str
     is_admin: bool
+    is_ai_manager: bool = False
+
+    @property
+    def can_manage_ai(self) -> bool:
+        """Tell whether the user may manage the AI functions (AI managers and admins).
+
+        Returns:
+            True for AI managers and administrators.
+        """
+        return self.is_admin or self.is_ai_manager
 
 
 class Sessions:
@@ -149,13 +159,15 @@ class Sessions:
         except BadSignature, KeyError, TypeError, ValueError:
             return None
         row = self._db.one(
-            "SELECT id, name, display_name, is_admin, disabled, session_ver "
-            "FROM users WHERE id = ?",
+            "SELECT id, name, display_name, is_admin, coalesce(is_ai_manager, false) AS ai, "
+            "disabled, session_ver FROM users WHERE id = ?",
             [user_id],
         )
         if row is None or row["disabled"] or row["session_ver"] != ver:
             return None
-        return SessionUser(row["id"], row["name"], row["display_name"], row["is_admin"])
+        return SessionUser(
+            row["id"], row["name"], row["display_name"], row["is_admin"], bool(row["ai"])
+        )
 
 
 class LoginRateLimiter:

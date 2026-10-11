@@ -19,6 +19,7 @@ import docker
 
 from . import disk
 from . import groups as groups_mod
+from . import models as models_mod
 from . import ssh as ssh_mod
 from . import users as users_mod
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
@@ -36,9 +37,11 @@ from .desktops import (
 )
 from .disk import HostSpace
 from .disk import Usage as DiskUsage
+from .downloads import Downloader
 from .files import FileManagers, files_container_name
 from .hostops import HostOps
 from .metrics import ContainerMetrics, GpuMetrics, Usage
+from .models import HubClient, LocalModel, ModelLibrary, RepoInfo, Space
 from .reconcile import reconcile
 from .samba import Samba, SambaError
 from .software import Software
@@ -100,6 +103,9 @@ class Service:
         self.builder.on_base_ready = self._rebuild_users_of
         self.metrics = ContainerMetrics(settings.cadvisor_url)
         self.gpus = GpuMetrics()
+        self.models = ModelLibrary(settings.models_dir)
+        self.hub = HubClient()
+        self.downloads = Downloader(client, self.db, self.models, os.getuid(), self.hf_token)
         self._reconcile_stop = threading.Event()
 
     # --- startup -----------------------------------------------------------------------------
@@ -126,6 +132,7 @@ class Service:
         except docker.errors.DockerException as exc:
             log.warning("could not update the scratch README: %s", exc)
         self.builder.start()
+        self.downloads.start()
         if not self.db.scalar("SELECT count(*) FROM images"):
             try:
                 self.add_image("system", self.settings.default_desktop)
@@ -164,9 +171,10 @@ class Service:
         threading.Thread(target=self._reconcile_loop, name="ow-reconcile", daemon=True).start()
 
     def stop(self) -> None:
-        """Stop the reconcile loop and the image builder."""
+        """Stop the reconcile loop, the image builder and the download worker."""
         self._reconcile_stop.set()
         self.builder.stop()
+        self.downloads.stop()
 
     def _reconcile_loop(self) -> None:
         """Run ``reconcile`` every ``reconcile_seconds`` until ``stop`` is called.
@@ -559,6 +567,144 @@ class Service:
             self._guard_admin_change(actor_id, user, "remove administrator rights from")
         self.db.execute("UPDATE users SET is_admin = ? WHERE id = ?", [is_admin, user_id])
         self.db.audit(actor, "user.admin" if is_admin else "user.unadmin", user["name"])
+
+    def set_ai_manager(self, actor: str, user_id: int, on: bool) -> None:
+        """Grant or remove the AI manager role (manage models and the AI session).
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user to change.
+            on: True to grant, False to remove the role.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        self.db.execute("UPDATE users SET is_ai_manager = ? WHERE id = ?", [on, user_id])
+        self.db.audit(actor, "user.ai_manager" if on else "user.not_ai_manager", user["name"])
+
+    # --- AI: models --------------------------------------------------------------------------
+
+    def hf_token(self) -> str | None:
+        """Return the stored Hugging Face token.
+
+        Returns:
+            The token, or None when none is set.
+        """
+        try:
+            return self.settings.hf_token_path.read_text().strip() or None
+        except FileNotFoundError:
+            return None
+
+    def set_hf_token(self, actor: str, token: str) -> None:
+        """Store or clear the Hugging Face token (a file only the service can read).
+
+        Args:
+            actor: Name recorded in the audit log (the token itself is never logged).
+            token: The token; empty clears it.
+
+        Raises:
+            ValidationError: When it doesn't look like a Hugging Face token.
+        """
+        token = token.strip()
+        path = self.settings.hf_token_path
+        if not token:
+            path.unlink(missing_ok=True)
+            self.db.audit(actor, "ai.hf_token", detail="cleared")
+            return
+        if not models_mod.TOKEN_RE.fullmatch(token):
+            raise ValidationError(
+                "A Hugging Face token starts with hf_ followed by letters and digits."
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as out:
+            out.write(token + "\n")
+        self.db.audit(actor, "ai.hf_token", detail="set")
+
+    def inspect_model(self, repo: str, revision: str = "") -> RepoInfo:
+        """Look up a model on Hugging Face.
+
+        Args:
+            repo: Model id as typed.
+            revision: Branch, tag or commit; empty means ``main``.
+
+        Returns:
+            The model's details and the files a download would fetch.
+
+        Raises:
+            ValidationError: When the id is not valid or the model can't be found.
+        """
+        repo = models_mod.validate_repo(repo)
+        revision = models_mod.validate_revision(revision)
+        return self.hub.inspect(repo, revision, self.hf_token())
+
+    def download_model(self, actor: str, repo: str, revision: str = "") -> int:
+        """Inspect a model and queue its download.
+
+        Args:
+            actor: Name recorded in the audit log.
+            repo: Model id as typed.
+            revision: Branch, tag or commit; empty means ``main``.
+
+        Returns:
+            The download id.
+
+        Raises:
+            ValidationError: When the model can't be found, has no safetensors weights, is
+                already being downloaded or doesn't fit on the disk.
+        """
+        info = self.inspect_model(repo, revision)
+        have = models_mod.folder_bytes(self.models.path_for(info.repo))
+        needed = max(info.total_bytes - have, 0)
+        free = self.models.space().free
+        if needed > free:
+            raise ValidationError(
+                f"{info.repo} needs {needed / 1e9:.1f} GB but only {free / 1e9:.1f} GB is free."
+            )
+        download_id = self.downloads.queue(info, actor)
+        self.db.audit(actor, "ai.download", info.repo, info.revision)
+        return download_id
+
+    def cancel_download(self, actor: str, download_id: int) -> None:
+        """Cancel a waiting or running download.
+
+        Args:
+            actor: Name recorded in the audit log.
+            download_id: The download.
+
+        Raises:
+            ValidationError: When the download is not waiting or running.
+        """
+        repo = self.downloads.cancel(download_id)
+        self.db.audit(actor, "ai.download.cancel", repo)
+
+    def delete_model(self, actor: str, repo: str) -> None:
+        """Delete a downloaded model.
+
+        Args:
+            actor: Name recorded in the audit log.
+            repo: Model id.
+
+        Raises:
+            ValidationError: When the id is not valid or the model is being downloaded.
+        """
+        repo = models_mod.validate_repo(repo)
+        if self.downloads.busy(repo):
+            raise ValidationError(f"{repo} is being downloaded. Cancel the download first.")
+        self.models.delete(repo)
+        self.db.audit(actor, "ai.model.delete", repo)
+
+    def model_library(self) -> tuple[list[LocalModel], Space, list[dict[str, Any]]]:
+        """Return what the AI page shows: downloaded models, disk space and downloads.
+
+        Returns:
+            The models (without those still downloading), the disk space and recent downloads.
+        """
+        downloads = self.downloads.recent()
+        active = {row["repo"] for row in downloads if row["status"] in ("queued", "running")}
+        models = [m for m in self.models.models() if m.repo not in active]
+        return models, self.models.space(), downloads
 
     def set_limits(
         self, actor: str, user_id: int, cpus: float | str | None, mem_gb: float | str | None

@@ -92,6 +92,24 @@ class Settings(BaseSettings):
         return self.state_dir / "secret.key"
 
     @property
+    def hf_token_path(self) -> Path:
+        """Return the file holding the Hugging Face token.
+
+        Returns:
+            ``<state_dir>/hf_token``.
+        """
+        return self.state_dir / "hf_token"
+
+    @property
+    def models_dir(self) -> Path:
+        """Return the folder downloaded models are kept in.
+
+        Returns:
+            ``<root>/shared/models``.
+        """
+        return self.root / "shared" / "models"
+
+    @property
     def users_dir(self) -> Path:
         """Return the folder holding the users' homes.
 
