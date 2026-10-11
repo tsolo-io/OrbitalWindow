@@ -20,7 +20,16 @@ All six design phases are implemented, one stacked PR per phase for ticket #2 (P
 carried over: no migration, no backward compatibility, no redirects. Decisions and their reasons are recorded as
 ADRs in `docs/content/adr/`; add one for every new architectural decision. Admin guide: `docs/content/admin/`;
 user help pages (also served at `/help`): `docs/content/user/`.
-AI features are tickets #15–#18 (model library, fit check, vLLM session, Open WebUI); see ADR 0024.
+Later tickets, all merged by 2026-10-11:
+- **AI:** #15–#18 (model library, fit check, vLLM session, Open WebUI; ADRs 0024–0028) and #21 (coding
+  benchmarks, ADR 0029). Fixes: vLLM tool calling (#30) and hybrid or thinking models such as Qwen3.5 (#31).
+- **Deploy and CI:** #3 (CI) and #14 (deploy Makefile, ADR 0023).
+- **Server status:** #22 (node-exporter, ADR 0025) and temperatures (#33).
+- **Local time:** #32. Times are stored in UTC and shown in `TZ` through `ui.common.local_time`. A test
+  stops `ui/` pages from formatting times themselves.
+
+Open: TLS (built, but no domain yet), remote access (not decided; see design.md *TLS with a domain*),
+and MATLAB in a desktop (needs a licence). Martin's testers will log new tickets.
 
 ## Project conventions
 - **Build:** hatch / hatchling, src layout (`src/orbitalwindow/`), Python 3.14 (service image `python:3.14-slim`).
