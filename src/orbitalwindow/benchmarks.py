@@ -64,6 +64,7 @@ SUITES = {
 }
 FILES = ("samples.jsonl", "raw.jsonl", "samples_eval_results.json")
 ACTIVE = ("queued", "starting", "generating", "evaluating", "cancelling")
+CONTEXT = 8192  # context of a session started for a benchmark: prompts and answers are short
 
 
 def scores(results: dict[str, Any]) -> tuple[int, int, int]:

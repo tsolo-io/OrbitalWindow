@@ -65,13 +65,43 @@ def test_hybrid_models_count_only_full_attention_layers():
 
 
 def test_estimate_parts_and_total():
-    """Weights + cache for 8k tokens + overhead; the context is capped at the model's maximum."""
+    """Weights + cache for 32k tokens + overhead; the context is capped at the model's maximum."""
     estimate = fit.estimate(16.4e9, QWEN3_8B)
-    assert estimate.context == 8192
-    assert estimate.kv_cache == 147456 * 8192
+    assert estimate.context == 32768
+    assert estimate.kv_cache == 147456 * 32768
     assert estimate.overhead == pytest.approx(1.5e9 + 0.05 * 16.4e9)
-    assert estimate.total == pytest.approx(16.4e9 + 147456 * 8192 + 1.5e9 + 0.82e9)
+    assert estimate.total == pytest.approx(16.4e9 + 147456 * 32768 + 1.5e9 + 0.82e9)
     assert fit.estimate(1e9, QWEN3_8B, context=10**6).context == 40960
+
+
+QWEN35_4B = {
+    "text_config": {
+        "num_hidden_layers": 32,
+        "num_attention_heads": 16,
+        "num_key_value_heads": 4,
+        "head_dim": 256,
+        "layer_types": ["linear_attention"] * 3 * 8 + ["full_attention"] * 8,
+        "max_position_embeddings": 262144,
+    }
+}
+
+
+@pytest.mark.parametrize(
+    ("weights", "config", "gpu_gib", "expected"),
+    [
+        (9.3e9, QWEN35_4B, 16, 65536),  # plenty of room: the suggested 64k
+        (9.3e9, QWEN35_4B, None, 65536),  # no GPU information
+        (1e9, QWEN3_8B, 80, 40960),  # the model's own maximum
+        (16.4e9, QWEN3_8B, 24, 29696),  # what fits, in whole thousands
+        (16.4e9, QWEN3_8B, 16, 32768),  # not even the weights fit: plan for the default
+        (4e9, None, 16, 32768),  # unknown shape
+    ],
+)
+def test_suggest_context(weights, config, gpu_gib, expected):
+    """Sessions start with 64k tokens, or less when the model or the GPU allows less."""
+    estimate = fit.estimate(weights, config)
+    gpu = gpu_gib * fit.GIB if gpu_gib else None
+    assert fit.suggest_context(estimate, gpu) == expected
 
 
 def test_estimate_without_config_counts_weights_and_overhead():

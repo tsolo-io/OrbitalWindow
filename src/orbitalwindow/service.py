@@ -37,6 +37,7 @@ from .aisession import (
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
 from .benchmarks import ACTIVE as BENCH_ACTIVE
+from .benchmarks import CONTEXT as BENCH_CONTEXT
 from .benchmarks import SUITES, Benchmarker
 from .builds import TAG_RE, Builder, desktop_image_ref
 from .chat import Chat
@@ -867,26 +868,31 @@ class Service:
         state = self.ai.state()
         return state, self.ai.log_tail() if state.status == "starting" else ""
 
-    def session_defaults(self, repo: str, context: int = fit_mod.DEFAULT_CONTEXT) -> dict[str, Any]:
+    def session_defaults(self, repo: str, context: int | None = None) -> dict[str, Any]:
         """Suggest session settings for a downloaded model.
 
-        The GPU share covers the estimate with a little room to spare (more cache means more
-        people can chat at once), between 30 % and 90 %.
+        Without a context, suggests the longest that fits, up to ``fit.SUGGESTED_CONTEXT``. The
+        GPU share covers the estimate with a little room to spare (more cache means more people
+        can chat at once), between 30 % and 90 %.
 
         Args:
             repo: Model id.
-            context: Context length to plan for.
+            context: Context length to plan for; None to suggest one.
 
         Returns:
             ``context`` (capped at the model's maximum), ``max_context``, ``gpu_share``, the
-            ``estimate`` and the ``verdict``.
+            ``estimate``, the ``verdict`` and ``short_for_coding`` (the context is shorter than
+            coding tools need).
 
         Raises:
             ValidationError: If the model is not downloaded.
         """
         model = self._local_model(repo)
-        estimate = fit_mod.estimate(model.weights, model.config(), context)
         gpu = self.model_gpu()
+        if context is None:
+            planned = fit_mod.estimate(model.weights, model.config())
+            context = fit_mod.suggest_context(planned, gpu.total if gpu else None)
+        estimate = fit_mod.estimate(model.weights, model.config(), context)
         share = 0.9
         if gpu is not None:
             share = min(max(round((estimate.total / gpu.total + 0.1) * 20) / 20, 0.3), 0.9)
@@ -896,6 +902,7 @@ class Service:
             "gpu_share": share,
             "estimate": estimate,
             "verdict": fit_mod.verdict(estimate.total, gpu),
+            "short_for_coding": estimate.context < fit_mod.CODING_CONTEXT,
         }
 
     def _local_model(self, repo: str) -> LocalModel:
@@ -1040,7 +1047,7 @@ class Service:
         gpus = self.gpus.stats()
         if not gpus:
             raise ValidationError("The AI session needs an NVIDIA GPU (NVML is not available).")
-        defaults = self.session_defaults(repo)
+        defaults = self.session_defaults(repo, BENCH_CONTEXT)
         index = max(gpus, key=lambda gpu: gpu.mem_total).index
         self.start_ai_session("benchmark", repo, index, defaults["context"], defaults["gpu_share"])
 

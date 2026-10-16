@@ -44,3 +44,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0028](0028-open-webui-chat.md) | The AI chat: Open WebUI on its own port, signed in through OrbitalWindow | accepted |
 | [0029](0029-coding-benchmarks.md) | Coding benchmarks with EvalPlus, run in isolated containers | accepted |
 | [0030](0030-browser-terminal.md) | A browser terminal that keeps running: xterm.js, docker exec and tmux | accepted |
+| [0031](0031-longer-default-context.md) | Longer contexts: plan for 32K, start with the longest that fits up to 64K | accepted |
