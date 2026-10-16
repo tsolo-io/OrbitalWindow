@@ -39,7 +39,7 @@ from .auth import authenticate as auth_authenticate
 from .benchmarks import ACTIVE as BENCH_ACTIVE
 from .benchmarks import CONTEXT as BENCH_CONTEXT
 from .benchmarks import SUITES, Benchmarker
-from .builds import TAG_RE, Builder, desktop_image_ref
+from .builds import TAG_RE, Builder, desktop_image_ref, terminal_image_ref
 from .chat import Chat
 from .config import Settings
 from .db import Database
@@ -1969,13 +1969,16 @@ class Service:
         """
         user = self._require_user(user_id)
         addons = self.software.active_addons(user_id)
+        image_ref = self.image_ref_for(user)
+        gui = self.db.scalar("SELECT gui FROM images WHERE id = ?", [user["image_id"]])
         self.desktops.start(
             user,
-            self.image_ref_for(user),
+            image_ref,
             addons,
             groups_mod.groups_of(self.db, user_id),
             self._ssh_access(user) if any(a.key == ssh_mod.SSH_ADDON for a in addons) else None,
             self.user_env_values(user_id),
+            gui=gui is not False,
         )
         self.db.audit(actor, "desktop.start", user["name"])
 
@@ -2087,6 +2090,17 @@ class Service:
             raise ValidationError("Stop your desktop before choosing another one.")
         self.db.execute("UPDATE users SET image_id = ? WHERE id = ?", [image_id, user_id])
         self.db.audit(actor, "desktop.choose", user["name"], image["base_tag"])
+        if not image["gui"] and ssh_mod.SSH_ADDON not in {
+            a.key for a in self.software.active_addons(user_id)
+        }:
+            # Without a desktop, SSH is the main way in besides the browser terminal.
+            try:
+                self.software.set_addon(user_id, ssh_mod.SSH_ADDON, True)
+            except ValidationError as exc:
+                log.info("could not switch on SSH for %s: %s", user["name"], exc)
+            else:
+                detail = f"{ssh_mod.SSH_ADDON} (no desktop)"
+                self.db.audit("system", "addon.on", user["name"], detail)
         # Packages may not exist for the new desktop; keep only those that do.
         dropped = self._drop_unknown_packages(user_id, image_id)
         if dropped:
@@ -2378,6 +2392,39 @@ class Service:
         self.builder.queue_base(image_id)
         return image_id
 
+    def add_terminal_image(self, actor: str, image: str, label: str | None = None) -> int:
+        """Add a terminal-only image (no desktop) and queue its build.
+
+        Args:
+            actor: Name recorded in the audit log.
+            image: A LinuxServer image such as ``baseimage-ubuntu:noble``, or a full reference
+                such as ``lscr.io/linuxserver/baseimage-ubuntu:noble``.
+            label: Display label; derived from the image when empty.
+
+        Returns:
+            The id of the new image.
+
+        Raises:
+            ValidationError: When the reference is not valid or the image already exists.
+        """
+        ref = _image_reference(image)
+        name = _terminal_name(ref)
+        if self.db.one("SELECT id FROM images WHERE base_tag = ?", [name]):
+            raise ValidationError(f"The image '{name}' already exists.")
+        image_id = self.db.scalar(
+            "INSERT INTO images (label, base_tag, image_ref, gui, base_image) "
+            "VALUES (?, ?, ?, false, ?) RETURNING id",
+            [
+                (label or "").strip() or _label_for(name.removeprefix("baseimage-")),
+                name,
+                terminal_image_ref(name),
+                ref,
+            ],
+        )
+        self.db.audit(actor, "image.add", name, ref)
+        self.builder.queue_base(image_id)
+        return image_id
+
     def list_images(self) -> list[dict[str, Any]]:
         """Return all desktop images, sorted by label.
 
@@ -2543,6 +2590,57 @@ def _validate_limits(cpus: Any, mem_gb: Any) -> tuple[float | None, float | None
     if mem_v is not None and mem_v < 2:
         raise ValidationError("A desktop needs at least 2 GB of RAM.")
     return cpus_v, mem_v
+
+
+LINUXSERVER = "lscr.io/linuxserver/"
+REF_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]{0,199}(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?$")
+
+
+def _image_reference(text: str) -> str:
+    """Return the full reference of an image an admin typed.
+
+    A name without a registry or organisation is a LinuxServer image; a missing tag is
+    ``latest``.
+
+    Args:
+        text: For example ``baseimage-ubuntu:noble`` or ``lscr.io/linuxserver/baseimage-ubuntu``.
+
+    Returns:
+        The full reference, for example ``lscr.io/linuxserver/baseimage-ubuntu:noble``.
+
+    Raises:
+        ValidationError: When it is not a valid image reference.
+    """
+    ref = text.strip()
+    if not REF_RE.fullmatch(ref) or "//" in ref or ".." in ref:
+        raise ValidationError(
+            "That is not a valid image (for example: baseimage-ubuntu:noble or "
+            "lscr.io/linuxserver/baseimage-fedora:42)."
+        )
+    if "/" not in ref:
+        ref = LINUXSERVER + ref
+    if ":" not in ref.rsplit("/", 1)[-1]:
+        ref += ":latest"
+    return ref
+
+
+def _terminal_name(ref: str) -> str:
+    """Return the short name of a terminal-only image, used as its tag and key.
+
+    Args:
+        ref: Full image reference.
+
+    Returns:
+        For example ``baseimage-ubuntu-noble`` for ``lscr.io/linuxserver/baseimage-ubuntu:noble``.
+
+    Raises:
+        ValidationError: When no valid name can be made from it.
+    """
+    repo, tag = ref.rsplit("/", 1)[-1].split(":", 1)
+    name = re.sub(r"[^a-z0-9._-]+", "-", f"{repo}-{tag}".lower()).strip("-.")[:64]
+    if not TAG_RE.fullmatch(name):
+        raise ValidationError("That image name can't be used.")
+    return name
 
 
 def _label_for(base_tag: str) -> str:

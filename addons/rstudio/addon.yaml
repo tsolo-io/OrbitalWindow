@@ -9,3 +9,4 @@ restricted: false
 apt: [r-base, r-base-dev]
 script: install.sh
 launchers: [ow-rstudio.desktop]
+gui: true                   # needs a desktop

@@ -4,8 +4,9 @@
 
 """Image builds, run one at a time by a background worker. Progress is written to ``builds.log``.
 
-- **base**: ``deploy/image/`` on top of a LinuxServer webtop tag → ``ow-desktop:<tag>``, then the
-  image's apt package names are stored in ``pkg_index``.
+- **base**: ``deploy/image/`` on top of a LinuxServer webtop tag → ``ow-desktop:<tag>``, or
+  ``Dockerfile.terminal`` on top of any LinuxServer image → ``ow-terminal:<name>`` (no desktop),
+  then the image's apt package names are stored in ``pkg_index``.
 - **user**: a generated context ``FROM ow-desktop:<tag>`` with the user's add-ons and packages →
   ``ow-user-<name>:latest``. Docker only tags on success, so a failed build keeps the last good one.
 """
@@ -70,6 +71,18 @@ def desktop_image_ref(base_tag: str) -> str:
         ``ow-desktop:<base_tag>``.
     """
     return f"ow-desktop:{base_tag}"
+
+
+def terminal_image_ref(name: str) -> str:
+    """Return the image reference of a built terminal-only image.
+
+    Args:
+        name: The image's name (its ``base_tag`` column), such as ``baseimage-ubuntu-noble``.
+
+    Returns:
+        ``ow-terminal:<name>``.
+    """
+    return f"ow-terminal:{name}"
 
 
 def user_dockerfile(plan: UserPlan) -> str:
@@ -319,12 +332,13 @@ class Builder:
         writer = _LogWriter(self._db, build_id)
         ok = False
         try:
-            base = f"{self._repo}:{image['base_tag']}"
+            base = image["base_image"] or f"{self._repo}:{image['base_tag']}"
             writer.write(f"Building {image['image_ref']} from {base}\n")
             self._stream(
                 writer,
                 self._client.api.build(
                     path=str(self._context),
+                    dockerfile="Dockerfile" if image["gui"] else "Dockerfile.terminal",
                     tag=image["image_ref"],
                     buildargs={"BASE_IMAGE": base},
                     pull=True,

@@ -93,7 +93,11 @@ def desktop_card(auth: PageAuth) -> None:
         restart_note = ui.label(
             "New software is ready. Stop and start your desktop to use it."
         ).classes("text-caption text-orange-9")
-        images = {i["id"]: i["label"] for i in svc.enabled_images()}
+        enabled = svc.enabled_images()
+        images = {
+            i["id"]: i["label"] if i["gui"] else f"{i['label']} (terminal only)" for i in enabled
+        }
+        no_desktop = {i["id"] for i in enabled if not i["gui"]}
         picker = ui.select(images, label="Desktop").classes("w-64")
         ui.label("You can change the desktop while it is stopped.").classes(
             "text-caption text-grey-7"
@@ -124,6 +128,11 @@ def desktop_card(auth: PageAuth) -> None:
         ).classes("text-caption text-grey-8")
         stop_terminal_btn.set_visibility(False)
         terminal_note.set_visibility(False)
+        no_desktop_note = ui.label(
+            "This has no desktop, for a little more performance. Use Open terminal, or connect "
+            "with SSH (see SSH keys below)."
+        ).classes("text-caption text-grey-8")
+        no_desktop_note.set_visibility(False)
         usage_box = ui.column().classes("w-full gap-1")
         busy = {"value": False}
         terminal_on = {"value": False}
@@ -168,6 +177,8 @@ def desktop_card(auth: PageAuth) -> None:
             start_btn.set_visibility(not running)
             stop_btn.set_visibility(running)
             open_btn.set_enabled(state is DesktopState.RUNNING)
+            open_btn.set_visibility(user["image_id"] not in no_desktop)
+            no_desktop_note.set_visibility(user["image_id"] in no_desktop)
             terminal_btn.set_enabled(state is DesktopState.RUNNING)
             terminal_on["value"] = state is DesktopState.RUNNING and await run.io_bound(
                 svc.terminal_running, user_id
@@ -260,6 +271,9 @@ def desktop_card(auth: PageAuth) -> None:
                 await act(
                     "Changing the desktop", svc.choose_image, auth.user.name, user_id, event.value
                 )
+                # The software and SSH cards depend on the choice (desktop-only add-ons, SSH).
+                if svc.db.scalar("SELECT image_id FROM users WHERE id = ?", [user_id]) != current:
+                    ui.navigate.reload()
 
         start_btn.on_click(guarded(auth, on_start))
         stop_btn.on_click(guarded(auth, on_stop))

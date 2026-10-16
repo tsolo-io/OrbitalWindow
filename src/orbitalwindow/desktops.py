@@ -149,6 +149,7 @@ def build_spec(
     ssh: SshAccess | None = None,
     session: str = "",
     user_env: Mapping[str, str] | None = None,
+    gui: bool = True,
 ) -> DesktopSpec:
     """Build the container spec for ``user``.
 
@@ -165,6 +166,8 @@ def build_spec(
         ssh: SSH gateway access, or None for no SSH.
         session: Start id for the URL path; a new one is generated when empty.
         user_env: The user's own environment variables; they win over add-ons' ones.
+        gui: Whether the image has a desktop. A terminal-only container gets no web route and
+            none of the desktop's settings.
 
     Returns:
         The desktop container spec.
@@ -182,6 +185,10 @@ def build_spec(
         LABEL_USER: name,
         LABEL_ROLE: "desktop",
         LABEL_SESSION: session,
+        # Add-ons active at start; used to find desktops that use a revoked add-on's mounts.
+        LABEL_ADDONS: ",".join(a.key for a in addons),
+    }
+    web_labels = {
         "traefik.enable": "true",
         "traefik.docker.network": net,
         f"traefik.http.routers.{router}.rule": f"Path(`{path[:-1]}`) || PathPrefix(`{path}`)",
@@ -195,22 +202,24 @@ def build_spec(
             f"Basic {basic}"
         ),
         f"traefik.http.services.{router}.loadbalancer.server.port": str(DESKTOP_PORT),
-        # Add-ons active at start; used to find desktops that use a revoked add-on's mounts.
-        LABEL_ADDONS: ",".join(a.key for a in addons),
     }
 
     uid = str(user["uid_gid"])
-    environment = {
-        "PUID": uid,
-        "PGID": uid,
-        "TZ": settings.tz,
-        "TITLE": f"{user['display_name']} – OrbitalWindow",
-        "CUSTOM_USER": name,
-        "PASSWORD": secret,
-        "SUBFOLDER": path,
-        "PIXELFLUX_WAYLAND": "false",
-        "START_DOCKER": "false",
-    }
+    environment = {"PUID": uid, "PGID": uid, "TZ": settings.tz}
+    if gui:
+        labels.update(web_labels)
+        environment.update(
+            {
+                "TITLE": f"{user['display_name']} – OrbitalWindow",
+                "CUSTOM_USER": name,
+                "PASSWORD": secret,
+                "SUBFOLDER": path,
+                "PIXELFLUX_WAYLAND": "false",
+                "START_DOCKER": "false",
+            }
+        )
+    else:
+        environment["OW_GUI"] = "false"
 
     root = settings.root
     volumes = {
@@ -400,6 +409,7 @@ class Desktops:
         groups: Sequence[dict[str, Any]] = (),
         ssh: SshAccess | None = None,
         user_env: Mapping[str, str] | None = None,
+        gui: bool = True,
     ) -> None:
         """Start a fresh desktop container for a user, replacing any existing one.
 
@@ -412,6 +422,7 @@ class Desktops:
             groups: Group rows whose folders are mounted.
             ssh: SSH gateway access, or None for no SSH.
             user_env: The user's own environment variables.
+            gui: Whether the image has a desktop (only desktops are routed through Traefik).
 
         Raises:
             DesktopError: The account is disabled, an add-on's mount source is not installed,
@@ -439,9 +450,11 @@ class Desktops:
                 groups,
                 ssh,
                 user_env=user_env,
+                gui=gui,
             )
             network = self._ensure_network(name)
-            self._connect_traefik(network)
+            if gui:
+                self._connect_traefik(network)
             if ssh is not None:
                 self._connect(network, self._settings.sshpiper_container)
             container = self._client.containers.create(

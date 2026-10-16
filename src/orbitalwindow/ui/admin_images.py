@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Admin: desktop images. Add a webtop tag (starts a build), enable/disable, rebuild, remove."""
+"""Admin: desktop images. Add a webtop tag or a terminal-only image (starts a build), enable or
+disable, rebuild, remove."""
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -14,7 +15,8 @@ from .software import show_build_log
 
 COLUMNS = [
     {"name": "label", "label": "Desktop", "field": "label", "align": "left"},
-    {"name": "base_tag", "label": "Webtop tag", "field": "base_tag", "align": "left"},
+    {"name": "kind", "label": "Kind", "field": "kind", "align": "left"},
+    {"name": "source", "label": "Built from", "field": "source", "align": "left"},
     {"name": "status", "label": "Status", "field": "status", "align": "left"},
     {"name": "built_at", "label": "Built", "field": "built_at", "align": "left"},
     {"name": "users", "label": "Users", "field": "users", "align": "right"},
@@ -44,12 +46,26 @@ def admin_images(request: Request) -> RedirectResponse | None:
         ui.label("Desktops").classes("text-h5")
         ui.label(
             "Each desktop is a LinuxServer webtop image (for example ubuntu-xfce, ubuntu-kde or "
-            "ubuntu-mate) with OrbitalWindow's additions. Adding one starts a build."
+            "ubuntu-mate) with OrbitalWindow's additions. A terminal-only image has no desktop: "
+            "it is built from a LinuxServer base image (for example baseimage-ubuntu:noble) and "
+            "used with the browser terminal and SSH, for a little more performance. Adding one "
+            "starts a build."
         ).classes("text-grey-8")
         with ui.row().classes("items-end gap-2"):
+            kind = ui.toggle({True: "Desktop", False: "Terminal only"}, value=True).props("no-caps")
             tag = ui.input("Webtop tag", placeholder="ubuntu-mate").props("dense outlined")
+            tag.classes("w-72")
             label = ui.input("Name shown to users (optional)").props("dense outlined")
-            add_btn = ui.button("Add desktop", icon="add").props("no-caps")
+            add_btn = ui.button("Add", icon="add").props("no-caps")
+
+        def on_kind() -> None:
+            """Ask for a webtop tag or a LinuxServer image, depending on the kind."""
+            if kind.value:
+                tag.props('label="Webtop tag" placeholder="ubuntu-mate"')
+            else:
+                tag.props('label="LinuxServer image" placeholder="baseimage-ubuntu:noble"')
+
+        kind.on_value_change(lambda _: on_kind())
 
         table = ui.table(columns=COLUMNS, rows=[], row_key="id").classes("w-full")
         table.add_slot(
@@ -90,7 +106,13 @@ def admin_images(request: Request) -> RedirectResponse | None:
             """Reload the image table."""
             rows = await run.io_bound(svc.list_images)
             table.rows = [
-                row | {"built_at": local_time(row["built_at"], empty="–")} for row in rows
+                row
+                | {
+                    "built_at": local_time(row["built_at"], empty="–"),
+                    "kind": "Desktop" if row["gui"] else "Terminal only",
+                    "source": row["base_image"] or f"webtop:{row['base_tag']}",
+                }
+                for row in rows
             ]
             table.update()
 
@@ -113,7 +135,8 @@ def admin_images(request: Request) -> RedirectResponse | None:
 
         async def on_add() -> None:
             """Add the image from the form (starts a build) and clear the form."""
-            await act(svc.add_image, tag.value or "", label.value or None, done="Build started.")
+            add = svc.add_image if kind.value else svc.add_terminal_image
+            await act(add, tag.value or "", label.value or None, done="Build started.")
             tag.set_value("")
             label.set_value("")
 

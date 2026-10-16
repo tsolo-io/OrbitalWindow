@@ -22,6 +22,7 @@ launchers: [ow-matlab.desktop]   # files in this folder, installed to /usr/share
 mounts:                     # added when the desktop starts (no rebuild needed)
   - {source: shared/matlab, target: /opt/matlab, read_only: true}   # source relative to OW_ROOT
 env: {}                     # extra environment for the desktop container
+gui: false                  # true: only useful with a desktop; not offered without one
 ```
 
 ## Rules
@@ -37,6 +38,9 @@ env: {}                     # extra environment for the desktop container
   be inside system folders or `/config`, `/scratch`, `/shared` or `/groups`. If a source folder
   doesn't exist, the desktop refuses to start and tells the user why.
 - `env` may not change variables OrbitalWindow sets (`PUID`, `PASSWORD`, `SUBFOLDER`, …).
+- `gui: true` marks an add-on that is only useful with a desktop (an editor or other window
+  program). Users whose container is terminal only can't switch it on, and it is left out of their
+  image.
 - Electron apps (VS Code, RStudio, …) must start with `--no-sandbox`: Chromium's sandbox can't
   create its namespaces in a desktop container (ADR 0022).
 

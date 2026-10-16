@@ -98,11 +98,13 @@ def software_card(auth: PageAuth) -> None:
                     spec = state.addon.spec
                     with ui.row().classes("items-start no-wrap gap-2"):
                         switch = ui.switch(value=state.active).props("dense")
-                        switch.set_enabled(state.available)
+                        switch.set_enabled(state.available and not state.needs_desktop)
                         with ui.column().classes("gap-0"):
                             ui.label(spec.label).classes("font-medium")
                             text = spec.description or ""
-                            if not state.available:
+                            if state.needs_desktop:
+                                text = (text + " Needs a desktop; yours is terminal only.").strip()
+                            elif not state.available:
                                 text = (text + " Ask your administrator for access.").strip()
                             ui.label(text).classes("text-caption text-grey-7")
                     switch.on_value_change(guarded(auth, _toggle(spec.key)))

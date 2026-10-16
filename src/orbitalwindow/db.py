@@ -219,6 +219,12 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (user_id, name)
     );
     """,
+    # 10: terminal-only images (#40): no desktop (GUI), built from any LinuxServer image
+    """
+    ALTER TABLE images ADD COLUMN gui BOOLEAN DEFAULT true;
+    UPDATE images SET gui = true;
+    ALTER TABLE images ADD COLUMN base_image VARCHAR;  -- full image to build on; NULL: webtop tag
+    """,
 ]
 
 
