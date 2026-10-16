@@ -14,6 +14,7 @@ from ..metrics import fmt_bytes
 from ..users import ValidationError
 from .common import PageAuth, authenticate, form_input, frame, guarded, help_icon, service
 from .software import software_card
+from .terminal import confirm_stop_terminal
 
 STATE_TEXT = {
     DesktopState.STOPPED: ("Stopped", "grey"),
@@ -109,8 +110,22 @@ def desktop_card(auth: PageAuth) -> None:
                     f"window.open('{open_url}', 'ow-desktop-{auth.user.name}')"
                 ),
             ).props("no-caps color=positive")
+            terminal_btn = ui.button(
+                "Open terminal",
+                icon="terminal",
+                on_click=lambda: ui.navigate.to("/terminal", new_tab=True),
+            ).props("no-caps outline")
+            stop_terminal_btn = ui.button("Stop terminal", icon="stop").props(
+                "no-caps outline color=negative"
+            )
+        terminal_note = ui.label(
+            "Your terminal is running. It keeps running when you close its page."
+        ).classes("text-caption text-grey-8")
+        stop_terminal_btn.set_visibility(False)
+        terminal_note.set_visibility(False)
         usage_box = ui.column().classes("w-full gap-1")
         busy = {"value": False}
+        terminal_on = {"value": False}
 
         async def show_usage(running: bool) -> None:
             """Show the desktop's CPU/RAM use (while running) and the shared GPU load.
@@ -152,6 +167,12 @@ def desktop_card(auth: PageAuth) -> None:
             start_btn.set_visibility(not running)
             stop_btn.set_visibility(running)
             open_btn.set_enabled(state is DesktopState.RUNNING)
+            terminal_btn.set_enabled(state is DesktopState.RUNNING)
+            terminal_on["value"] = state is DesktopState.RUNNING and await run.io_bound(
+                svc.terminal_running, user_id
+            )
+            stop_terminal_btn.set_visibility(terminal_on["value"])
+            terminal_note.set_visibility(terminal_on["value"])
             start_btn.set_enabled(not busy["value"] and state is not DesktopState.BUILDING)
             stop_btn.set_enabled(not busy["value"])
             picker.set_enabled(not running and not busy["value"])
@@ -193,9 +214,37 @@ def desktop_card(auth: PageAuth) -> None:
             """Start the user's desktop."""
             await act("Start", svc.start_desktop, auth.user.name, user_id)
 
-        async def on_stop() -> None:
-            """Stop the user's desktop."""
+        async def stop_desktop() -> None:
+            """Stop the user's desktop (and its terminal)."""
             await act("Stop", svc.stop_desktop, auth.user.name, user_id)
+
+        async def on_stop() -> None:
+            """Stop the user's desktop; ask first while its terminal runs."""
+            if not terminal_on["value"]:
+                await stop_desktop()
+                return
+            with ui.dialog() as dialog, ui.card():
+                ui.label("Stop the desktop?").classes("text-h6")
+                ui.label(
+                    "Your terminal is running. Stopping the desktop also stops the terminal and "
+                    "the programs running in it."
+                )
+
+                async def confirmed() -> None:
+                    """Close the dialog and stop the desktop."""
+                    dialog.close()
+                    await stop_desktop()
+
+                with ui.row().classes("w-full justify-end gap-2"):
+                    ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
+                    ui.button("Stop desktop", on_click=guarded(auth, confirmed)).props(
+                        "no-caps color=negative"
+                    )
+            dialog.open()
+
+        def on_stop_terminal() -> None:
+            """Ask, then stop the terminal and everything running in it."""
+            confirm_stop_terminal(auth, refresh)
 
         async def on_pick(event) -> None:
             """Switch to the desktop image chosen in the picker, if it changed.
@@ -213,6 +262,7 @@ def desktop_card(auth: PageAuth) -> None:
 
         start_btn.on_click(guarded(auth, on_start))
         stop_btn.on_click(guarded(auth, on_stop))
+        stop_terminal_btn.on_click(guarded(auth, on_stop_terminal))
         picker.on_value_change(guarded(auth, on_pick))
         ui.timer(3.0, guarded(auth, refresh))
         ui.timer(0.1, guarded(auth, refresh), once=True)

@@ -43,3 +43,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0027](0027-one-vllm-ai-session.md) | One AI session: a vLLM container with an OpenAI-compatible API | accepted |
 | [0028](0028-open-webui-chat.md) | The AI chat: Open WebUI on its own port, signed in through OrbitalWindow | accepted |
 | [0029](0029-coding-benchmarks.md) | Coding benchmarks with EvalPlus, run in isolated containers | accepted |
+| [0030](0030-browser-terminal.md) | A browser terminal that keeps running: xterm.js, docker exec and tmux | accepted |

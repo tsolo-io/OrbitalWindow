@@ -231,11 +231,21 @@ env: {}                     # extra container environment
 - Read only by an open page, every 5 s; rates come from the page's previous read. Nothing is
   cached or polled in the background. Without node-exporter, the page shows what to install.
 
+### Browser terminal (ticket #39, ADR 0030)
+- Page `/terminal` (own desktop only): NiceGUI `ui.xterm` attached through a TTY `docker exec`
+  (`socket-proxy-rw`), as `abc` in `/config`.
+- The shell runs in a tmux session `ow` in the desktop. Closing the page detaches it, so programs
+  keep running. **Stop terminal** (page or dashboard) ends the session. Removing a running desktop
+  ends the session first and waits 2 s, and the dashboard asks before stopping one whose terminal
+  runs.
+- tmux is in the desktop base image. Older desktops get a plain shell that ends with the page.
+
 ### UI pages (NiceGUI)
 - **`/login`**
 - **`/` (user dashboard):**
   - Status (stopped, building, starting, running) with Start and Stop buttons, plus a desktop picker showing enabled images.
   - **Open desktop** (opens `/desktop/<user>/` in a new tab).
+  - **Open terminal** (opens `/terminal` in a new tab); while a terminal runs, a note and **Stop terminal**.
   - Own CPU/RAM and GPU totals.
   - **Software** card: add-on switches (open ones, plus restricted ones the admin granted; others are greyed out with "ask admin").
   - Package editor: list, add with autocomplete, remove, **Apply**, which builds and shows the log.
