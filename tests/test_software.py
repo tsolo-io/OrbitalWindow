@@ -99,15 +99,21 @@ def test_user_dockerfile(service, user1):
     assert text.index("add-on: devtools") < text.index("add-on: vscode") < text.index("octave")
     assert "COPY addons/vscode/ /opt/ow/addons/vscode/" in lines
     assert "COPY ow-step /usr/local/sbin/ow-step" in lines
+    assert "COPY ow-pkg /usr/local/bin/ow-pkg" in lines
     assert (
         "RUN /usr/local/sbin/ow-step sh -euc "
-        "'cd /opt/ow/addons/vscode && sh ./install.sh && rm -rf /var/lib/apt/lists/*'"
+        "'cd /opt/ow/addons/vscode && OW_PKG_MANAGER=apt sh ./install.sh && ow-pkg clean'"
     ) in lines
     assert (
         "RUN install -m 644 /opt/ow/addons/vscode/ow-vscode.desktop /usr/share/applications/"
         in lines
     )
-    assert any("apt-get update" in line and "gfortran" in line for line in lines)
+    assert any(
+        line.endswith(
+            "'ow-pkg install build-essential cmake gfortran pkg-config git-gui gitk git-lfs'"
+        )
+        for line in lines
+    )
     assert lines[-1] == 'LABEL ow.managed="true" ow.role="user-image" ow.user="user1"'
 
 

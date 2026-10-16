@@ -22,6 +22,15 @@ log = logging.getLogger(__name__)
 
 KEY_RE = r"^[a-z][a-z0-9-]{1,31}$"
 APT_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+$")
+# Other package managers allow upper case and a few more characters (Fedora: ImageMagick).
+PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+._@-]{0,127}$")
+# Package managers ow-pkg knows (ADR 0034), and the systems that use them, for users.
+MANAGERS = {
+    "apt": "Ubuntu and Debian",
+    "apk": "Alpine",
+    "dnf": "Fedora",
+    "pacman": "Arch",
+}
 LAUNCHER_RE = re.compile(r"^ow-[a-z0-9-]+\.desktop$")
 ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 # Environment the desktop spec owns; an add-on may not override it.
@@ -100,6 +109,11 @@ class AddonSpec(BaseModel):
     description: Annotated[str, Field(max_length=500)] = ""
     restricted: bool = False
     apt: list[str] = []
+    apk: list[str] = []
+    dnf: list[str] = []
+    pacman: list[str] = []
+    # The package managers (systems) the add-on works on; see ``supports``.
+    managers: list[str] | None = None
     script: str | None = None
     launchers: list[str] = []
     mounts: list[Mount] = []
@@ -124,6 +138,77 @@ class AddonSpec(BaseModel):
         if bad:
             raise ValueError(f"not valid package names: {', '.join(bad)}")
         return v
+
+    @field_validator("apk", "dnf", "pacman")
+    @classmethod
+    def _packages(cls, v: list[str]) -> list[str]:
+        """Check the package names for apk, dnf and pacman.
+
+        Args:
+            v: The package names.
+
+        Returns:
+            The unchanged list.
+
+        Raises:
+            ValueError: If any name is not a valid package name.
+        """
+        bad = [p for p in v if not PACKAGE_RE.fullmatch(p)]
+        if bad:
+            raise ValueError(f"not valid package names: {', '.join(bad)}")
+        return v
+
+    @field_validator("managers")
+    @classmethod
+    def _managers(cls, v: list[str] | None) -> list[str] | None:
+        """Check the package manager names.
+
+        Args:
+            v: The names, or None.
+
+        Returns:
+            The unchanged list.
+
+        Raises:
+            ValueError: If a name is not one of ``MANAGERS``.
+        """
+        bad = [name for name in v or [] if name not in MANAGERS]
+        if bad:
+            raise ValueError(f"unknown package managers {bad}; use {', '.join(MANAGERS)}")
+        return v
+
+    def packages_for(self, manager: str) -> list[str]:
+        """Return the packages to install with a package manager.
+
+        Args:
+            manager: ``apt``, ``apk``, ``dnf`` or ``pacman``.
+
+        Returns:
+            The package names; empty for an unknown manager.
+        """
+        return list(getattr(self, manager, [])) if manager in MANAGERS else []
+
+    def supports(self, manager: str) -> bool:
+        """Tell whether the add-on works on an image with this package manager.
+
+        ``managers`` decides when given. Otherwise an add-on with package lists works where it
+        has a list; one with only a script is assumed to be written for Ubuntu and Debian; one
+        with neither (mounts, environment, launchers) works everywhere.
+
+        Args:
+            manager: ``apt``, ``apk``, ``dnf`` or ``pacman``.
+
+        Returns:
+            True if the add-on can be used there.
+        """
+        if self.managers is not None:
+            return manager in self.managers
+        listed = [name for name in MANAGERS if getattr(self, name)]
+        if listed:
+            return manager in listed
+        if self.script:
+            return manager == "apt"
+        return True
 
     @field_validator("launchers")
     @classmethod
@@ -222,12 +307,14 @@ class Addon:
     def affects_image(self) -> bool:
         """Tell whether the add-on changes the per-user image.
 
-        Add-ons with apt packages, a script or launchers are baked into the per-user image.
+        Add-ons with packages, a script or launchers are baked into the per-user image.
 
         Returns:
-            True if the add-on has apt packages, a script or launchers.
+            True if the add-on has packages, a script or launchers.
         """
-        return bool(self.spec.apt or self.spec.script or self.spec.launchers)
+        spec = self.spec
+        packages = spec.apt or spec.apk or spec.dnf or spec.pacman
+        return bool(packages or spec.script or spec.launchers)
 
 
 @dataclass

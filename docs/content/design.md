@@ -252,6 +252,13 @@ env: {}                     # extra container environment
   through **Open terminal** and SSH, and SSH is switched on when it is chosen. Add-ons with
   `gui: true` are not offered.
 
+### Other distributions (ticket #40, ADR 0034)
+- `ow-pkg` (in every image) wraps apt, apk, dnf and pacman. `base-packages.sh` installs the base
+  tools with each distribution's names, and `images.pkg_manager` is recorded with the package
+  index.
+- Add-ons list packages per manager (`apt`, `apk`, `dnf`, `pacman`, optional `managers`). Those not
+  for the user's system are greyed out and left out of the image.
+
 ### Environment variables (ticket #41, ADR 0032)
 - Page `/environment` (linked from the desktop card): the user's own variables (`user_env`), set
   in every desktop they start, whichever desktop it is. They win over add-on `env`. Names

@@ -9,4 +9,7 @@ description: >-
   add on this page. Only works while your desktop is running.
 restricted: false
 apt: [openssh-server, openssh-sftp-server]
+apk: [openssh-server, openssh-sftp-server]
+dnf: [openssh-server]
+pacman: [openssh]
 script: install.sh

@@ -225,6 +225,11 @@ MIGRATIONS: list[str] = [
     UPDATE images SET gui = true;
     ALTER TABLE images ADD COLUMN base_image VARCHAR;  -- full image to build on; NULL: webtop tag
     """,
+    # 11: images of other distributions (#40): the package manager, found when the index is built
+    """
+    ALTER TABLE images ADD COLUMN pkg_manager VARCHAR DEFAULT 'apt';
+    UPDATE images SET pkg_manager = 'apt';
+    """,
 ]
 
 

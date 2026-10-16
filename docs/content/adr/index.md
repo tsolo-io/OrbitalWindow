@@ -47,3 +47,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0031](0031-longer-default-context.md) | Longer contexts: plan for 32K, start with the longest that fits up to 64K | accepted |
 | [0032](0032-user-environment-variables.md) | Users' own environment variables, per user and applied at start | accepted |
 | [0033](0033-terminal-only-containers.md) | Terminal-only containers: LinuxServer base images in the desktop slot | accepted |
+| [0034](0034-other-distributions.md) | Other distributions: ow-pkg over apt, apk, dnf and pacman | accepted |

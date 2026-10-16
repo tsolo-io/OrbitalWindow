@@ -7,3 +7,6 @@ label: Developer tools
 description: Compilers and build tools (gcc, gfortran, cmake) and graphical Git tools.
 restricted: false
 apt: [build-essential, cmake, gfortran, pkg-config, git-gui, gitk, git-lfs]
+apk: [build-base, cmake, gfortran, pkgconf, git-gui, git-lfs]
+dnf: [gcc, gcc-c++, make, gcc-gfortran, cmake, pkgconf, git-gui, gitk, git-lfs]
+pacman: [base-devel, gcc-fortran, cmake, pkgconf, tk, git-lfs]   # gitk and git gui come with git

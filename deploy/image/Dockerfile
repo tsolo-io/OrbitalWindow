@@ -3,19 +3,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # OrbitalWindow desktop base image, built by the service as ow-desktop:<tag>.
-# Keep it slim: optional software belongs in add-ons (addons/<key>/).
+# Keep it slim: optional software belongs in add-ons (addons/<key>/). Webtop tags of any
+# distribution with apt, apk, dnf or pacman work (ubuntu-*, debian-*, fedora-*, alpine-*, arch-*).
 ARG BASE_IMAGE=lscr.io/linuxserver/webtop:ubuntu-xfce
 FROM ${BASE_IMAGE}
 
-# Ubuntu's nvtop carries cap_perfmon, which is outside Docker's bounding set, so exec
-# fails; drop the capability (NVIDIA stats via NVML don't need it).
-# tmux keeps the browser terminal running without a browser (ADR 0030).
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      git python3 python3-venv curl unzip rsync nano htop nvtop tmux libcap2-bin \
-      mesa-utils vulkan-tools fonts-dejavu fonts-liberation fonts-noto-core \
- && (setcap -r /usr/bin/nvtop || true) \
- && rm -rf /var/lib/apt/lists/*
+# The base tools for any distribution ow-pkg supports (ADR 0034); tmux keeps the browser
+# terminal running without a browser (ADR 0030).
+COPY root/usr/local/bin/ow-pkg /usr/local/bin/ow-pkg
+COPY base-packages.sh /tmp/base-packages.sh
+RUN sh /tmp/base-packages.sh desktop && rm /tmp/base-packages.sh
 
 COPY root/ /
 

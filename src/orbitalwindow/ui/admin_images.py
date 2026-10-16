@@ -17,10 +17,11 @@ COLUMNS = [
     {"name": "label", "label": "Desktop", "field": "label", "align": "left"},
     {"name": "kind", "label": "Kind", "field": "kind", "align": "left"},
     {"name": "source", "label": "Built from", "field": "source", "align": "left"},
+    {"name": "pkg_manager", "label": "Packages", "field": "pkg_manager", "align": "left"},
     {"name": "status", "label": "Status", "field": "status", "align": "left"},
     {"name": "built_at", "label": "Built", "field": "built_at", "align": "left"},
     {"name": "users", "label": "Users", "field": "users", "align": "right"},
-    {"name": "packages", "label": "Packages", "field": "packages", "align": "right"},
+    {"name": "packages", "label": "Package list", "field": "packages", "align": "right"},
     {"name": "enabled", "label": "Offered to users", "field": "enabled", "align": "center"},
     {"name": "actions", "label": "", "field": "actions", "align": "right"},
 ]
@@ -47,9 +48,10 @@ def admin_images(request: Request) -> RedirectResponse | None:
         ui.label(
             "Each desktop is a LinuxServer webtop image (for example ubuntu-xfce, ubuntu-kde or "
             "ubuntu-mate) with OrbitalWindow's additions. A terminal-only image has no desktop: "
-            "it is built from a LinuxServer base image (for example baseimage-ubuntu:noble) and "
-            "used with the browser terminal and SSH, for a little more performance. Adding one "
-            "starts a build."
+            "it is built from a LinuxServer base image (for example baseimage-ubuntu:noble, "
+            "baseimage-fedora:42 or baseimage-alpine:3.22) and used with the browser terminal "
+            "and SSH, for a little more performance. Ubuntu, Debian, Fedora, Alpine and Arch "
+            "work for both kinds. Adding one starts a build."
         ).classes("text-grey-8")
         with ui.row().classes("items-end gap-2"):
             kind = ui.toggle({True: "Desktop", False: "Terminal only"}, value=True).props("no-caps")
@@ -63,7 +65,7 @@ def admin_images(request: Request) -> RedirectResponse | None:
             if kind.value:
                 tag.props('label="Webtop tag" placeholder="ubuntu-mate"')
             else:
-                tag.props('label="LinuxServer image" placeholder="baseimage-ubuntu:noble"')
+                tag.props('label="LinuxServer image" placeholder="baseimage-fedora:42"')
 
         kind.on_value_change(lambda _: on_kind())
 

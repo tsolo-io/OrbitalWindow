@@ -63,7 +63,7 @@ def software_card(auth: PageAuth) -> None:
             ui.label("Software").classes("text-h6")
             help_icon("software")
         ui.label(
-            "Switch on the software you need and add extra Ubuntu packages. Then press Apply: "
+            "Switch on the software you need and add extra packages. Then press Apply: "
             "your desktop is prepared in the background, and the new software appears the next "
             "time you start it."
         ).classes("text-sm text-grey-8")
@@ -98,11 +98,14 @@ def software_card(auth: PageAuth) -> None:
                     spec = state.addon.spec
                     with ui.row().classes("items-start no-wrap gap-2"):
                         switch = ui.switch(value=state.active).props("dense")
-                        switch.set_enabled(state.available and not state.needs_desktop)
+                        usable = not state.needs_desktop and not state.unsupported
+                        switch.set_enabled(state.available and usable)
                         with ui.column().classes("gap-0"):
                             ui.label(spec.label).classes("font-medium")
                             text = spec.description or ""
-                            if state.needs_desktop:
+                            if state.unsupported:
+                                text = f"{text} Not available for {state.unsupported}.".strip()
+                            elif state.needs_desktop:
                                 text = (text + " Needs a desktop; yours is terminal only.").strip()
                             elif not state.available:
                                 text = (text + " Ask your administrator for access.").strip()

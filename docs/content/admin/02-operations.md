@@ -34,8 +34,14 @@ and user names must differ.
 - **Desktops**: add a LinuxServer webtop tag to build a new desktop; **Rebuild** picks up base image
   updates (do this regularly for security updates). Users' own images are rebuilt automatically
   afterwards. A desktop can only be removed when nobody uses it.
-- **Terminal only**: choose *Terminal only* and give a LinuxServer base image (for example
-  `baseimage-ubuntu:noble`, or a full reference such as `lscr.io/linuxserver/baseimage-ubuntu:noble`)
+- **Other systems**: desktops and terminal-only images can be built on Ubuntu, Debian, Fedora,
+  Alpine or Arch (webtop tags such as `fedora-xfce`, base images such as
+  `baseimage-fedora:42`). Users' packages then come from that system. Add-ons that don't support it
+  (VS Code, RStudio and MATLAB are Ubuntu/Debian only; conda not on Alpine) are greyed out for
+  its users. The **Packages** column shows each image's package manager.
+- **Terminal only**: choose *Terminal only* and give a LinuxServer base image with a tag (for
+  example `baseimage-ubuntu:noble` or `baseimage-alpine:3.22`, or a full reference such as
+  `lscr.io/linuxserver/baseimage-ubuntu:noble`)
   for users who work in the terminal and want a little more performance. It has the same GPU, CPU,
   memory and folders as a desktop, but no desktop: users reach it with **Open terminal** and SSH.
   Choosing one switches SSH on for the user (unless SSH is restricted and not granted). Add-ons

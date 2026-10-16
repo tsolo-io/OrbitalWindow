@@ -6,7 +6,8 @@
 
 - **base**: ``deploy/image/`` on top of a LinuxServer webtop tag → ``ow-desktop:<tag>``, or
   ``Dockerfile.terminal`` on top of any LinuxServer image → ``ow-terminal:<name>`` (no desktop),
-  then the image's apt package names are stored in ``pkg_index``.
+  then its package manager and package names are stored (``images.pkg_manager``, ``pkg_index``).
+  ``ow-pkg`` hides the differences between apt, apk, dnf and pacman (ADR 0034).
 - **user**: a generated context ``FROM ow-desktop:<tag>`` with the user's add-ons and packages →
   ``ow-user-<name>:latest``. Docker only tags on success, so a failed build keeps the last good one.
 """
@@ -34,8 +35,7 @@ log = logging.getLogger(__name__)
 TAG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 LOG_FLUSH_SECONDS = 1.0
 MAX_LOG_CHARS = 400_000
-APT_INSTALL = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends"
-APT_CLEAN = "rm -rf /var/lib/apt/lists/*"
+OW_PKG = "/usr/local/bin/ow-pkg"
 STEP = "/usr/local/sbin/ow-step"
 # Wraps long build steps. It prints a line every minute so the build stream through the socket
 # proxy (which drops connections idle for 10 minutes) never goes quiet, and users see progress.
@@ -102,18 +102,20 @@ def user_dockerfile(plan: UserPlan) -> str:
         f"FROM {plan.base_ref}",
         'SHELL ["/bin/sh", "-eu", "-c"]',
         f"COPY ow-step {STEP}",
+        # Also in images built before ow-pkg existed.
+        f"COPY ow-pkg {OW_PKG}",
     ]
     for addon in plan.addons:
         spec = addon.spec
         folder = f"/opt/ow/addons/{spec.key}"
         lines.append(f"# add-on: {spec.key}")
         lines.append(f"COPY addons/{spec.key}/ {folder}/")
-        if spec.apt:
-            lines.append(
-                _step(f"apt-get update && {APT_INSTALL} {shlex.join(spec.apt)} && {APT_CLEAN}")
-            )
+        packages = spec.packages_for(plan.manager)
+        if packages:
+            lines.append(_step(f"ow-pkg install {shlex.join(packages)}"))
         if spec.script:
-            lines.append(_step(f"cd {folder} && sh ./{spec.script} && {APT_CLEAN}"))
+            script = f"OW_PKG_MANAGER={plan.manager} sh ./{spec.script}"
+            lines.append(_step(f"cd {folder} && {script} && ow-pkg clean"))
         if spec.launchers:
             lines.append(
                 "RUN install -m 644 "
@@ -122,9 +124,7 @@ def user_dockerfile(plan: UserPlan) -> str:
             )
     if plan.packages:
         lines.append("# the user's own packages")
-        lines.append(
-            _step(f"apt-get update && {APT_INSTALL} {shlex.join(plan.packages)} && {APT_CLEAN}")
-        )
+        lines.append(_step(f"ow-pkg install {shlex.join(plan.packages)}"))
     lines.append(f'LABEL ow.managed="true" ow.role="user-image" ow.user="{plan.name}"')
     return "\n".join(lines) + "\n"
 
@@ -351,7 +351,8 @@ class Builder:
             docker_id = self._client.images.get(image["image_ref"]).id
             writer.write("\nReading the package list of the new image…\n")
             count = self._index_packages(image_id, image["image_ref"])
-            writer.write(f"{count} packages available.\n")
+            manager = self._db.scalar("SELECT pkg_manager FROM images WHERE id = ?", [image_id])
+            writer.write(f"{count} packages available ({manager}).\n")
             self._db.execute(
                 "UPDATE images SET status = 'ready', built_at = now(), docker_id = ? WHERE id = ?",
                 [docker_id, image_id],
@@ -374,7 +375,9 @@ class Builder:
                 self.on_base_ready(image_id)
 
     def _index_packages(self, image_id: int, image_ref: str) -> int:
-        """Fill pkg_index from ``apt-cache pkgnames`` (the image ships without apt lists).
+        """Store the image's package manager and fill pkg_index from ``ow-pkg index``.
+
+        The image ships without package lists, so they are fetched in a throwaway container.
 
         Args:
             image_id: Id of the image row.
@@ -388,7 +391,7 @@ class Builder:
         """
         out = self._client.containers.run(
             image_ref,
-            ["-c", "apt-get update -qq >/dev/null 2>&1 && apt-cache pkgnames"],
+            ["-c", "ow-pkg manager && ow-pkg index"],
             entrypoint="/bin/sh",
             user="root",
             remove=True,
@@ -396,10 +399,12 @@ class Builder:
             stderr=False,
             labels={"ow.managed": "true", "ow.role": "helper"},
         )
-        names = sorted({n for n in out.decode().split() if n})
+        manager, *lines = out.decode().split()
+        names = sorted({n for n in lines if n})
         if not names:
             raise RuntimeError("the package list is empty (is the network reachable?)")
         with self._db.transaction():
+            self._db.execute("UPDATE images SET pkg_manager = ? WHERE id = ?", [manager, image_id])
             self._db.execute("DELETE FROM pkg_index WHERE image_id = ?", [image_id])
             self._db.execute(
                 "INSERT INTO pkg_index SELECT ?, unnest(?::VARCHAR[])", [image_id, names]
@@ -444,6 +449,7 @@ class Builder:
                 (ctx / "Dockerfile").write_text(user_dockerfile(plan))
                 (ctx / "ow-step").write_text(STEP_SCRIPT)
                 (ctx / "ow-step").chmod(0o755)  # COPY keeps the mode (--chmod needs BuildKit)
+                shutil.copy2(self._context / "root" / OW_PKG.lstrip("/"), ctx / "ow-pkg")
                 self._stream(
                     writer,
                     self._client.api.build(
