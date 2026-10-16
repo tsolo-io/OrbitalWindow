@@ -45,3 +45,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0029](0029-coding-benchmarks.md) | Coding benchmarks with EvalPlus, run in isolated containers | accepted |
 | [0030](0030-browser-terminal.md) | A browser terminal that keeps running: xterm.js, docker exec and tmux | accepted |
 | [0031](0031-longer-default-context.md) | Longer contexts: plan for 32K, start with the longest that fits up to 64K | accepted |
+| [0032](0032-user-environment-variables.md) | Users' own environment variables, per user and applied at start | accepted |

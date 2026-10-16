@@ -118,6 +118,7 @@ def desktop_card(auth: PageAuth) -> None:
             stop_terminal_btn = ui.button("Stop terminal", icon="stop").props(
                 "no-caps outline color=negative"
             )
+        ui.link("Environment variables", "/environment").classes("text-sm")
         terminal_note = ui.label(
             "Your terminal is running. It keeps running when you close its page."
         ).classes("text-caption text-grey-8")

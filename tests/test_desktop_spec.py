@@ -49,6 +49,7 @@ def test_spec_snapshot(settings):
         "START_DOCKER": "false",
         "NVIDIA_DRIVER_CAPABILITIES": "all",
         "OW_GROUPS": "",
+        "OW_USER_ENV": "",
     }
     assert k["volumes"] == {
         f"{root}/users/user1": {"bind": "/config", "mode": "rw"},

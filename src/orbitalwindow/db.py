@@ -209,6 +209,16 @@ MIGRATIONS: list[str] = [
         finished_at TIMESTAMP
     );
     """,
+    # 9: users' own environment variables (#41)
+    """
+    CREATE TABLE user_env (
+        user_id INTEGER NOT NULL,
+        name VARCHAR NOT NULL,
+        value VARCHAR NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+        PRIMARY KEY (user_id, name)
+    );
+    """,
 ]
 
 

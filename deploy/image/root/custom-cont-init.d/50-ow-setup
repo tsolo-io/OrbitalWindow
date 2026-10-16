@@ -33,3 +33,16 @@ for icon in "$desktop"/ow-*.desktop; do
     [ -e "$icon" ] || continue
     [ -e "/usr/share/applications/$(basename "$icon")" ] || rm -f -- "$icon"
 done
+
+# User environment variables (OrbitalWindow's environment page, ADR 0032): the container has
+# them, but sshd doesn't pass its environment on, so login shells read them from a profile script.
+profile=/etc/profile.d/ow-user-env.sh
+: > "$profile"
+for name in ${OW_USER_ENV:-}; do
+    case "$name" in [A-Za-z_]*) ;; *) continue ;; esac
+    case "$name" in *[!A-Za-z0-9_]*) continue ;; esac
+    [ -n "${!name+set}" ] || continue
+    printf 'export %s=%q\n' "$name" "${!name}" >> "$profile"
+done
+chmod 644 "$profile"
+# END user environment variables

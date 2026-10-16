@@ -244,12 +244,21 @@ env: {}                     # extra container environment
   runs.
 - tmux is in the desktop base image. Older desktops get a plain shell that ends with the page.
 
+### Environment variables (ticket #41, ADR 0032)
+- Page `/environment` (linked from the desktop card): the user's own variables (`user_env`), set
+  in every desktop they start, whichever desktop it is. They win over add-on `env`. Names
+  OrbitalWindow or the start-up relies on are refused.
+- They apply at the next start: the `ow.env` label hash tells the page when a restart is needed. The
+  init hook writes them to `/etc/profile.d/ow-user-env.sh` for SSH logins. The audit log records
+  names only.
+
 ### UI pages (NiceGUI)
 - **`/login`**
 - **`/` (user dashboard):**
   - Status (stopped, building, starting, running) with Start and Stop buttons, plus a desktop picker showing enabled images.
   - **Open desktop** (opens `/desktop/<user>/` in a new tab).
   - **Open terminal** (opens `/terminal` in a new tab); while a terminal runs, a note and **Stop terminal**.
+  - **Environment variables** link (opens `/environment`).
   - Own CPU/RAM and GPU totals.
   - **Software** card: add-on switches (open ones, plus restricted ones the admin granted; others are greyed out with "ask admin").
   - Package editor: list, add with autocomplete, remove, **Apply**, which builds and shows the log.
