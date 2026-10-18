@@ -63,3 +63,25 @@ def test_pkg_index_has_no_secondary_index():
     """The package index table has no secondary index."""
     db = Database(":memory:")
     assert db.scalar("SELECT count(*) FROM duckdb_indexes() WHERE table_name = 'pkg_index'") == 0
+
+
+@pytest.mark.parametrize("start", range(1, len(MIGRATIONS)))
+def test_migrations_apply_to_a_database_with_rows(tmp_path, monkeypatch, start):
+    """Each migration also applies to a database that already has an image row."""
+    path = tmp_path / "ow.duckdb"
+    monkeypatch.setattr("orbitalwindow.db.MIGRATIONS", MIGRATIONS[:start])
+    db = Database(path)
+    columns = db._con.execute(
+        "SELECT column_name FROM information_schema.columns"
+        " WHERE table_name = 'images' AND is_nullable = 'NO' AND column_default IS NULL"
+    ).fetchall()
+    names = [row[0] for row in columns]
+    if names:
+        db._con.execute(
+            f"INSERT INTO images ({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
+            ["x"] * len(names),
+        )
+    db.close()
+    monkeypatch.setattr("orbitalwindow.db.MIGRATIONS", MIGRATIONS)
+    db = Database(path)
+    assert db.scalar("SELECT max(version) FROM schema_version") == len(MIGRATIONS)
