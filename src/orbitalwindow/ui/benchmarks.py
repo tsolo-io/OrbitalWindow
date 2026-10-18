@@ -67,11 +67,12 @@ def settings_text(row: dict[str, Any]) -> str:
         row: The benchmark.
 
     Returns:
-        For example ``GPU 0 · 8,192 tokens · 35 %``.
+        For example ``GPU 0 · 8,192 tokens · 35 %``; llama.cpp sessions have no GPU share.
     """
     if row["gpu_index"] is None:
         return "–"
-    return f"GPU {row['gpu_index']} · {row['context']:,} tokens · {row['gpu_share']:.0%}"
+    share = f" · {row['gpu_share']:.0%}" if row["gpu_share"] else ""
+    return f"GPU {row['gpu_index']} · {row['context']:,} tokens{share}"
 
 
 @ui.page("/benchmarks")

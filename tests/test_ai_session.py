@@ -445,3 +445,12 @@ def test_start_with_llamacpp(service, model_on_disk, gguf_on_disk):
     assert service._model_tools("Qwen/Qwen3-8B-GGUF")
     row = service.db.one("SELECT * FROM ai_sessions ORDER BY id DESC LIMIT 1")
     assert row["gpu_share"] == 0
+
+
+def test_benchmark_settings_without_a_gpu_share():
+    """llama.cpp benchmarks show no GPU share (it is a vLLM setting)."""
+    from orbitalwindow.ui.benchmarks import settings_text
+
+    row = {"gpu_index": 0, "context": 40960, "gpu_share": 0.0}
+    assert settings_text(row) == "GPU 0 · 40,960 tokens"
+    assert settings_text(row | {"gpu_share": 0.35}) == "GPU 0 · 40,960 tokens · 35%"
