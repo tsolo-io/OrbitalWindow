@@ -146,7 +146,7 @@ env: {}                     # extra container environment
 
 ### Metrics
 - **cAdvisor** (pin the v0.60.x release; check the registry when implementing). OrbitalWindow reads `/api/v2.0/stats` for containers labelled `ow.managed` to get CPU and RAM.
-- **GPU** totals come from NVML (`nvidia-ml-py`). The OrbitalWindow container gets only the GPU `utility` capability. On AMD and Intel, these numbers are hidden.
+- **GPU** totals come from NVML (`nvidia-ml-py`). The OrbitalWindow container gets only the GPU `utility` capability. On Intel they come from `ow-gpu-stats`, a small exporter with `CAP_PERFMON` (ADR 0036). On AMD, these numbers are hidden.
 - Admins get a link to the cAdvisor UI at `/admin/cadvisor/`, behind forwardAuth that checks for admin.
 
 ### Web file manager (FileBrowser Quantum, one container per user)

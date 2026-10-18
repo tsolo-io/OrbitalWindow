@@ -2,10 +2,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resource metrics: per-container CPU/RAM from cAdvisor (cgroups), GPU totals from NVML.
+"""Resource metrics: per-container CPU/RAM from cAdvisor (cgroups), GPU totals from NVML or from
+the Intel GPU exporter (``deploy/scripts/intel-gpu-stats.py``).
 
 Both are read on demand and cached for a few seconds, so many open dashboards cost one request.
-Either source may be missing (no cAdvisor yet, no NVIDIA GPU); callers then get empty results.
+Either source may be missing (no cAdvisor yet, no GPU numbers); callers then get empty results.
 """
 
 import logging
@@ -109,9 +110,20 @@ class ContainerMetrics:
 
 
 class GpuMetrics:
-    """Whole-GPU utilisation and memory via NVML. Empty when there is no NVIDIA driver."""
+    """Whole-GPU utilisation and memory: from the GPU exporter if there is one, else from NVML.
 
-    def __init__(self) -> None:
+    Empty when neither is available (AMD, no GPU, or the exporter is down).
+    """
+
+    def __init__(self, url: str = "", client: httpx2.Client | None = None) -> None:
+        """Create the reader.
+
+        Args:
+            url: The Intel GPU exporter's URL; empty to use NVML (NVIDIA).
+            client: HTTP client for the exporter (tests pass one with a mock transport).
+        """
+        self._url = url
+        self._client = client or (httpx2.Client(timeout=2.0) if url else None)
         self._lock = threading.Lock()
         self._nvml: Any = None
         self._ready = False
@@ -171,7 +183,12 @@ class GpuMetrics:
         """
         with self._lock:
             now = time.monotonic()
-            if now - self._at < CACHE_SECONDS or not self._init():
+            if now - self._at < CACHE_SECONDS:
+                return self._cache
+            if self._url:
+                self._cache, self._at = self._exporter_stats(), now
+                return self._cache
+            if not self._init():
                 return self._cache
             nv = self._nvml
             result = []
@@ -195,6 +212,21 @@ class GpuMetrics:
                 log.warning("NVML query failed: %s", exc)
             self._cache, self._at = result, now
             return result
+
+    def _exporter_stats(self) -> list[GpuStat]:
+        """Read the GPU exporter.
+
+        Returns:
+            One entry per GPU; empty when the exporter can't be reached or answers badly.
+        """
+        assert self._client is not None
+        try:
+            response = self._client.get(self._url)
+            response.raise_for_status()
+            return [GpuStat(**gpu) for gpu in response.json()]
+        except (httpx2.HTTPError, ValueError, TypeError) as exc:
+            log.warning("GPU exporter %s: %s", self._url, exc)
+            return []
 
 
 def fmt_bytes(n: int | None) -> str:

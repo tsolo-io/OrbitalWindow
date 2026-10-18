@@ -160,7 +160,7 @@ def admin_system(request: Request) -> RedirectResponse | None:
             gpu_box.clear()
             with gpu_box:
                 if not gpus:
-                    ui.label("No GPU statistics (no NVIDIA GPU, or NVML is not available).")\
+                    ui.label("No GPU statistics (only NVIDIA and Intel GPUs have them).")\
                         .classes("text-grey-7")  # fmt: skip
                 for gpu in gpus:
                     gpu_line(gpu)

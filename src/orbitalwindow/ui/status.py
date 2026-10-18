@@ -4,15 +4,23 @@
 
 """Server status for every user: load, CPU, memory, disks, disk and network traffic, GPUs.
 
-The figures come from node-exporter on the host and NVML. They are read only while this page is
-open, by the page itself; nothing is cached or polled in the background.
+The figures come from node-exporter on the host and the GPU numbers (NVML or the Intel exporter).
+They are read only while this page is open, by the page itself; nothing is cached or polled in the
+background.
 """
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
-from ..hoststats import ChipTemp, NodeExporterError, Sample, rates, temperature_level
+from ..hoststats import (
+    GPU_CHIP_LABELS,
+    ChipTemp,
+    NodeExporterError,
+    Sample,
+    rates,
+    temperature_level,
+)
 from .common import authenticate, frame, guarded, service
 
 REFRESH_SECONDS = 5.0
@@ -102,7 +110,7 @@ def status_page(request: Request) -> RedirectResponse | None:
             Args:
                 current: The latest sample, or None if node-exporter could not be read.
                 error: Why it could not be read.
-                gpus: GPU statistics from NVML (empty without NVIDIA GPUs).
+                gpus: GPU statistics (empty without NVIDIA or Intel GPUs).
             """
             body.clear()
             with body:
@@ -186,7 +194,7 @@ def status_page(request: Request) -> RedirectResponse | None:
             """Add the GPU card.
 
             Args:
-                gpus: GPU statistics from NVML.
+                gpus: GPU statistics.
             """
             with ui.card().classes("w-full gap-3"):
                 ui.label("GPUs").classes("text-h6")
@@ -203,8 +211,10 @@ def status_page(request: Request) -> RedirectResponse | None:
 
             Args:
                 chips: hwmon chips from node-exporter.
-                gpus: GPU statistics from NVML.
+                gpus: GPU statistics. Their temperatures replace the hwmon GPU chips.
             """
+            if any(gpu.temperature is not None for gpu in gpus):
+                chips = tuple(chip for chip in chips if not chip.label.startswith(GPU_CHIP_LABELS))
             rows = [
                 (
                     chip.label,
@@ -280,7 +290,7 @@ def status_page(request: Request) -> RedirectResponse | None:
                 ).classes("w-full")
 
         async def refresh() -> None:
-            """Read node-exporter and NVML once and redraw."""
+            """Read node-exporter and the GPU numbers once and redraw."""
             error = ""
             try:
                 current = await run.io_bound(svc.node_exporter.read)

@@ -73,6 +73,7 @@ nav = [
     { "0033 Terminal-only containers" = "adr/0033-terminal-only-containers.md" },
     { "0034 Other distributions" = "adr/0034-other-distributions.md" },
     { "0035 Intel GPUs" = "adr/0035-intel-gpus.md" },
+    { "0036 Intel GPU numbers" = "adr/0036-intel-gpu-numbers.md" },
   ] },
 ]
 

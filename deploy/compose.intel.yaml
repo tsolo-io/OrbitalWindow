@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Added by `make start` when OW_GPU_VENDOR=intel: GPU load, memory and temperature for the admin
+# pages and the AI page. The i915 PMU and the GPU's free memory need CAP_PERFMON, which the
+# non-root service can't have, so a small exporter reads them as root with only that capability
+# and answers on an internal network (see ADR 0036).
+services:
+  orbitalwindow:
+    environment:
+      OW_GPU_STATS_URL: http://gpu-stats:9400/
+    networks: [gpu]
+
+  gpu-stats:
+    image: python:3.14-slim
+    container_name: ow-gpu-stats
+    restart: unless-stopped
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+    command: ["python", "-I", "/opt/intel-gpu-stats.py"]
+    volumes:
+      - ./scripts/intel-gpu-stats.py:/opt/intel-gpu-stats.py:ro
+    devices: ["/dev/dri:/dev/dri"]
+    networks: [gpu]
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [PERFMON]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9400/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+
+networks:
+  gpu:
+    name: ow-gpu
+    internal: true

@@ -14,9 +14,9 @@
 #   make backup DEST=…     back up homes, group folders, state and Samba passwords
 #   make export-cert       save the self-signed certificate as orbitalwindow.crt for users' PCs
 #
-# The compose files follow .env: compose.nvidia.yaml when OW_GPU_VENDOR=nvidia, compose.tls.yaml
-# when OW_ACME_DNS_PROVIDER is set. DEV=1 (used by the repository's Makefile) adds
-# compose.dev.yaml, which builds the images from the checkout.
+# The compose files follow .env: compose.nvidia.yaml when OW_GPU_VENDOR=nvidia, compose.intel.yaml
+# when it is intel, compose.tls.yaml when OW_ACME_DNS_PROVIDER is set. DEV=1 (used by the
+# repository's Makefile) adds compose.dev.yaml, which builds the images from the checkout.
 
 .DEFAULT_GOAL := help
 ENV_VALUE = $(shell sed -n 's/^$(1)=//p' .env 2>/dev/null | tail -1)
@@ -25,6 +25,7 @@ ACME_PROVIDER := $(call ENV_VALUE,OW_ACME_DNS_PROVIDER)
 OW_ROOT := $(or $(call ENV_VALUE,OW_ROOT),/srv/orbitalwindow)
 COMPOSE_FILES := -f compose.yaml $(if $(DEV),-f compose.dev.yaml) \
   $(if $(filter nvidia,$(GPU_VENDOR)),-f compose.nvidia.yaml) \
+  $(if $(filter intel,$(GPU_VENDOR)),-f compose.intel.yaml) \
   $(if $(ACME_PROVIDER),-f compose.tls.yaml)
 COMPOSE ?= docker compose $(COMPOSE_FILES) --env-file .env
 SERVICE ?= orbitalwindow

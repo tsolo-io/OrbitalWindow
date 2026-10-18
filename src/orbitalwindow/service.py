@@ -58,7 +58,7 @@ from .downloads import Downloader
 from .files import FileManagers, files_container_name
 from .hostops import HostOps
 from .hoststats import NodeExporter
-from .metrics import ContainerMetrics, GpuMetrics, Usage
+from .metrics import ContainerMetrics, GpuMetrics, GpuStat, Usage
 from .models import HubClient, LocalModel, ModelLibrary, RepoInfo, Space
 from .reconcile import reconcile
 from .samba import Samba, SambaError
@@ -122,7 +122,7 @@ class Service:
         )
         self.builder.on_base_ready = self._rebuild_users_of
         self.metrics = ContainerMetrics(settings.cadvisor_url)
-        self.gpus = GpuMetrics()
+        self.gpus = GpuMetrics(settings.gpu_stats_url)
         self.node_exporter = NodeExporter(settings.node_exporter_url)
         self.models = ModelLibrary(settings.models_dir)
         self.hub = HubClient()
@@ -743,7 +743,7 @@ class Service:
         """Return the GPU a model would run on: the one with the most memory.
 
         Returns:
-            Its name, total and free memory, or None without NVML (no NVIDIA GPU).
+            Its name, total and free memory, or None without GPU numbers (AMD or no GPU).
         """
         stats = self.gpus.stats()
         if not stats:
@@ -788,7 +788,9 @@ class Service:
         """
         gpu = self.model_gpu()
         if gpu is None:
-            raise ValidationError("Suggestions need the GPU's memory, which needs an NVIDIA GPU.")
+            raise ValidationError(
+                "Suggestions need the GPU's memory, which needs an NVIDIA or Intel GPU."
+            )
         try:
             return self.llmfit.suggest(gpu.total)
         except SuggestionError as exc:
@@ -924,6 +926,22 @@ class Service:
             raise ValidationError(f"{repo} is not downloaded.")
         return model
 
+    def _ai_gpus(self) -> list[GpuStat]:
+        """Return the GPUs an AI session can use.
+
+        Returns:
+            The GPUs, at least one.
+
+        Raises:
+            ValidationError: On a host that is not NVIDIA, or without GPU numbers.
+        """
+        if self.desktops.gpu_vendor() is not GpuVendor.NVIDIA:
+            raise ValidationError("The AI session needs an NVIDIA GPU.")
+        gpus = self.gpus.stats()
+        if not gpus:
+            raise ValidationError("The AI session needs an NVIDIA GPU (NVML is not available).")
+        return gpus
+
     def start_ai_session(
         self, actor: str, repo: str, gpu_index: Any, context: Any, gpu_share: Any
     ) -> int:
@@ -944,9 +962,7 @@ class Service:
                 or when a session is already running.
         """
         model = self._local_model(repo)
-        gpus = self.gpus.stats()
-        if not gpus:
-            raise ValidationError("The AI session needs an NVIDIA GPU (NVML is not available).")
+        gpus = self._ai_gpus()
         index = _int_in(gpu_index, 0, max(g.index for g in gpus), "GPU")
         if index not in {g.index for g in gpus}:
             raise ValidationError("Unknown GPU.")
@@ -1045,9 +1061,7 @@ class Service:
         Raises:
             ValidationError: If the session can't be started.
         """
-        gpus = self.gpus.stats()
-        if not gpus:
-            raise ValidationError("The AI session needs an NVIDIA GPU (NVML is not available).")
+        gpus = self._ai_gpus()
         defaults = self.session_defaults(repo, BENCH_CONTEXT)
         index = max(gpus, key=lambda gpu: gpu.mem_total).index
         self.start_ai_session("benchmark", repo, index, defaults["context"], defaults["gpu_share"])

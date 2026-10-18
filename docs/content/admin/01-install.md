@@ -83,8 +83,9 @@ All `make` commands below run in this folder (`make help` lists them). Edit `.en
 make start            # pulls the published images and starts; `make status`, `make logs`
 ```
 
-`make` picks the compose files from `.env`: `compose.nvidia.yaml` when `OW_GPU_VENDOR=nvidia`
-(without it the admin pages show no GPU numbers) and `compose.tls.yaml` when
+`make` picks the compose files from `.env`: `compose.nvidia.yaml` when `OW_GPU_VENDOR=nvidia` or
+`compose.intel.yaml` when it is `intel` (without them the admin pages show no GPU numbers) and
+`compose.tls.yaml` when
 `OW_ACME_DNS_PROVIDER` is set. Plain `docker compose up -d` in this folder works too: Compose then
 takes the files from `COMPOSE_FILE` in `.env`, which must list the same files. On a development
 checkout, `make start` in the repository root builds both images from source instead
