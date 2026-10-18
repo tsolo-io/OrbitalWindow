@@ -14,6 +14,7 @@ from .common import authenticate, frame, guarded, service
 GPU_OPTIONS = {
     "nvidia": "NVIDIA",
     "amd": "AMD",
+    "intel": "Intel",
     "none": "None (no GPU, for testing only)",
 }
 

@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0011 GPU vendor setting and "unlimited" CPU/RAM
 
-- Status: accepted
+- Status: accepted (0035 adds `intel`)
 - Date: 2026-10-09
 
 ## Context

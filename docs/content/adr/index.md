@@ -24,7 +24,7 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0008](0008-auth-forms-are-plain-posts.md) | Login and password forms are plain HTTP POSTs, not NiceGUI events | accepted |
 | [0009](0009-duckdb-single-writer.md) | DuckDB with one writer process and one lock; UTC timestamps | accepted |
 | [0010](0010-samba-sync.md) | Samba in a container, kept in sync by exec helpers; no stored plaintext passwords | accepted |
-| [0011](0011-gpu-vendor-and-unlimited-limits.md) | GPU vendor setting (`nvidia`/`amd`/`none`) and "unlimited" CPU/RAM | accepted |
+| [0011](0011-gpu-vendor-and-unlimited-limits.md) | GPU vendor setting (`nvidia`/`amd`/`none`; `intel` in 0035) and "unlimited" CPU/RAM | accepted |
 | [0012](0012-software-addons-and-per-user-images.md) | Optional software as add-on folders, installed by per-user image builds | accepted |
 | [0013](0013-files-sharing-and-remote-access.md) | Files, sharing and remote access services | accepted |
 | [0014](0014-admins-never-see-user-desktops.md) | Admins never see users' desktops or files | accepted |
@@ -48,3 +48,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0032](0032-user-environment-variables.md) | Users' own environment variables, per user and applied at start | accepted |
 | [0033](0033-terminal-only-containers.md) | Terminal-only containers: LinuxServer base images in the desktop slot | accepted |
 | [0034](0034-other-distributions.md) | Other distributions: ow-pkg over apt, apk, dnf and pacman | accepted |
+| [0035](0035-intel-gpus.md) | Intel GPUs: `gpu_vendor=intel` passes only `/dev/dri` | accepted |

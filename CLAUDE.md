@@ -60,7 +60,8 @@ and MATLAB in a desktop (needs a licence). Martin's testers will log new tickets
   need a one-line docstring.
 
 ## Environment facts
-- **Production:** single server, Ubuntu 24.04, mostly NVIDIA GPUs (some AMD), 2–3 users, LAN only.
+- **Production:** single server, Ubuntu 24.04, mostly NVIDIA GPUs (some AMD or Intel), 2–3 users, LAN only.
 - **Test server:** Ubuntu 26.04, RTX 5080 (NVIDIA open kernel module), Docker 29 with nvidia-container-toolkit.
   Disk space is limited, so remove images you don't need.
+- **Wired:** Ubuntu 24.04, Intel Arc A770 (`i915`), `OW_GPU_VENDOR=intel`. Mes Antilles runs here.
 - **Users:** Windows research students, not comfortable with a terminal. Keep the UI and help text plain and task-focused.

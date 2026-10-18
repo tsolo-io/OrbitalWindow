@@ -18,7 +18,7 @@ Research students (Windows PCs, not comfortable with a terminal) need GPU-accele
 - Samba stays in sync whenever users or passwords change.
 - cAdvisor is added for container metrics.
 
-Stack: Python, FastAPI + NiceGUI, DuckDB. It needs Docker access. Typical deployment: one server (Ubuntu 24.04, NVIDIA GPU(s), some AMD), 2–3 users, LAN only.
+Stack: Python, FastAPI + NiceGUI, DuckDB. It needs Docker access. Typical deployment: one server (Ubuntu 24.04, NVIDIA GPU(s), some AMD or Intel), 2–3 users, LAN only.
 
 Further services:
 - a per-user web file manager
@@ -75,7 +75,7 @@ Per user: network ow-net-<user> joined by ow-<user>, ow-files-<user>, and (attac
 
 ### Desktop container spec (built by OrbitalWindow)
 - **Name, image, network:** name `ow-<user>`; image `ow-user-<user>:latest`, or the chosen `ow-desktop:<tag>` if the user has no extra packages; hostname `ow-<user>`; endpoint on `ow-net-<user>` with the user's fixed **MAC address** (MATLAB host ID).
-- **GPU:** `/dev/dri` passed in; `device_requests` for all NVIDIA GPUs (or `/dev/kfd` when the setting `gpu_vendor=amd`).
+- **GPU:** `/dev/dri` passed in; `device_requests` for all NVIDIA GPUs (or `/dev/kfd` when the setting `gpu_vendor=amd`; only `/dev/dri` when it is `intel`).
 - **Limits:** `cap_drop NET_RAW`, `shm_size 2g`, `nano_cpus` and `mem_limit` from the user's row.
 - **Environment:** PUID/PGID = `uid_gid`, `CUSTOM_USER`, `PASSWORD=<internal secret>`, `SUBFOLDER=/desktop/<user>/`, `PIXELFLUX_WAYLAND=false`, `START_DOCKER=false`, TZ, TITLE.
 - **Mounts:** `$OW_ROOT/users/<user>:/config`, plus `$OW_ROOT/groups/<g>:/groups/<g>` for each group the user belongs to, `$OW_ROOT/shared/scratch:/scratch` (rw), `$OW_ROOT/shared/data:/shared` (ro), and the mounts of selected add-ons (e.g. matlab, conda).
@@ -146,7 +146,7 @@ env: {}                     # extra container environment
 
 ### Metrics
 - **cAdvisor** (pin the v0.60.x release; check the registry when implementing). OrbitalWindow reads `/api/v2.0/stats` for containers labelled `ow.managed` to get CPU and RAM.
-- **GPU** totals come from NVML (`nvidia-ml-py`). The OrbitalWindow container gets only the GPU `utility` capability. On AMD, these numbers are hidden.
+- **GPU** totals come from NVML (`nvidia-ml-py`). The OrbitalWindow container gets only the GPU `utility` capability. On AMD and Intel, these numbers are hidden.
 - Admins get a link to the cAdvisor UI at `/admin/cadvisor/`, behind forwardAuth that checks for admin.
 
 ### Web file manager (FileBrowser Quantum, one container per user)

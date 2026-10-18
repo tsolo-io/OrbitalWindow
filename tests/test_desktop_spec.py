@@ -90,6 +90,14 @@ def test_amd(settings):
     assert k["device_requests"] == []
 
 
+def test_intel(settings):
+    """An Intel GPU passes only /dev/dri, without device requests or NVIDIA settings."""
+    k = build_spec(USER, "img", settings, GpuVendor.INTEL, "x").kwargs
+    assert k["devices"] == ["/dev/dri:/dev/dri:rwm"]
+    assert k["device_requests"] == []
+    assert "NVIDIA_DRIVER_CAPABILITIES" not in k["environment"]
+
+
 def test_state_mapping():
     """Docker container states map to the right desktop states."""
     from orbitalwindow.desktops import DesktopState, _state_of
