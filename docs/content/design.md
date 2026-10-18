@@ -205,8 +205,8 @@ env: {}                     # extra container environment
 - **Role:** `users.is_ai_manager` (admins count too); page `/ai`.
 - **Library:** `$OW_ROOT/shared/models/<org>/<name>`, one plain folder per model
   (`hf download --local-dir`), owned by the service UID.
-- **Downloads:** one at a time in `ow-model-dl` (image `ow-hf:1`), pinned to the inspected commit,
-  weights in safetensors only. Progress, cancel and resume are on the AI page.
+- **Downloads:** one at a time in `ow-model-dl` (image `ow-hf:1`), pinned to the inspected commit:
+  the safetensors weights, or one chosen GGUF file (its parts) for llama.cpp (#54). Progress, cancel and resume are on the AI page.
 - **Token:** `$OW_ROOT/state/hf_token` for gated models.
 - **Fit (#16, ADR 0026):** estimate from weights, KV cache and overhead; llmfit image for
   suggestions.
@@ -215,6 +215,10 @@ env: {}                     # extra container environment
   `ai_sessions` history. vLLM gets a tool-call parser and, for Qwen3 thinking models, a reasoning
   parser chosen from `config.json` and the chat template (#30, #31); `--max-num-seqs 16` lets
   hybrid models such as Qwen3.5 start. The fit counts only full-attention layers for the KV cache.
+- **Engine (#54, ADR 0039):** the setting `ai_engine` is `vllm` or `llamacpp`. llama.cpp runs a GGUF
+  file in `ghcr.io/ggml-org/llama.cpp:server-<cuda|intel|rocm>-<build>` with the same container,
+  network, port and key, so the chat, the API and benchmarks don't depend on it. Intel hosts use
+  llama.cpp: vLLM hangs the Arc A770 (ADR 0038).
 - **Context (#38, ADR 0031):** the fit check plans for 32,768 tokens, the least coding tools such
   as OpenCode need. A session starts with the longest context that fits, up to 65,536 tokens and
   the model's maximum (benchmarks use 8,192). The dashboard's AI card shows every user the running

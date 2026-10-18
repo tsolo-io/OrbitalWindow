@@ -25,7 +25,9 @@ Set `OW_GPU_VENDOR=amd` in `.env` (or **Settings → GPU**). Then:
 - **Video encoding** of the desktop stream uses VA-API instead of NVENC.
 - **GPU numbers** on the dashboard and System page are hidden (they come from NVIDIA's NVML).
   The **Server status** page shows the GPU temperature (node-exporter) as *AMD GPU*.
-- The **AI session** (vLLM) and model suggestions need NVIDIA.
+- The **AI session** uses llama.cpp (**Settings → AI → AI engine**) with its ROCm image
+  (`server-rocm`) and GGUF models. It is untested on AMD. GPU numbers, and with them the fit check
+  and model suggestions, are not available on AMD.
 - **MATLAB** GPU computing (`gpuArray`) needs NVIDIA; MATLAB itself runs fine.
 - OrbitalWindow starts every desktop with `PIXELFLUX_WAYLAND=false` (needed on NVIDIA). On AMD the
   Wayland mode may also work; it is untested.

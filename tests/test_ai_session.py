@@ -99,6 +99,31 @@ def test_spec_arc_a_series_flags():
     assert "--dtype" not in session_spec(REQUEST, settings, "k", 7)["command"]
 
 
+def test_llamacpp_spec_per_vendor():
+    """llama.cpp runs the vendor's image with the GGUF file, the key in the environment."""
+    from dataclasses import replace
+
+    from orbitalwindow.config import Settings
+
+    settings = Settings(root="/srv/ow", hostname="h")
+    base = replace(REQUEST, engine="llamacpp", model_file="Qwen3-8B-Q4_K_M.gguf", gpu_index=1)
+    intel = session_spec(replace(base, gpu_vendor="intel"), settings, "k", 7)
+    assert intel["image"] == "ghcr.io/ggml-org/llama.cpp:server-intel-b11382"
+    assert intel["command"][:2] == ["--model", "/models/Qwen/Qwen3-0.6B/Qwen3-8B-Q4_K_M.gguf"]
+    assert intel["command"][intel["command"].index("--ctx-size") + 1] == "8192"
+    assert intel["environment"]["LLAMA_API_KEY"] == "k" and "k" not in intel["command"]
+    assert intel["environment"]["ONEAPI_DEVICE_SELECTOR"] == "level_zero:1"
+    assert intel["devices"] == ["/dev/dri:/dev/dri:rwm"] and intel["device_requests"] == []
+    assert intel["name"] == "ow-ai-model" and intel["network"] == "ow-ai"
+    nvidia = session_spec(base, settings, "k", 7)
+    assert nvidia["image"].endswith(":server-cuda-b11382")
+    assert nvidia["device_requests"][0]["DeviceIDs"] == ["1"] and nvidia["devices"] == []
+    amd = session_spec(replace(base, gpu_vendor="amd"), settings, "k", 7)
+    assert amd["image"].endswith(":server-rocm-b11382")
+    assert "/dev/kfd:/dev/kfd:rwm" in amd["devices"]
+    assert amd["environment"]["HIP_VISIBLE_DEVICES"] == "1"
+
+
 def test_spec_public_session_routes_v1():
     """A public session is routed under /v1 on the TLS entrypoint."""
     from orbitalwindow.config import Settings
@@ -380,3 +405,43 @@ def test_reconcile_reconnects_traefik_for_public_session(service, model_on_disk)
     service.ai.ensure_connected()
     assert network.connected == [service.settings.traefik_container]
     assert aisession.CONTAINER == "ow-ai-model"
+
+
+@pytest.fixture
+def gguf_on_disk(service):
+    """A downloaded Qwen3-8B GGUF model (only its metadata) and one 16 GB GPU."""
+    from test_gguf import QWEN3_8B, file_bytes
+
+    folder = service.settings.models_dir / "Qwen" / "Qwen3-8B-GGUF"
+    folder.mkdir(parents=True)
+    (folder / "Qwen3-8B-Q4_K_M.gguf").write_bytes(file_bytes(QWEN3_8B) + bytes(1000))
+    return folder
+
+
+def test_ai_engine_setting(service):
+    """The engine is vLLM until changed; unknown engines are refused."""
+    assert service.ai_engine() == "vllm"
+    service.update_settings("boss", {"ai_engine": "llamacpp"})
+    assert service.ai_engine() == "llamacpp"
+    with pytest.raises(ValidationError, match="Unknown AI engine"):
+        service.update_settings("boss", {"ai_engine": "ollama"})
+
+
+def test_start_with_llamacpp(service, model_on_disk, gguf_on_disk):
+    """Each engine runs only its own model format; llama.cpp also runs on AMD."""
+    with pytest.raises(ValidationError, match="Choose llama.cpp"):
+        service.start_ai_session("boss", "Qwen/Qwen3-8B-GGUF", 0, 8192, 0.5)
+    service.update_settings("boss", {"ai_engine": "llamacpp"})
+    with pytest.raises(ValidationError, match="no GGUF file"):
+        service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192, 0.5)
+    service.db.set_setting("gpu_vendor", "amd")
+    defaults = service.session_defaults("Qwen/Qwen3-8B-GGUF")
+    assert defaults["context"] == 40960  # the model's maximum: the GGUF metadata's
+    assert defaults["estimate"].shape.layers == 36
+    service.start_ai_session("boss", "Qwen/Qwen3-8B-GGUF", 0, 32768, "ignored")
+    image, kwargs = service.ai._client.runs[0]
+    assert image.endswith(":server-rocm-b11382")
+    assert kwargs["command"][1] == "/models/Qwen/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf"
+    assert service._model_tools("Qwen/Qwen3-8B-GGUF")
+    row = service.db.one("SELECT * FROM ai_sessions ORDER BY id DESC LIMIT 1")
+    assert row["gpu_share"] == 0

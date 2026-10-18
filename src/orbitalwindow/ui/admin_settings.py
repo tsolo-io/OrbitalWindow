@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Admin: settings. Defaults for new users, scratch retention, host name, GPU vendor."""
+"""Admin: settings. Defaults for new users, scratch retention, host name, GPU vendor, AI engine."""
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -17,6 +17,7 @@ GPU_OPTIONS = {
     "intel": "Intel",
     "none": "None (no GPU, for testing only)",
 }
+ENGINE_OPTIONS = {"vllm": "vLLM", "llamacpp": "llama.cpp"}
 
 
 @ui.page("/admin/settings")
@@ -52,9 +53,28 @@ def admin_settings(request: Request) -> RedirectResponse | None:
                 "Shown on the dashboard, for example in \\\\host\\user for Windows Explorer."
             ).classes("text-caption text-grey-7")
             gpu = ui.select(GPU_OPTIONS, label="GPU", value=current.get("gpu_vendor", "nvidia"))
-            ui.label("Applies to desktops started after the change.").classes(
-                "text-caption text-grey-7"
+            ui.label(
+                "Applies to desktops started after the change. A change rebuilds every desktop "
+                "image (Intel images get Intel's GPU computing packages)."
+            ).classes("text-caption text-grey-7")
+        with ui.card().classes("w-full"):
+            ui.label("AI").classes("text-h6")
+            engine = ui.select(
+                ENGINE_OPTIONS, label="AI engine", value=current.get("ai_engine", "vllm")
             )
+            ui.label(
+                "The program that runs the AI session. vLLM loads safetensors models and serves "
+                "many people fast on NVIDIA GPUs. llama.cpp loads GGUF models (compressed, so "
+                "larger models fit) and runs on NVIDIA, Intel and AMD GPUs."
+            ).classes("text-caption text-grey-7")
+            ui.label(
+                "vLLM does not work on Intel GPUs: on an Arc A770 a longer chat hangs the GPU. "
+                "Use llama.cpp on Intel."
+            ).classes("text-caption text-orange-9")
+            ui.label(
+                "Applies when the AI session is next started. Each engine needs its own model "
+                "format: download a GGUF version of a model for llama.cpp."
+            ).classes("text-caption text-grey-7")
         with ui.card().classes("w-full"):
             ui.label("Shared scratch folder").classes("text-h6")
             scratch = ui.input(
@@ -69,6 +89,7 @@ def admin_settings(request: Request) -> RedirectResponse | None:
                 "default_quota_gb": quota.value,
                 "hostname": host.value,
                 "gpu_vendor": gpu.value,
+                "ai_engine": engine.value,
                 "scratch_retention_days": scratch.value,
             }
             try:
