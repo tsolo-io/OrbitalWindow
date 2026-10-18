@@ -229,10 +229,11 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE images ADD COLUMN IF NOT EXISTS base_image VARCHAR;  -- full image; NULL: webtop tag
     """,
-    # 11: images of other distributions (#40): the package manager, found when the index is built
+    # 12: images of other distributions (#40): the package manager, found when the index is built.
+    # IF NOT EXISTS: early builds of #40 added this column as migration 11.
     """
-    ALTER TABLE images ADD COLUMN pkg_manager VARCHAR DEFAULT 'apt';
-    UPDATE images SET pkg_manager = 'apt';
+    ALTER TABLE images ADD COLUMN IF NOT EXISTS pkg_manager VARCHAR DEFAULT 'apt';
+    UPDATE images SET pkg_manager = 'apt' WHERE pkg_manager IS NULL;
     """,
 ]
 
