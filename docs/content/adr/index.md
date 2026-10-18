@@ -50,3 +50,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0034](0034-other-distributions.md) | Other distributions: ow-pkg over apt, apk, dnf and pacman | accepted |
 | [0035](0035-intel-gpus.md) | Intel GPUs: `gpu_vendor=intel` passes only `/dev/dri` | accepted |
 | [0036](0036-intel-gpu-numbers.md) | Intel GPU numbers: an exporter with only `CAP_PERFMON` | accepted |
+| [0037](0037-vendor-packages-in-images.md) | GPU vendor packages in images, and GPU device groups for `abc` | accepted |

@@ -12,7 +12,9 @@ FROM ${BASE_IMAGE}
 # terminal running without a browser (ADR 0030).
 COPY root/usr/local/bin/ow-pkg /usr/local/bin/ow-pkg
 COPY base-packages.sh /tmp/base-packages.sh
-RUN sh /tmp/base-packages.sh desktop && rm /tmp/base-packages.sh
+# The host's GPU vendor (the GPU setting): Intel images get the compute runtime.
+ARG GPU_VENDOR=none
+RUN sh /tmp/base-packages.sh desktop "$GPU_VENDOR" && rm /tmp/base-packages.sh
 
 COPY root/ /
 

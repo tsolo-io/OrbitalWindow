@@ -65,7 +65,10 @@ def test_terminal_image_builds_from_its_own_dockerfile(service):
     service.builder._build_base(build_id, image_id)
     kwargs = service.client.api.build.call_args.kwargs
     assert kwargs["dockerfile"] == "Dockerfile.terminal"
-    assert kwargs["buildargs"] == {"BASE_IMAGE": "lscr.io/linuxserver/baseimage-ubuntu:noble"}
+    assert kwargs["buildargs"] == {
+        "BASE_IMAGE": "lscr.io/linuxserver/baseimage-ubuntu:noble",
+        "GPU_VENDOR": "nvidia",
+    }
     assert kwargs["tag"] == "ow-terminal:baseimage-ubuntu-noble"
     service.builder._build_base(service.builder.queue_base(1), 1)
     kwargs = service.client.api.build.call_args.kwargs
