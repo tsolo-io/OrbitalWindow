@@ -219,11 +219,15 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (user_id, name)
     );
     """,
-    # 10: terminal-only images (#40): no desktop (GUI), built from any LinuxServer image
+    # 10, 11: terminal-only images (#40): no desktop (GUI), built from any LinuxServer image.
+    # DuckDB cannot commit two ALTERs of a table that has rows in one transaction, so each column
+    # is its own migration. IF NOT EXISTS: early builds of #40 added both columns in migration 10.
     """
-    ALTER TABLE images ADD COLUMN gui BOOLEAN DEFAULT true;
-    UPDATE images SET gui = true;
-    ALTER TABLE images ADD COLUMN base_image VARCHAR;  -- full image to build on; NULL: webtop tag
+    ALTER TABLE images ADD COLUMN IF NOT EXISTS gui BOOLEAN DEFAULT true;
+    UPDATE images SET gui = true WHERE gui IS NULL;
+    """,
+    """
+    ALTER TABLE images ADD COLUMN IF NOT EXISTS base_image VARCHAR;  -- full image; NULL: webtop tag
     """,
 ]
 
