@@ -75,6 +75,7 @@ nav = [
     { "0035 Intel GPUs" = "adr/0035-intel-gpus.md" },
     { "0036 Intel GPU numbers" = "adr/0036-intel-gpu-numbers.md" },
     { "0037 GPU packages in images" = "adr/0037-vendor-packages-in-images.md" },
+    { "0038 AI session on Intel" = "adr/0038-ai-session-on-intel.md" },
   ] },
 ]
 

@@ -98,11 +98,12 @@ class Estimate:
         """
         return self.weights + (self.kv_cache or 0) + self.overhead
 
-    def max_context(self, gpu_bytes: float) -> int | None:
+    def max_context(self, gpu_bytes: float, kv_limit: float | None = None) -> int | None:
         """Return the longest context whose KV cache fits next to the weights.
 
         Args:
             gpu_bytes: Total memory of the GPU.
+            kv_limit: Largest KV cache the GPU can hold, or None for no limit.
 
         Returns:
             Tokens (capped at the model's maximum), 0 if not even the weights fit, or None
@@ -111,6 +112,8 @@ class Estimate:
         if self.shape is None:
             return None
         room = gpu_bytes * GPU_SHARE - self.weights - self.overhead
+        if kv_limit:
+            room = min(room, kv_limit)
         tokens = max(int(room // self.shape.kv_per_token), 0)
         return min(tokens, self.shape.max_context) if self.shape.max_context else tokens
 
@@ -136,15 +139,19 @@ def estimate(
     return Estimate(weights, kv_cache, overhead, context, shape)
 
 
-def suggest_context(estimate: Estimate, gpu_total: float | None) -> int:
+def suggest_context(
+    estimate: Estimate, gpu_total: float | None, kv_limit: float | None = None
+) -> int:
     """Return the context a session should start with.
 
-    ``SUGGESTED_CONTEXT``, or less when the model allows less or the cache would not fit in
-    ``GPU_SHARE`` of the GPU next to the weights. Rounded down to whole thousands (1,024).
+    ``SUGGESTED_CONTEXT``, or less when the model allows less, the cache would not fit in
+    ``GPU_SHARE`` of the GPU next to the weights, or the cache would be larger than the GPU's
+    limit. Rounded down to whole thousands (1,024).
 
     Args:
         estimate: The model's estimate (its shape gives the cache per token and the maximum).
         gpu_total: Memory of the GPU, or None when unknown.
+        kv_limit: Largest KV cache the GPU can hold, or None for no limit.
 
     Returns:
         Tokens; ``DEFAULT_CONTEXT`` when nothing better is known or not even the weights fit.
@@ -155,7 +162,7 @@ def suggest_context(estimate: Estimate, gpu_total: float | None) -> int:
     if estimate.shape.max_context:
         tokens = min(tokens, estimate.shape.max_context)
     if gpu_total:
-        longest = estimate.max_context(gpu_total) or 0
+        longest = estimate.max_context(gpu_total, kv_limit) or 0
         if longest < 1024:
             return min(DEFAULT_CONTEXT, tokens)
         tokens = min(tokens, longest // 1024 * 1024)
@@ -167,6 +174,7 @@ class Gpu:
     name: str
     total: float
     free: float
+    kv_limit: float | None = None  # largest KV cache the GPU can hold in one block
 
 
 @dataclass(frozen=True)
@@ -175,12 +183,13 @@ class Verdict:
     text: str
 
 
-def verdict(needed: float, gpu: Gpu | None) -> Verdict:
+def verdict(needed: float, gpu: Gpu | None, kv_cache: float | None = None) -> Verdict:
     """Compare an estimate with a GPU.
 
     Args:
         needed: Bytes the model needs.
         gpu: The GPU to run it on, or None if there is no GPU information.
+        kv_cache: Bytes of KV cache in the estimate, checked against the GPU's limit.
 
     Returns:
         The level and a short explanation.
@@ -188,6 +197,12 @@ def verdict(needed: float, gpu: Gpu | None) -> Verdict:
     if gpu is None:
         return Verdict("unknown", "No GPU information (NVIDIA and Intel only).")
     usable = gpu.total * GPU_SHARE
+    if needed <= usable and gpu.kv_limit and kv_cache and kv_cache > gpu.kv_limit:
+        return Verdict(
+            "tight",
+            f"Fits on the {gpu.name} with a shorter context: its context cache can be at most "
+            f"{gpu.kv_limit / GIB:.2f} GB.",
+        )
     if needed <= usable:
         if needed <= gpu.free:
             return Verdict("fits", f"Fits on the {gpu.name}.")

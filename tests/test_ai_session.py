@@ -59,6 +59,46 @@ def test_spec_private_session():
     assert spec["labels"]["ow.ai.session"] == "7"
 
 
+def test_spec_intel_session():
+    """On Intel the XPU image gets /dev/dri and picks the GPU with ZE_AFFINITY_MASK."""
+    from dataclasses import replace
+
+    from orbitalwindow.config import Settings
+
+    settings = Settings(root="/srv/ow", hostname="h")
+    spec = session_spec(replace(REQUEST, gpu_index=1, gpu_vendor="intel"), settings, "k", 7)
+    assert spec["image"] == "vllm/vllm-openai-xpu:v0.30.0"
+    assert spec["devices"] == ["/dev/dri:/dev/dri:rwm"] and spec["device_requests"] == []
+    assert spec["environment"]["ZE_AFFINITY_MASK"] == "1"
+    nvidia = session_spec(REQUEST, settings, "k", 7)
+    assert nvidia["image"] == "vllm/vllm-openai:v0.30.0" and nvidia["devices"] == []
+    assert "ZE_AFFINITY_MASK" not in nvidia["environment"]
+
+
+def test_spec_arc_a_series_flags():
+    """Arc A-series sessions run in float16 with Triton attention and a KV cache under 4 GiB."""
+    from dataclasses import replace
+
+    from orbitalwindow.aisession import is_xe_hpg
+    from orbitalwindow.config import Settings
+
+    assert is_xe_hpg("intel", "Intel Arc A770") and is_xe_hpg("intel", "Intel Arc A-series GPU")
+    assert is_xe_hpg("intel", "Intel Data Center GPU Flex 170")
+    assert not is_xe_hpg("intel", "Intel GPU (8086:e20b)") and not is_xe_hpg("nvidia", "Arc A")
+    settings = Settings(root="/srv/ow", hostname="h")
+    request = replace(REQUEST, gpu_vendor="intel", xe_hpg=True)
+    command = session_spec(request, settings, "k", 7)["command"]
+    assert command[-6:] == [
+        "--dtype",
+        "half",
+        "--attention-backend",
+        "TRITON_ATTN",
+        "--kv-cache-memory-bytes",
+        str(int(3.75 * 1024**3)),
+    ]
+    assert "--dtype" not in session_spec(REQUEST, settings, "k", 7)["command"]
+
+
 def test_spec_public_session_routes_v1():
     """A public session is routed under /v1 on the TLS entrypoint."""
     from orbitalwindow.config import Settings
@@ -282,18 +322,27 @@ def test_start_session_validates_and_audits(service, model_on_disk):
     assert service.ai.state().status == "stopped"
 
 
-def test_start_needs_an_nvidia_gpu(service, model_on_disk):
-    """Without NVML there is no AI session."""
+def test_start_needs_gpu_numbers(service, model_on_disk):
+    """Without GPU numbers (no NVML or exporter) there is no AI session."""
     service.gpus.stats = lambda: []
-    with pytest.raises(ValidationError, match="NVIDIA"):
+    with pytest.raises(ValidationError, match="numbers"):
         service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192, 0.5)
 
 
-def test_start_needs_an_nvidia_host(service, model_on_disk):
-    """GPU numbers alone (an Intel host) are not enough for the CUDA vLLM image."""
+def test_start_needs_an_nvidia_or_intel_host(service, model_on_disk):
+    """AMD hosts have no AI session; Intel hosts run the XPU image."""
+    service.db.set_setting("gpu_vendor", "amd")
+    with pytest.raises(ValidationError, match="NVIDIA or Intel"):
+        service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192, 0.5)
     service.db.set_setting("gpu_vendor", "intel")
-    with pytest.raises(ValidationError, match="NVIDIA"):
-        service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192, 0.5)
+    service.gpus.stats = lambda: [GpuStat(0, "Intel Arc A770", 0, 1024**3, 16 * 1024**3)]
+    with pytest.raises(ValidationError, match="at most 35,108 tokens"):
+        service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 40960, 0.5)
+    service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192, 0.5)
+    image, kwargs = service.ai._client.runs[0]
+    assert "TRITON_ATTN" in kwargs["command"]
+    assert image == "vllm/vllm-openai-xpu:v0.30.0"
+    assert kwargs["devices"] == ["/dev/dri:/dev/dri:rwm"]
 
 
 def test_session_defaults(service, model_on_disk):

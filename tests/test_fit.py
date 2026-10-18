@@ -268,3 +268,18 @@ def test_chat_template_from_file_or_tokenizer_config(tmp_path):
     assert model.chat_template() == "{{ old }}"
     (tmp_path / "chat_template.jinja").write_text("{{ new }}")
     assert model.chat_template() == "{{ new }}"
+
+
+def test_kv_limit_shortens_the_context_and_the_verdict():
+    """An Arc A-series KV limit caps the suggested context and makes a long one only 'tight'."""
+    from orbitalwindow.aisession import XE_HPG_KV_BYTES
+
+    arc = fit.Gpu("Intel Arc A770", 17e9, 16e9, XE_HPG_KV_BYTES)
+    planned = fit.estimate(8e9, QWEN3_8B)
+    # 3.75 GiB / 147,456 bytes per token = 27,306 tokens, rounded down to 26,624.
+    assert fit.suggest_context(planned, arc.total, arc.kv_limit) == 26 * 1024
+    assert planned.max_context(arc.total, arc.kv_limit) == 27306
+    long = fit.estimate(8e9, QWEN3_8B, 32768)
+    assert fit.verdict(long.total, arc, long.kv_cache).level == "tight"
+    short = fit.estimate(8e9, QWEN3_8B, 16384)
+    assert fit.verdict(short.total, arc, short.kv_cache).level == "fits"

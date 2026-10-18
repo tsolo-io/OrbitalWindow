@@ -39,7 +39,9 @@ REGION = "HHIQQ"  # memory_class, memory_instance, rsvd0, probed_size, unallocat
 REGION_SIZE = 88
 REGIONS_HEADER = 16
 PERF_EVENT_OPEN = 298  # x86_64 syscall number
-# PCI device ids of common Intel GPUs; others show as "Intel GPU (8086:xxxx)".
+# PCI device ids of common Intel GPUs. Other Arc A-series and Flex GPUs (DG2, ids 0x5690–0x56cf)
+# show as "Intel Arc A-series GPU (8086:xxxx)": OrbitalWindow runs vLLM differently on these.
+# Any other GPU shows as "Intel GPU (8086:xxxx)".
 NAMES = {
     "0x56a0": "Intel Arc A770",
     "0x56a1": "Intel Arc A750",
@@ -91,7 +93,14 @@ def gpu_name(device: Path) -> str:
         A plain name such as ``Intel Arc A770``.
     """
     pci_id = read_text(device / "device") or "?"
-    return NAMES.get(pci_id, f"Intel GPU (8086:{pci_id.removeprefix('0x')})")
+    if pci_id in NAMES:
+        return NAMES[pci_id]
+    short = pci_id.removeprefix("0x")
+    try:
+        dg2 = 0x5690 <= int(pci_id, 16) <= 0x56CF
+    except ValueError:
+        dg2 = False
+    return f"Intel Arc A-series GPU (8086:{short})" if dg2 else f"Intel GPU (8086:{short})"
 
 
 def temperatures(device: Path) -> tuple[int | None, int | None]:
