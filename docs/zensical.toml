@@ -35,6 +35,7 @@ nav = [
     { "AI chat and models" = "user/06-ai.md" },
     { "Terminal" = "user/07-terminal.md" },
     { "Environment variables" = "user/08-environment.md" },
+    { "VS Code" = "user/09-vscode.md" },
   ] },
   { "Decisions (ADR)" = [
     { "Overview" = "adr/index.md" },
@@ -77,6 +78,7 @@ nav = [
     { "0037 GPU packages in images" = "adr/0037-vendor-packages-in-images.md" },
     { "0038 AI session on Intel" = "adr/0038-ai-session-on-intel.md" },
     { "0039 llama.cpp engine" = "adr/0039-llama-cpp-engine.md" },
+    { "0040 VS Code without a desktop" = "adr/0040-vs-code-without-a-desktop.md" },
   ] },
 ]
 

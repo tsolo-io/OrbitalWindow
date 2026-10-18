@@ -25,6 +25,7 @@ router = APIRouter()
 OWNER_URI_RE = {
     "desktop": re.compile(r"^/desktop/([a-z0-9]+)(?:/|$|\?)"),
     "files": re.compile(r"^/files/([a-z0-9]+)(?:/|$|\?)"),
+    "code": re.compile(r"^/code/([a-z0-9]+)(?:/|$|\?)"),
 }
 # Characters allowed in a post-login target; anything else falls back to the default.
 NEXT_RE = re.compile(r"^/[A-Za-z0-9/_.~%=&?-]*$")
@@ -40,14 +41,14 @@ class Access(IntEnum):
 def owner_access(
     user: SessionUser | None, forwarded_uri: str, kind: str = "desktop"
 ) -> tuple[Access, str | None]:
-    """Decide forwardAuth for ``/desktop/<owner>/…`` or ``/files/<owner>/…``.
+    """Decide forwardAuth for ``/desktop/<owner>/…``, ``/files/<owner>/…`` or ``/code/<owner>/…``.
 
     Only the owner gets in; admins included.
 
     Args:
         user: The logged-in user, or None when there is no valid session.
         forwarded_uri: The original request URI from Traefik's ``X-Forwarded-Uri``.
-        kind: Which route family to match: ``"desktop"`` or ``"files"``.
+        kind: Which route family to match: ``"desktop"``, ``"files"`` or ``"code"``.
 
     Returns:
         The access decision and, when allowed, the owner's user name (otherwise None).
@@ -312,7 +313,7 @@ def _owner_response(request: Request, uri: str, kind: str) -> Response:
     Args:
         request: The forwardAuth request from Traefik.
         uri: The original request URI.
-        kind: Which route family to match: ``"desktop"`` or ``"files"``.
+        kind: Which route family to match: ``"desktop"``, ``"files"`` or ``"code"``.
 
     Returns:
         200 with an ``X-OW-User`` header for the owner, a login redirect without a session,
@@ -324,6 +325,19 @@ def _owner_response(request: Request, uri: str, kind: str) -> Response:
     if access is Access.LOGIN:
         return _login_redirect(request, uri)
     return PlainTextResponse("Forbidden", status_code=403)
+
+
+@router.get("/auth/code")
+def auth_code(request: Request) -> Response:
+    """Traefik forwardAuth for VS Code routers: only the owner gets in.
+
+    Args:
+        request: The forwardAuth request from Traefik.
+
+    Returns:
+        200 for the owner, a login redirect without a session, otherwise 403.
+    """
+    return _owner_response(request, request.headers.get("x-forwarded-uri", ""), "code")
 
 
 @router.get("/auth/admin")

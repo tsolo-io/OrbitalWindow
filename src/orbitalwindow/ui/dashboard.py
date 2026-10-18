@@ -8,6 +8,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
+from ..codeserver import CodeState
 from ..desktops import DesktopError, DesktopState, desktop_path
 from ..files import files_path
 from ..metrics import fmt_bytes
@@ -62,6 +63,7 @@ def dashboard(request: Request, pw: str = "") -> RedirectResponse | None:
         ui.notify(text, type=kind, timeout=8000)
     with ui.column().classes("w-full max-w-3xl mx-auto p-4 gap-4"):
         desktop_card(auth)
+        code_card(auth)
         ai_card(auth)
         software_card(auth)
         ssh_card(auth)
@@ -281,6 +283,74 @@ def desktop_card(auth: PageAuth) -> None:
         picker.on_value_change(guarded(auth, on_pick))
         ui.timer(3.0, guarded(auth, refresh))
         ui.timer(0.1, guarded(auth, refresh), once=True)
+
+
+def code_card(auth: PageAuth) -> None:
+    """Add the VS Code card: start, open and stop VS Code in the browser, without a desktop.
+
+    Args:
+        auth: Session of the page.
+    """
+    svc = service()
+    user_id = auth.user.id
+    colors = {"stopped": "grey", "starting": "orange", "running": "positive", "error": "negative"}
+    with ui.card().classes("w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            with ui.row().classes("items-center gap-1"):
+                ui.label("VS Code").classes("text-h6")
+                help_icon("vscode")
+            badge = ui.badge("stopped", color="grey")
+        ui.label(
+            "Edit the files in your home folder with VS Code in the browser, without starting "
+            "your desktop. It keeps running until you stop it."
+        ).classes("text-caption text-grey-7")
+        status = ui.label().classes("text-body2")
+        with ui.row().classes("items-center gap-2"):
+            start_btn = ui.button("Start VS Code", icon="play_arrow").props("no-caps")
+            open_btn = ui.button(
+                "Open VS Code",
+                icon="open_in_new",
+                on_click=lambda: ui.navigate.to(svc.code_url(user_id), new_tab=True),
+            ).props("no-caps")
+            stop_btn = ui.button("Stop VS Code", icon="stop").props("no-caps outline")
+
+    async def refresh() -> None:
+        """Show the state and the buttons that fit it."""
+        result = await run.io_bound(svc.code_state, user_id)
+        if result is None:  # None: the page closed or the app is stopping
+            return
+        state, error = result
+        badge.set_text(state.value)
+        badge.props(f"color={colors[state.value]}")
+        status.set_text(
+            {
+                CodeState.STARTING: "Starting. The first time takes a minute or two.",
+                CodeState.ERROR: error,
+            }.get(state, "")
+        )
+        start_btn.set_visibility(state in (CodeState.STOPPED, CodeState.ERROR))
+        open_btn.set_visibility(state is CodeState.RUNNING)
+        stop_btn.set_visibility(state in (CodeState.RUNNING, CodeState.STARTING, CodeState.ERROR))
+
+    async def act(fn, done: str) -> None:
+        """Run a service call for this user, then refresh.
+
+        Args:
+            fn: ``start_code`` or ``stop_code``.
+            done: Message to show on success.
+        """
+        try:
+            await run.io_bound(fn, auth.user.name, user_id)
+        except ValidationError as exc:
+            ui.notify(str(exc), type="negative")
+        else:
+            ui.notify(done, type="positive")
+        await refresh()
+
+    start_btn.on_click(guarded(auth, lambda: act(svc.start_code, "VS Code is starting.")))
+    stop_btn.on_click(guarded(auth, lambda: act(svc.stop_code, "VS Code stopped.")))
+    ui.timer(0.1, guarded(auth, refresh), once=True)
+    ui.timer(3.0, guarded(auth, refresh))
 
 
 def ai_card(auth: PageAuth) -> None:

@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # llama.cpp server images: <image>:server-<cuda|intel|rocm>-<build> (ADR 0039).
     llamacpp_image: str = "ghcr.io/ggml-org/llama.cpp"
     llamacpp_build: str = "b11382"
+    # code-server image that VS Code in the browser is built on (ADR 0040).
+    code_server_image: str = "lscr.io/linuxserver/code-server:4.140.0-ls368"
     # Open WebUI image for the AI chat, served on its own port (it can't run under a path).
     openwebui_image: str = "ghcr.io/open-webui/open-webui:v0.11.4"
     chat_port: int = 8443

@@ -44,6 +44,7 @@ from .benchmarks import CONTEXT as BENCH_CONTEXT
 from .benchmarks import SUITES, Benchmarker
 from .builds import TAG_RE, Builder, desktop_image_ref, terminal_image_ref
 from .chat import Chat
+from .codeserver import CodeServers, CodeState, code_path
 from .config import Settings
 from .db import Database
 from .desktops import (
@@ -122,6 +123,7 @@ class Service:
         self._login_slots = threading.BoundedSemaphore(4)
         self.desktops = Desktops(client, self.db, settings)
         self.files = FileManagers(client, settings)
+        self.code = CodeServers(client, settings)
         self.samba = Samba(client, settings.samba_container, settings.samba_state_dir)
         self.software = Software(self.db, settings.addons_dir)
         self.builder = Builder(
@@ -524,6 +526,7 @@ class Service:
             try:
                 self.desktops.stop(user)
                 self.files.stop(user["name"])
+                self.code.stop(user["name"])
             except docker.errors.DockerException as exc:
                 result.warnings.append(f"The desktop could not be stopped: {exc}")
         else:
@@ -563,6 +566,7 @@ class Service:
         try:
             self.desktops.stop(user)
             self.files.remove(name)
+            self.code.remove(name)
             self.hostops.remove_files_data(name)
         except docker.errors.DockerException as exc:
             result.warnings.append(f"The desktop or file manager could not be removed: {exc}")
@@ -2138,6 +2142,64 @@ class Service:
         if by_admin:
             self.db.execute("UPDATE users SET stopped_by_admin = true WHERE id = ?", [user_id])
         self.db.audit(actor, "desktop.stop", user["name"], "by admin" if by_admin else "")
+
+    def code_state(self, user_id: int) -> tuple[CodeState, str]:
+        """Return the state of a user's VS Code.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            The state and, when it failed, why.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        return self.code.state(self._require_user(user_id)["name"])
+
+    def code_url(self, user_id: int) -> str:
+        """Return the address of a user's VS Code.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            ``/code/<user>/``.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        return code_path(self._require_user(user_id)["name"])
+
+    def start_code(self, actor: str, user_id: int) -> None:
+        """Start VS Code for a user (in the background; it builds its image on first use).
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+
+        Raises:
+            ValidationError: When the user no longer exists or is disabled.
+        """
+        user = self._require_user(user_id)
+        if user["disabled"]:
+            raise ValidationError("This account is disabled.")
+        self.code.start(user, groups_mod.groups_of(self.db, user_id), self.user_env_values(user_id))
+        self.db.audit(actor, "code.start", user["name"])
+
+    def stop_code(self, actor: str, user_id: int) -> None:
+        """Stop a user's VS Code (open files are saved by VS Code itself; settings stay).
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        self.code.stop(user["name"])
+        self.db.audit(actor, "code.stop", user["name"])
 
     def open_terminal(self, actor: str, user_id: int, rows: int, cols: int) -> Terminal:
         """Connect to the terminal in the user's running desktop, starting it if needed.
