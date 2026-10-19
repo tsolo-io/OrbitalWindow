@@ -135,8 +135,10 @@ def test_settings(service):
     assert s["default_cpus"] == "2" and s["default_mem_gb"] == ""
     assert s["scratch_retention_days"] == "14" and s["gpu_vendor"] == "amd"
     assert service.public_hostname() == "desk.example.org"
+    service.update_settings("boss", {"gpu_vendor": "intel"})
+    assert service.get_settings()["gpu_vendor"] == "intel"
     for bad in (
-        {"gpu_vendor": "intel"},
+        {"gpu_vendor": "matrox"},
         {"hostname": "bad host"},
         {"hostname": "x;rm"},
         {"scratch_retention_days": "0"},

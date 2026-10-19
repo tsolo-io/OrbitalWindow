@@ -44,6 +44,7 @@ DESKTOP_PIDS_LIMIT = 4096
 class GpuVendor(StrEnum):
     NVIDIA = "nvidia"
     AMD = "amd"
+    INTEL = "intel"
     NONE = "none"
 
 
@@ -260,6 +261,9 @@ def build_spec(
         environment["NVIDIA_DRIVER_CAPABILITIES"] = "all"
     elif gpu_vendor is GpuVendor.AMD:
         devices += ["/dev/dri:/dev/dri:rwm", "/dev/kfd:/dev/kfd:rwm"]
+    elif gpu_vendor is GpuVendor.INTEL:
+        # Mesa (iris, ANV) and VA-API (iHD) in the desktop image need only the render nodes.
+        devices.append("/dev/dri:/dev/dri:rwm")
 
     kwargs: dict[str, Any] = {
         "name": cname,

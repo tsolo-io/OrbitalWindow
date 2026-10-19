@@ -35,6 +35,8 @@ CHIP_LABELS = {
     "acpitz": "Motherboard",
     "pch": "Chipset",
     "amdgpu": "AMD GPU",
+    "i915": "Intel GPU",
+    "xe": "Intel GPU",
     "iwlwifi": "Wi-Fi",
 }
 # Readings outside this range are unconnected or broken sensors (and bogus limits).

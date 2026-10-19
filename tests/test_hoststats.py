@@ -123,6 +123,7 @@ node_hwmon_chip_names{chip="platform_coretemp_0",chip_name="coretemp"} 1
 node_hwmon_chip_names{chip="thermal_thermal_zone0",chip_name="acpitz_0"} 1
 node_hwmon_chip_names{chip="thermal_thermal_zone1",chip_name="acpitz_1"} 1
 node_hwmon_chip_names{chip="platform_nct6775_656",chip_name="nct6798"} 1
+node_hwmon_chip_names{chip="0000:02:01_0_0000:03:00_0",chip_name="i915"} 1
 node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp1"} 40.85
 node_hwmon_temp_celsius{chip="nvme_nvme0",sensor="temp2"} 45.85
 node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp1"} 92
@@ -131,6 +132,7 @@ node_hwmon_temp_celsius{chip="platform_coretemp_0",sensor="temp3"} 44
 node_hwmon_temp_celsius{chip="thermal_thermal_zone0",sensor="temp0"} 27.8
 node_hwmon_temp_celsius{chip="thermal_thermal_zone1",sensor="temp0"} 29.8
 node_hwmon_temp_celsius{chip="platform_nct6775_656",sensor="temp1"} 35
+node_hwmon_temp_celsius{chip="0000:02:01_0_0000:03:00_0",sensor="temp1"} 49
 node_hwmon_temp_celsius{chip="platform_nct6775_656",sensor="temp2"} -62
 node_hwmon_temp_celsius{chip="platform_nct6775_656",sensor="temp3"} 0
 node_hwmon_temp_crit_celsius{chip="nvme_nvme0",sensor="temp1"} 80.85
@@ -143,13 +145,21 @@ node_hwmon_temp_max_celsius{chip="nvme_nvme0",sensor="temp2"} 65261.85
 def test_temperatures_grouped_and_averaged_per_chip():
     """Sensors are averaged per chip with plain names; broken readings are left out."""
     temps = {temp.label: temp for temp in sample(parse(HWMON)).temperatures}
-    assert list(temps) == ["CPU", "Motherboard zone0", "Motherboard zone1", "NVMe disk", "nct6798"]
+    assert list(temps) == [
+        "CPU",
+        "Intel GPU",
+        "Motherboard zone0",
+        "Motherboard zone1",
+        "NVMe disk",
+        "nct6798",
+    ]
     cpu = temps["CPU"]
     assert cpu.average == pytest.approx(58.67, abs=0.01)
     assert (cpu.hottest, cpu.sensors, cpu.critical) == (92, 3, 100)
     assert cpu.level == "warm"  # the hottest core is within 10 °C of the limit
     assert temps["NVMe disk"].average == pytest.approx(43.35)
     assert temps["NVMe disk"].critical == pytest.approx(80.85) and temps["NVMe disk"].level == "ok"
+    assert temps["Intel GPU"].average == 49  # i915 hwmon of an Arc A770
     assert temps["nct6798"].sensors == 1 and temps["nct6798"].critical is None
     assert sample(parse("node_load1 1\n")).temperatures == ()
 

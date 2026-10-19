@@ -142,4 +142,4 @@ Then rebuild the desktops (**Desktops → Rebuild**); users' software images are
 | "Your software is being installed" | A build is running; see the user's build log or the Desktops page. |
 | Windows says the password is wrong | Reset the password; Windows may cache the old one (*Credential Manager*). |
 | SSH: "Connection closed" | The user's desktop is not running, or the SSH add-on is off. After 5 failed logins the gateway blocks that address for 60 minutes. |
-| GPU numbers missing | No NVIDIA driver in the service (AMD/none), or the NVIDIA override is not active (`OW_GPU_VENDOR=nvidia`). |
+| GPU numbers missing | No NVIDIA driver in the service (AMD, Intel or none), or the NVIDIA override is not active (`OW_GPU_VENDOR=nvidia`). |

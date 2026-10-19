@@ -16,9 +16,13 @@ nav = [
   { "Design" = "design.md" },
   { "POC learnings" = "poc-learnings.md" },
   { "Admin guide" = [
-    { "Installing" = "admin/01-install.md" },
+    { "Installing" = [
+      { "Installing" = "admin/01-install.md" },
+      { "Preparing an NVIDIA host" = "admin/01-install-nvidia.md" },
+      { "Preparing an AMD host" = "admin/01-install-amd.md" },
+      { "Preparing an Intel host" = "admin/01-install-intel.md" },
+    ] },
     { "Operations" = "admin/02-operations.md" },
-    { "AMD hosts" = "admin/03-amd.md" },
     { "Security" = "admin/04-security.md" },
     { "AI models" = "admin/05-ai.md" },
   ] },
@@ -68,6 +72,7 @@ nav = [
     { "0032 Environment variables" = "adr/0032-user-environment-variables.md" },
     { "0033 Terminal-only containers" = "adr/0033-terminal-only-containers.md" },
     { "0034 Other distributions" = "adr/0034-other-distributions.md" },
+    { "0035 Intel GPUs" = "adr/0035-intel-gpus.md" },
   ] },
 ]
 
