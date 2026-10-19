@@ -41,6 +41,7 @@ class Settings(BaseSettings):
 
     # Names of the infrastructure containers OrbitalWindow talks to or wires up.
     traefik_container: str = "ow-traefik"
+    service_container: str = "orbitalwindow"  # joins the chat network to fetch users' chat keys
     samba_container: str = "ow-samba"
     sshpiper_container: str = "ow-sshpiper"
     ssh_port: int = 2222  # the gateway's published port, shown to users

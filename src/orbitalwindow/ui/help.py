@@ -44,6 +44,14 @@ def help_page(request: Request, slug: str = "") -> RedirectResponse | None:
         "ssh_cmd": svc.ssh_command(name),
         "groups": ", ".join(f"**{g}**" for g in groups) if groups else "none yet",
     }
+    # The AI examples show the running model; without one, what to put there.
+    state = svc.ai.state()
+    running = state.status == "running"
+    values |= {
+        "chat_api": svc.chat_api_url(),
+        "model": state.repo if running else "<the model name on the dashboard>",
+        "context": str(state.context) if running and state.context else "32768",
+    }
     frame(auth, page.title)
     with ui.row().classes("w-full max-w-6xl mx-auto p-4 no-wrap items-start gap-6"):
         with ui.column().classes("w-56 shrink-0 gap-1"):

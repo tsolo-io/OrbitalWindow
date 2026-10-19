@@ -373,7 +373,81 @@ def ai_card(auth: PageAuth) -> None:
             ui.link("How to use it", "/help/ai").classes("text-sm")
             if auth.user.can_manage_ai:
                 ui.link("Manage the AI session", "/ai").classes("text-sm")
+        with ui.expansion("Use the model from your own code", icon="code").classes(
+            "w-full"
+        ) as code_box:
+            ui.label(
+                "Python, MATLAB and coding tools such as OpenCode use the model through the OpenAI "
+                "API, with these settings. The key is yours: keep it private, like a password."
+            ).classes("text-caption text-grey-7")
+            api_url = ui.label().classes("font-mono text-body2")
+            api_model = ui.label().classes("font-mono text-body2")
+            with ui.row().classes("items-center gap-2 w-full"):
+                key_in = (
+                    ui.input("Your API key", password=True, password_toggle_button=True)
+                    .props("readonly dense outlined")
+                    .classes("min-w-[24rem]")
+                )
+                copy_btn = ui.button(
+                    "Copy", icon="content_copy", on_click=lambda: ui.clipboard.write(key_in.value)
+                ).props("no-caps flat")
+                create_btn = ui.button("Create my key", icon="key").props("no-caps")
+                renew_btn = ui.button("New key", icon="autorenew").props("no-caps flat")
+            key_note = ui.label().classes("text-caption")
+            with ui.row().classes("gap-4"):
+                ui.link("Examples: Python, MATLAB, OpenCode", "/help/ai").classes("text-sm")
+                ui.link("Server certificate (orbitalwindow.crt)", "/orbitalwindow.crt").classes(
+                    "text-sm"
+                )
     card.set_visibility(False)
+
+    async def show_access() -> None:
+        """Show the address, the model and the user's key (read when the section opens)."""
+        access = await run.io_bound(svc.chat_access, auth.user.id)
+        if access is None:  # None: the page closed or the app is stopping
+            return
+        api_url.set_text(f"Address (base URL): {access['url']}")
+        context = f", context {access['context']:,} tokens" if access["context"] else ""
+        api_model.set_text(f"Model: {access['model'] or '–'}{context}")
+        key = access["key"]
+        key_in.set_value(key or "")
+        key_in.set_visibility(bool(key))
+        copy_btn.set_visibility(bool(key))
+        renew_btn.set_visibility(bool(key))
+        create_btn.set_visibility(not key and not access["error"])
+        key_note.set_text(
+            access["error"] or ("" if key else "You have no key yet. Create one to start.")
+        )
+        key_note.classes(replace=f"text-caption {'text-negative' if access['error'] else ''}")
+
+    async def on_create(renew: bool) -> None:
+        """Create the user's key, or replace it after a confirmation.
+
+        Args:
+            renew: Replace the existing key.
+        """
+        if renew:
+            with ui.dialog() as dialog, ui.card():
+                ui.label("Replace your API key?").classes("text-h6")
+                ui.label(
+                    "Programs that use the old key stop working until you give them the new one."
+                )
+                with ui.row():
+                    ui.button("Replace", on_click=lambda: dialog.submit(True)).props("no-caps")
+                    ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("no-caps flat")
+            if not await dialog:
+                return
+        try:
+            await run.io_bound(svc.create_chat_key, auth.user.name, auth.user.id, renew)
+        except ValidationError as exc:
+            ui.notify(str(exc), type="negative", multi_line=True)
+            return
+        ui.notify("Your new key is ready." if renew else "Your key is ready.", type="positive")
+        await show_access()
+
+    code_box.on_value_change(guarded(auth, lambda event: show_access() if event.value else None))
+    create_btn.on_click(guarded(auth, lambda: on_create(False)))
+    renew_btn.on_click(guarded(auth, lambda: on_create(True)))
 
     async def refresh() -> None:
         """Show the running model, or hide the card when there is none."""

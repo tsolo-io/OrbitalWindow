@@ -9,14 +9,19 @@ the session network ``ow-ai`` (no internet) and talks to vLLM with the session's
 serves it on its own port (Open WebUI can't run under a path); forwardAuth (``/auth/ai``) passes
 the user's e-mail, name and role, which Open WebUI trusts to sign people in. Requests carrying an
 Open WebUI API key (``Bearer sk-…``) skip forwardAuth and Open WebUI checks the key.
+
+``ChatKeys`` gets those keys for the dashboard (#61): the service joins ``ow-ai`` and signs the
+user in with the same headers forwardAuth sends, then reads or creates the user's key.
 """
 
 import hashlib
 import logging
 import secrets
 from typing import Any
+from urllib.parse import quote
 
 import docker
+import httpx2
 
 from . import aisession
 from .config import Settings
@@ -29,6 +34,135 @@ ROUTER = "ow-chat"
 API_ROUTER = "ow-chat-api"
 LABEL_SPEC = "ow.spec"
 DATA_MOUNT = "/data"
+# Chat accounts are <user>@<this domain>; it is never used for mail.
+CHAT_EMAIL_DOMAIN = "orbitalwindow.local"
+
+
+def trusted_headers(name: str, display_name: str, is_admin: bool) -> dict[str, str]:
+    """Return the headers Open WebUI trusts to sign an OrbitalWindow user in.
+
+    Args:
+        name: OrbitalWindow user name.
+        display_name: The user's display name.
+        is_admin: OrbitalWindow admins are Open WebUI admins; everyone else is a user.
+
+    Returns:
+        ``X-OW-Email``, ``X-OW-Name`` (URL-encoded) and ``X-OW-Role``.
+    """
+    return {
+        "X-OW-Email": f"{name}@{CHAT_EMAIL_DOMAIN}",
+        "X-OW-Name": quote(display_name),
+        "X-OW-Role": "admin" if is_admin else "user",
+    }
+
+
+class ChatKeyError(Exception):
+    """Open WebUI could not be reached or refused, so the user's chat key is not available."""
+
+
+class ChatKeys:
+    """Reads and creates users' Open WebUI API keys (the ``sk-`` keys for ``:8443/api``)."""
+
+    def __init__(
+        self, base_url: str = f"http://{CONTAINER}:{PORT}", client: httpx2.Client | None = None
+    ) -> None:
+        """Create the client.
+
+        Args:
+            base_url: Open WebUI inside the chat network.
+            client: HTTP client to use (tests pass one with a mock transport).
+        """
+        self._client = client or httpx2.Client(base_url=base_url, timeout=10.0)
+
+    def _token(self, name: str, display_name: str, is_admin: bool) -> str:
+        """Sign the user in to Open WebUI, as forwardAuth does for the browser.
+
+        Args:
+            name: OrbitalWindow user name.
+            display_name: The user's display name.
+            is_admin: Whether the user is an OrbitalWindow admin.
+
+        Returns:
+            Open WebUI's session token for the user.
+
+        Raises:
+            ChatKeyError: When Open WebUI can't be reached or refuses.
+        """
+        headers = trusted_headers(name, display_name, is_admin)
+        try:
+            response = self._client.post(
+                "/api/v1/auths/signin", headers=headers, json={"email": "", "password": ""}
+            )
+            response.raise_for_status()
+            return response.json()["token"]
+        except (httpx2.HTTPError, ValueError, KeyError) as exc:
+            raise ChatKeyError(f"The chat did not answer: {exc}") from exc
+
+    def get(self, name: str, display_name: str, is_admin: bool, create: bool = False) -> str | None:
+        """Return the user's chat API key, creating one when asked.
+
+        Args:
+            name: OrbitalWindow user name.
+            display_name: The user's display name.
+            is_admin: Whether the user is an OrbitalWindow admin.
+            create: Create a key when the user has none.
+
+        Returns:
+            The key, or None when the user has none and ``create`` is False.
+
+        Raises:
+            ChatKeyError: When Open WebUI can't be reached or refuses.
+        """
+        auth = {"Authorization": f"Bearer {self._token(name, display_name, is_admin)}"}
+        try:
+            response = self._client.get("/api/v1/auths/api_key", headers=auth)
+            if response.status_code == 200 and response.json().get("api_key"):
+                return response.json()["api_key"]
+            if response.status_code not in (200, 404):
+                response.raise_for_status()
+            return self._create(auth) if create else None
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise ChatKeyError(f"The chat did not answer: {exc}") from exc
+
+    def renew(self, name: str, display_name: str, is_admin: bool) -> str:
+        """Replace the user's chat API key; programs with the old key stop working.
+
+        Args:
+            name: OrbitalWindow user name.
+            display_name: The user's display name.
+            is_admin: Whether the user is an OrbitalWindow admin.
+
+        Returns:
+            The new key.
+
+        Raises:
+            ChatKeyError: When Open WebUI can't be reached or refuses.
+        """
+        auth = {"Authorization": f"Bearer {self._token(name, display_name, is_admin)}"}
+        try:
+            return self._create(auth)
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise ChatKeyError(f"The chat did not answer: {exc}") from exc
+
+    def _create(self, auth: dict[str, str]) -> str:
+        """Create (or replace) the signed-in user's key.
+
+        Args:
+            auth: The user's Authorization header.
+
+        Returns:
+            The new key.
+
+        Raises:
+            httpx2.HTTPError: When Open WebUI refuses.
+            ValueError: When its answer has no key.
+        """
+        response = self._client.post("/api/v1/auths/api_key", headers=auth)
+        response.raise_for_status()
+        key = response.json().get("api_key")
+        if not key:
+            raise ValueError("no key in the answer")
+        return key
 
 
 def chat_spec(
@@ -195,7 +329,7 @@ class Chat:
             if container.labels.get(LABEL_SPEC) == spec["labels"][LABEL_SPEC]:
                 if container.status != "running":
                     container.start()
-                self._connect_traefik()
+                self._connect_members()
                 return
             container.remove(force=True)
         self._settings.chat_data_dir.mkdir(parents=True, exist_ok=True)
@@ -207,19 +341,23 @@ class Chat:
             self._client.images.pull(image)
         log.info("starting the AI chat")
         self._client.containers.run(image, **spec)
-        self._connect_traefik()
+        self._connect_members()
 
-    def _connect_traefik(self) -> None:
-        """Connect Traefik to the session network so it can reach Open WebUI."""
+    def _connect_members(self) -> None:
+        """Connect Traefik (for the chat) and the service (for chat keys) to the session network."""
+        wanted = (self._settings.traefik_container, self._settings.service_container)
         for network in self._client.networks.list(names=[aisession.NETWORK]):
             if network.name != aisession.NETWORK:
                 continue
             network.reload()
-            traefik = self._settings.traefik_container
-            if any(member.name == traefik for member in network.containers):
-                return
-            try:
-                network.connect(traefik)
-            except docker.errors.APIError as exc:
-                if "already exists" not in str(exc):
-                    raise
+            present = {member.name for member in network.containers}
+            for name in wanted:
+                if name in present:
+                    continue
+                try:
+                    network.connect(name)
+                except docker.errors.NotFound:
+                    log.info("%s is not a container here; not joining the chat network", name)
+                except docker.errors.APIError as exc:
+                    if "already exists" not in str(exc):
+                        raise
