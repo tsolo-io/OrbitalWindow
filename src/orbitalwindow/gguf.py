@@ -21,8 +21,9 @@ from .fit import Shape
 
 MAGIC = b"GGUF"
 SPLIT_RE = re.compile(r"-(\d{5})-of-(\d{5})\.gguf$")
-# Vision projectors and other helper files are not models of their own.
-SKIP_RE = re.compile(r"(^|/)(mmproj|imatrix)[^/]*$", re.IGNORECASE)
+# Vision projectors, importance matrices and multi-token-prediction drafts (MTP) are helper files,
+# not models of their own.
+SKIP_RE = re.compile(r"(^|/)(mmproj|imatrix|mtp)[^/]*$|(^|/)mtp/", re.IGNORECASE)
 QUANT_RE = re.compile(r"(?:^|[-_.])((?:I?Q\d[A-Z0-9_]*)|BF16|F16|F32)(?:[-_.]|$)", re.IGNORECASE)
 PREFERRED = "Q4_K_M"  # the usual balance of size and quality
 KV_BYTES = 2  # llama.cpp keeps the KV cache in float16 by default

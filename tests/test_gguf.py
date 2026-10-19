@@ -126,6 +126,8 @@ def test_files_are_grouped_by_quantisation():
         ("Big-Q4_K_M.gguf", 6),
         ("Big-Q2_K.gguf", 3),
         ("mmproj-F16.gguf", 1),
+        ("MTP/mtp-Big-F16.gguf", 2),
+        ("mtp-Big.gguf", 2),
         ("README.md", 1),
     ]
     models = gguf.group_files(files)
