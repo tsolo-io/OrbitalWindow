@@ -10,13 +10,17 @@ from typing import Any
 from nicegui import run, ui
 
 from ..aisession import SessionState
-from ..fit import GIB
+from ..fit import CODING_CONTEXT, GIB, SUGGESTED_CONTEXT
 from ..service import Service
 from ..users import ValidationError
 from .common import PageAuth, guarded, local_time
 
 STATUS_COLORS = {"running": "positive", "starting": "orange", "failed": "negative"}
 LOADING = " · loading, this can take several minutes"
+SHORT_FOR_CODING = (
+    f"Coding tools such as OpenCode need a context of at least {CODING_CONTEXT:,} tokens; "
+    "choose a smaller model for them."
+)
 
 
 def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
@@ -50,9 +54,9 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
             with ui.row().classes("items-end gap-4 w-full"):
                 model_in = ui.select([], label="Model").classes("min-w-[20rem]")
                 gpu_in = ui.select({}, label="GPU").classes("min-w-[16rem]")
-                context_in = ui.number("Context (tokens)", value=8192, min=256, step=1024).classes(
-                    "w-40"
-                )
+                context_in = ui.number(
+                    "Context (tokens)", value=SUGGESTED_CONTEXT, min=256, step=1024
+                ).classes("w-40")
             with ui.row().classes("items-center gap-2 w-full"):
                 ui.label("GPU memory for the model:")
                 share_in = ui.slider(min=0.1, max=0.95, step=0.05, value=0.9).classes("w-64")
@@ -90,6 +94,11 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
         api_url.set_text(url if svc.ai_api_public() else f"{url} (switched off)")
         key_in.set_value(svc.ai_api_key())
         model = state.repo or "<model>"
+        limit = (
+            f"# Context window: {state.context:,} tokens (question and answer together).\n"
+            if state.context
+            else ""
+        )
         example.set_content(
             "from openai import OpenAI\n\n"
             f'client = OpenAI(base_url="{url}", api_key="<API key>")\n'
@@ -97,18 +106,22 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
             f'    model="{model}",\n'
             '    messages=[{"role": "user", "content": "Hello!"}],\n'
             ")\nprint(reply.choices[0].message.content)\n"
+            f"{limit}"
             "# Self-signed certificate? Pass http_client=httpx.Client(verify=False)."
         )
 
-    async def update_estimate() -> None:
-        """Pre-fill the context and GPU share for the chosen model and show its estimate."""
+    async def update_estimate(suggest: bool = False) -> None:
+        """Pre-fill the context and GPU share for the chosen model and show its estimate.
+
+        Args:
+            suggest: Suggest a context for the model instead of using the one entered.
+        """
         if not model_in.value:
             estimate_label.set_text("")
             return
+        context = None if suggest or not context_in.value else int(context_in.value)
         try:
-            defaults = await run.io_bound(
-                svc.session_defaults, model_in.value, int(context_in.value or 8192)
-            )
+            defaults = await run.io_bound(svc.session_defaults, model_in.value, context)
         except ValidationError as exc:
             estimate_label.set_text(str(exc))
             return
@@ -117,10 +130,13 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
         context_in.set_value(defaults["context"])
         share_in.set_value(defaults["gpu_share"])
         estimate = defaults["estimate"]
-        estimate_label.set_text(
+        text = (
             f"Needs about {estimate.total / GIB:.1f} GB for a {estimate.context:,}-token context. "
             f"{defaults['verdict'].text}"
         )
+        if defaults["short_for_coding"]:
+            text += f" {SHORT_FOR_CODING}"
+        estimate_label.set_text(text)
 
     def show_share() -> None:
         """Show the GPU share as a percentage and in GB of the chosen GPU."""
@@ -198,7 +214,7 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
             ui.notify("Choose a model first.", type="warning")
             return
         defaults = await run.io_bound(
-            svc.session_defaults, model_in.value, int(context_in.value or 8192)
+            svc.session_defaults, model_in.value, int(context_in.value or SUGGESTED_CONTEXT)
         )
         if defaults["verdict"].level in ("busy", "tight", "too-big"):
             with ui.dialog() as dialog, ui.card():
@@ -246,8 +262,8 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
         """Replace the API key."""
         await act(svc.new_ai_api_key, done="New key made. It applies at the next start.")
 
-    model_in.on_value_change(guarded(auth, update_estimate))
-    context_in.on("blur", guarded(auth, update_estimate))
+    model_in.on_value_change(guarded(auth, lambda: update_estimate(suggest=True)))
+    context_in.on("blur", guarded(auth, lambda: update_estimate()))
     share_in.on_value_change(lambda _: show_share())
     gpu_in.on_value_change(lambda _: show_share())
     start_btn.on_click(guarded(auth, on_start))

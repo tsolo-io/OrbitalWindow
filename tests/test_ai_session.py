@@ -294,6 +294,10 @@ def test_session_defaults(service, model_on_disk):
     defaults = service.session_defaults("Qwen/Qwen3-0.6B", 100_000)
     assert defaults["context"] == 40960 and defaults["max_context"] == 40960
     assert 0.3 <= defaults["gpu_share"] <= 0.9 and defaults["verdict"].level == "fits"
+    assert defaults["short_for_coding"] is False
+    suggested = service.session_defaults("Qwen/Qwen3-0.6B")
+    assert suggested["context"] == 40960  # longest the model allows, under 64k
+    assert service.session_defaults("Qwen/Qwen3-0.6B", 8192)["short_for_coding"] is True
 
 
 def test_api_key_and_public_setting(service):

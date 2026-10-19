@@ -63,6 +63,7 @@ nav = [
     { "0028 Open WebUI chat" = "adr/0028-open-webui-chat.md" },
     { "0029 Coding benchmarks" = "adr/0029-coding-benchmarks.md" },
     { "0030 Browser terminal" = "adr/0030-browser-terminal.md" },
+    { "0031 Longer contexts" = "adr/0031-longer-default-context.md" },
   ] },
 ]
 

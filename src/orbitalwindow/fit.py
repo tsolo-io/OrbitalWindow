@@ -13,7 +13,11 @@ The KV cache ignores sliding-window attention, so the estimate errs on the large
 from dataclasses import dataclass
 from typing import Any
 
-DEFAULT_CONTEXT = 8192
+# The fit check plans for the least coding tools need: OpenCode's first request alone is about
+# 7,500 tokens, and the conversation grows from there (ADR 0031).
+CODING_CONTEXT = 32_768
+DEFAULT_CONTEXT = CODING_CONTEXT
+SUGGESTED_CONTEXT = 65_536  # the session's default when it fits
 GPU_SHARE = 0.9  # vLLM's default --gpu-memory-utilization
 OVERHEAD_BYTES = 1.5e9
 OVERHEAD_SHARE = 0.05  # of the weights: activations grow with the model
@@ -130,6 +134,32 @@ def estimate(
     kv_cache = shape.kv_per_token * context if shape else None
     overhead = OVERHEAD_BYTES + OVERHEAD_SHARE * weights
     return Estimate(weights, kv_cache, overhead, context, shape)
+
+
+def suggest_context(estimate: Estimate, gpu_total: float | None) -> int:
+    """Return the context a session should start with.
+
+    ``SUGGESTED_CONTEXT``, or less when the model allows less or the cache would not fit in
+    ``GPU_SHARE`` of the GPU next to the weights. Rounded down to whole thousands (1,024).
+
+    Args:
+        estimate: The model's estimate (its shape gives the cache per token and the maximum).
+        gpu_total: Memory of the GPU, or None when unknown.
+
+    Returns:
+        Tokens; ``DEFAULT_CONTEXT`` when nothing better is known or not even the weights fit.
+    """
+    if estimate.shape is None:
+        return DEFAULT_CONTEXT
+    tokens = SUGGESTED_CONTEXT
+    if estimate.shape.max_context:
+        tokens = min(tokens, estimate.shape.max_context)
+    if gpu_total:
+        longest = estimate.max_context(gpu_total) or 0
+        if longest < 1024:
+            return min(DEFAULT_CONTEXT, tokens)
+        tokens = min(tokens, longest // 1024 * 1024)
+    return tokens
 
 
 @dataclass(frozen=True)

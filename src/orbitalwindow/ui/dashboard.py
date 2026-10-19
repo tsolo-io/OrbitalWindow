@@ -280,6 +280,7 @@ def ai_card(auth: PageAuth) -> None:
             ui.label("AI model").classes("text-h6")
             badge = ui.badge("")
         text = ui.label()
+        context = ui.label().classes("text-caption text-grey-8")
         with ui.row().classes("items-center gap-4"):
             chat_btn = ui.button("Open chat", icon="chat").props(
                 f'no-caps href="{svc.chat_url()}" target="ow-chat"'
@@ -298,6 +299,12 @@ def ai_card(auth: PageAuth) -> None:
         card.set_visibility(state.status in ("starting", "running"))
         chat_ready = state.status == "running" and await run.io_bound(svc.chat_ready)
         chat_btn.set_visibility(chat_ready)
+        context.set_text(
+            f"Context window: {state.context:,} tokens. That is how much text (your question, "
+            "the conversation so far and the answer) the model can work with at once."
+            if state.context
+            else ""
+        )
         if state.status == "running":
             badge.set_text("ready")
             badge.props("color=positive")

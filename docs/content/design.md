@@ -215,6 +215,10 @@ env: {}                     # extra container environment
   `ai_sessions` history. vLLM gets a tool-call parser and, for Qwen3 thinking models, a reasoning
   parser chosen from `config.json` and the chat template (#30, #31); `--max-num-seqs 16` lets
   hybrid models such as Qwen3.5 start. The fit counts only full-attention layers for the KV cache.
+- **Context (#38, ADR 0031):** the fit check plans for 32,768 tokens, the least coding tools such
+  as OpenCode need. A session starts with the longest context that fits, up to 65,536 tokens and
+  the model's maximum (benchmarks use 8,192). The dashboard's AI card shows every user the running
+  context.
 - **Chat (#18, ADR 0028):** Open WebUI `ow-openwebui` on port 8443 (Traefik entrypoint `ai`)
   while the session runs. It signs users in from the forwardAuth headers `X-OW-Email`/`Name`/`Role`
   and offers per-user API keys (`Bearer sk-…` skips forwardAuth). Its data is in `state/openwebui`.

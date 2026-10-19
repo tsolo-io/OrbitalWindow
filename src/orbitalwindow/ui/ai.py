@@ -8,7 +8,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
-from ..fit import Estimate, Verdict
+from ..fit import CODING_CONTEXT, Estimate, Verdict
 from ..users import ValidationError
 from .ai_session import session_card
 from .common import authenticate, frame, guarded, local_time, service
@@ -85,6 +85,10 @@ def fit_details(estimate: Estimate, verdict: Verdict, gpu_total: float | None) -
             ui.label(f"Longest context that fits: {longest:,} tokens.").classes(
                 "text-caption text-grey-7"
             )
+        if longest is not None and longest < CODING_CONTEXT:
+            ui.label(
+                f"Too short for coding tools such as OpenCode (they need {CODING_CONTEXT:,})."
+            ).classes("text-caption text-orange-9")
 
 
 def gb(size: int | None) -> str:
