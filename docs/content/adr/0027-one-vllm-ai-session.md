@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0027 One AI session: a vLLM container with an OpenAI-compatible API
 
-- Status: accepted
+- Status: accepted (0038 adds Intel GPUs)
 - Date: 2026-10-10
 
 ## Context

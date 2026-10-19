@@ -84,3 +84,9 @@ def test_other_drivers_and_unknown_ids(stats, tmp_path):
     assert stats.find_gpus(fake_sysfs(tmp_path / "a", "amdgpu", "0x744c"), Path("/dev")) == []
     gpus = stats.find_gpus(fake_sysfs(tmp_path / "b", "i915", "0x1234"), Path("/dev"))
     assert gpus[0].name == "Intel GPU (8086:1234)"
+
+
+def test_unknown_arc_a_series_ids_are_named_as_such(stats, tmp_path):
+    """DG2 ids not in the table are named Arc A-series, so the service treats them like an A770."""
+    gpus = stats.find_gpus(fake_sysfs(tmp_path, "i915", "0x56b3"), Path("/dev"))
+    assert gpus[0].name == "Intel Arc A-series GPU (8086:56b3)"

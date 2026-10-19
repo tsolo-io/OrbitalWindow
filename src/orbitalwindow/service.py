@@ -28,9 +28,11 @@ from . import terminal as terminal_mod
 from . import users as users_mod
 from .aisession import (
     MIN_CONTEXT,
+    XE_HPG_KV_BYTES,
     AiSessions,
     SessionRequest,
     SessionState,
+    is_xe_hpg,
     reasoning_parser,
     tool_parser,
 )
@@ -749,7 +751,10 @@ class Service:
         if not stats:
             return None
         best = max(stats, key=lambda gpu: gpu.mem_total)
-        return fit_mod.Gpu(best.name, float(best.mem_total), float(best.mem_total - best.mem_used))
+        limit = XE_HPG_KV_BYTES if is_xe_hpg(self.desktops.gpu_vendor().value, best.name) else None
+        return fit_mod.Gpu(
+            best.name, float(best.mem_total), float(best.mem_total - best.mem_used), limit
+        )
 
     def fit_for_download(self, info: RepoInfo) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
         """Estimate whether an inspected model fits on the GPU.
@@ -763,7 +768,7 @@ class Service:
         weights = sum(size for path, size in info.files if path.endswith(".safetensors"))
         config = self.hub.config(info.repo, info.revision, self.hf_token())
         estimate = fit_mod.estimate(weights, config)
-        return estimate, fit_mod.verdict(estimate.total, self.model_gpu())
+        return estimate, fit_mod.verdict(estimate.total, self.model_gpu(), estimate.kv_cache)
 
     def fit_for_local(self, model: LocalModel) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
         """Estimate whether a downloaded model fits on the GPU.
@@ -775,7 +780,7 @@ class Service:
             The memory estimate and the verdict for the GPU.
         """
         estimate = fit_mod.estimate(model.weights, model.config())
-        return estimate, fit_mod.verdict(estimate.total, self.model_gpu())
+        return estimate, fit_mod.verdict(estimate.total, self.model_gpu(), estimate.kv_cache)
 
     def model_suggestions(self) -> list[Suggestion]:
         """Return llmfit's model suggestions for the GPU.
@@ -894,7 +899,9 @@ class Service:
         gpu = self.model_gpu()
         if context is None:
             planned = fit_mod.estimate(model.weights, model.config())
-            context = fit_mod.suggest_context(planned, gpu.total if gpu else None)
+            context = fit_mod.suggest_context(
+                planned, gpu.total if gpu else None, gpu.kv_limit if gpu else None
+            )
         estimate = fit_mod.estimate(model.weights, model.config(), context)
         share = 0.9
         if gpu is not None:
@@ -904,7 +911,7 @@ class Service:
             "max_context": estimate.shape.max_context if estimate.shape else None,
             "gpu_share": share,
             "estimate": estimate,
-            "verdict": fit_mod.verdict(estimate.total, gpu),
+            "verdict": fit_mod.verdict(estimate.total, gpu, estimate.kv_cache),
             "short_for_coding": estimate.context < fit_mod.CODING_CONTEXT,
         }
 
@@ -933,13 +940,13 @@ class Service:
             The GPUs, at least one.
 
         Raises:
-            ValidationError: On a host that is not NVIDIA, or without GPU numbers.
+            ValidationError: On an AMD host or one without a GPU, or without GPU numbers.
         """
-        if self.desktops.gpu_vendor() is not GpuVendor.NVIDIA:
-            raise ValidationError("The AI session needs an NVIDIA GPU.")
+        if self.desktops.gpu_vendor() not in (GpuVendor.NVIDIA, GpuVendor.INTEL):
+            raise ValidationError("The AI session needs an NVIDIA or Intel GPU.")
         gpus = self.gpus.stats()
         if not gpus:
-            raise ValidationError("The AI session needs an NVIDIA GPU (NVML is not available).")
+            raise ValidationError("The AI session needs the GPU's numbers, which are missing.")
         return gpus
 
     def start_ai_session(
@@ -969,6 +976,14 @@ class Service:
         shape = fit_mod.shape_from_config(model.config() or {})
         top = shape.max_context if shape and shape.max_context else 1_048_576
         tokens = _int_in(context, MIN_CONTEXT, top, "Context length")
+        gpu = next(g for g in gpus if g.index == index)
+        vendor = self.desktops.gpu_vendor().value
+        xe_hpg = is_xe_hpg(vendor, gpu.name)
+        if xe_hpg and shape and tokens * shape.kv_per_token > XE_HPG_KV_BYTES:
+            longest = int(XE_HPG_KV_BYTES // shape.kv_per_token)
+            raise ValidationError(
+                f"On the {gpu.name} the context can be at most {longest:,} tokens for this model."
+            )
         try:
             share = round(float(gpu_share), 2)
         except TypeError, ValueError:
@@ -984,6 +999,8 @@ class Service:
             self.ai_api_public(),
             tool_parser(config, model.repo, template),
             reasoning_parser(config, template),
+            vendor,
+            xe_hpg,
         )
         session_id = self.ai.start(request, self.ai_api_key(), actor)
         # Open WebUI starts alongside (its image may need pulling: don't hold up the page).

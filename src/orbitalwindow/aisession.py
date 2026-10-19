@@ -39,6 +39,12 @@ MIN_CONTEXT = 256
 # Hybrid models such as Qwen3.5 need a state block per request and fail to start when the GPU
 # share has fewer blocks than this; fewer also means fewer CUDA graphs to capture at start.
 MAX_SEQS = 16
+# Intel Arc A-series and Flex (Xe-HPG) need three changes (tested on an Arc A770, ADR 0038):
+# float16 (vLLM refuses bfloat16 on the A770), Triton attention (vLLM's Flash Attention kernels
+# need Xe2 or newer) and a KV cache under 4 GiB (larger blocks can't be addressed and give
+# garbage, so vLLM's whole cache must stay one block below that).
+XE_HPG_NAMES = ("Arc A", "Flex 1")
+XE_HPG_KV_BYTES = int(3.75 * 1024**3)
 LABEL_REPO = "ow.ai.repo"
 LABEL_SESSION = "ow.ai.session"
 # vLLM's tool call parser per model family (config.json ``model_type``). Open WebUI asks the model
@@ -73,6 +79,21 @@ class SessionRequest:
     public: bool  # route /v1 through Traefik
     tool_parser: str = ""  # vLLM tool call parser; empty: no tool calling
     reasoning_parser: str = ""  # vLLM reasoning parser; empty: thinking stays in the answer
+    gpu_vendor: str = "nvidia"  # nvidia: CUDA image; intel: XPU image
+    xe_hpg: bool = False  # Intel Arc A-series or Flex: see XE_HPG_NAMES
+
+
+def is_xe_hpg(vendor: str, gpu_name: str) -> bool:
+    """Tell whether a GPU is an Intel Arc A-series or Flex GPU, which vLLM needs to treat apart.
+
+    Args:
+        vendor: The GPU setting.
+        gpu_name: The GPU's name from the GPU numbers.
+
+    Returns:
+        True for those GPUs.
+    """
+    return vendor == "intel" and any(part in gpu_name for part in XE_HPG_NAMES)
 
 
 def tool_parser(config: dict[str, Any], repo: str, template: str = "") -> str:
@@ -144,8 +165,9 @@ def session_spec(
             f"traefik.http.routers.{ROUTER}.service": ROUTER,
             f"traefik.http.services.{ROUTER}.loadbalancer.server.port": str(PORT),
         }
+    intel = request.gpu_vendor == "intel"
     return {
-        "image": settings.vllm_image,
+        "image": settings.vllm_intel_image if intel else settings.vllm_image,
         "command": [
             f"{MOUNT}/{request.repo}",
             "--served-model-name",
@@ -166,7 +188,19 @@ def session_spec(
             if request.tool_parser
             else []
         )
-        + (["--reasoning-parser", request.reasoning_parser] if request.reasoning_parser else []),
+        + (["--reasoning-parser", request.reasoning_parser] if request.reasoning_parser else [])
+        + (
+            [
+                "--dtype",
+                "half",
+                "--attention-backend",
+                "TRITON_ATTN",
+                "--kv-cache-memory-bytes",
+                str(XE_HPG_KV_BYTES),
+            ]
+            if request.xe_hpg
+            else []
+        ),
         "name": CONTAINER,
         "hostname": CONTAINER,
         "detach": True,
@@ -177,14 +211,17 @@ def session_spec(
             "VLLM_NO_USAGE_STATS": "1",
             "DO_NOT_TRACK": "1",
             "TZ": settings.tz,
-        },
+        }
+        # Level Zero numbers the Intel GPUs like the exporter does (render node order).
+        | ({"ZE_AFFINITY_MASK": str(request.gpu_index)} if intel else {}),
         "volumes": {
             str(settings.models_dir): {"bind": MOUNT, "mode": "ro"},
             CACHE_VOLUME: {"bind": "/root/.cache", "mode": "rw"},
         },
-        "device_requests": [
-            DeviceRequest(device_ids=[str(request.gpu_index)], capabilities=[["gpu"]])
-        ],
+        "devices": ["/dev/dri:/dev/dri:rwm"] if intel else [],
+        "device_requests": []
+        if intel
+        else [DeviceRequest(device_ids=[str(request.gpu_index)], capabilities=[["gpu"]])],
         "shm_size": "2g",
         "network": NETWORK,
         "security_opt": ["no-new-privileges"],
@@ -389,9 +426,9 @@ class AiSessions:
         """
         try:
             network = self._ensure_network()
-            self._ensure_image()
             spec = session_spec(request, self._settings, api_key, session_id)
             image = spec.pop("image")
+            self._ensure_image(image)
             self._client.containers.run(image, **spec)
             if request.public:
                 self._connect(network, self._settings.traefik_container)
@@ -462,17 +499,20 @@ class AiSessions:
             if "already exists" not in str(exc):
                 raise
 
-    def _ensure_image(self) -> None:
+    def _ensure_image(self, image: str) -> None:
         """Pull the vLLM image unless it is already there (it is large: tens of GB).
+
+        Args:
+            image: The vLLM image of the session.
 
         Raises:
             ValidationError: If it can't be pulled.
         """
         try:
-            self._client.images.get(self._settings.vllm_image)
+            self._client.images.get(image)
         except docker.errors.ImageNotFound:
-            log.info("pulling %s", self._settings.vllm_image)
+            log.info("pulling %s", image)
             try:
-                self._client.images.pull(self._settings.vllm_image)
+                self._client.images.pull(image)
             except docker.errors.DockerException as exc:
-                raise ValidationError(f"Could not pull {self._settings.vllm_image}: {exc}") from exc
+                raise ValidationError(f"Could not pull {image}: {exc}") from exc

@@ -145,6 +145,7 @@ services:
       DOCKER_HOST: tcp://socket-proxy-rw:2375
       OW_LLMFIT_IMAGE: ${OW_LLMFIT_IMAGE:-ghcr.io/alexsjones/llmfit:1.1.15}
       OW_VLLM_IMAGE: ${OW_VLLM_IMAGE:-vllm/vllm-openai:v0.30.0}
+      OW_VLLM_INTEL_IMAGE: ${OW_VLLM_INTEL_IMAGE:-vllm/vllm-openai-xpu:v0.30.0}
       OW_OPENWEBUI_IMAGE: ${OW_OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.11.4}
     volumes:
       # Same path inside and outside, so mount sources we give Docker are valid host paths.

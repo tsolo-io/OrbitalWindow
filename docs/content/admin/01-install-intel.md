@@ -54,7 +54,15 @@ Set `OW_GPU_VENDOR=intel` in `.env` (or **Settings → GPU**). Then:
   check if a model fits and suggest models. The exporter runs as root with only the
   `CAP_PERFMON` capability, which the kernel requires for these numbers.
 - **GPU load** is the busiest engine (render, compute, copy or video) in the last 2 seconds.
-- The **AI session** (vLLM) needs NVIDIA.
+- The **AI session** runs vLLM's Intel image (`OW_VLLM_INTEL_IMAGE`, about 17 GB). On the Arc
+  A-series and Flex GPUs (tested: A770) OrbitalWindow starts it with `--dtype half` (vLLM refuses
+  bfloat16 on the A770), `--attention-backend TRITON_ATTN` (vLLM's Flash Attention kernels need
+  the newer Xe2 GPUs) and a context cache of at most 3.75 GB (these GPUs can't address larger
+  memory blocks). So the longest context is shorter than on an NVIDIA GPU with the same memory:
+  about 35,000 tokens for Qwen3-0.6B and 27,000 for Qwen3-8B. Newer Intel GPUs (Arc B-series)
+  run vLLM's defaults; they are untested.
+  **Known problem:** on the A770 a context over about 5,100 tokens hangs the GPU (ADR 0038), so
+  the chat does not work yet.
 - **GPU computing:** desktop and terminal-only images built on an Intel host get Intel's compute
   runtime: OpenCL (`intel-opencl-icd`), oneAPI Level Zero (`libze-intel-gpu1`) and `clinfo`.
   `clinfo -l` in a desktop lists the GPU. Programs such as PyTorch for Intel GPUs (XPU) use it.

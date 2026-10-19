@@ -8,7 +8,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
-from ..fit import CODING_CONTEXT, Estimate, Verdict
+from ..fit import CODING_CONTEXT, Estimate, Gpu, Verdict
 from ..users import ValidationError
 from .ai_session import session_card
 from .common import authenticate, frame, guarded, local_time, service
@@ -59,13 +59,13 @@ STATUS_COLORS = (
 )
 
 
-def fit_details(estimate: Estimate, verdict: Verdict, gpu_total: float | None) -> None:
+def fit_details(estimate: Estimate, verdict: Verdict, gpu: Gpu | None) -> None:
     """Add the GPU memory estimate and the verdict to the current container.
 
     Args:
         estimate: The memory estimate.
         verdict: How it compares with the GPU.
-        gpu_total: Memory of the GPU, for the longest context that fits; None without a GPU.
+        gpu: The GPU, for the longest context that fits; None without GPU information.
     """
     parts = f"weights {gb(estimate.weights)}"
     if estimate.kv_cache is not None:
@@ -79,8 +79,8 @@ def fit_details(estimate: Estimate, verdict: Verdict, gpu_total: float | None) -
         ui.label(
             "The model's configuration couldn't be read, so the cache isn't included."
         ).classes("text-caption text-grey-7")
-    elif gpu_total:
-        longest = estimate.max_context(gpu_total)
+    elif gpu:
+        longest = estimate.max_context(gpu.total, gpu.kv_limit)
         if longest:
             ui.label(f"Longest context that fits: {longest:,} tokens.").classes(
                 "text-caption text-grey-7"
@@ -439,7 +439,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
             gpu = await run.io_bound(svc.model_gpu)
             spinner.delete()
             with info_box:
-                fit_details(estimate, verdict, gpu.total if gpu else None)
+                fit_details(estimate, verdict, gpu)
 
         async def on_suggest() -> None:
             """Run llmfit (or use its recent answer) and show the suggestions."""

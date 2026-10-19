@@ -35,4 +35,4 @@ The image already contains Mesa and `intel-media-va-driver-non-free` (iHD). Linu
 - The dashboard and System page show no Intel GPU numbers. ADR 0036 adds them.
 - GPU computing (OpenCL, oneAPI) in desktops needs Intel's compute runtime in the image. ADR 0037
   adds it.
-- vLLM has an Intel (XPU) build. Using it is a separate decision.
+- vLLM has an Intel (XPU) build. ADR 0038 uses it for the AI session.
