@@ -131,6 +131,34 @@ make start
 
 Then rebuild the desktops (**Desktops → Rebuild**); users' software images are rebuilt automatically.
 
+## Locked out
+
+If nobody can log in as an administrator (a forgotten password, or the only admin was disabled or
+deleted), run this on the server, in the folder with `.env`:
+
+```bash
+make reset-admin-password                # the user "admin"
+make reset-admin-password NAME=jsmith    # another user
+```
+
+It stops OrbitalWindow for a few seconds (desktops and the AI session keep running), and then:
+
+1. gives the user a new password and prints it once;
+2. enables the account if it was disabled, and makes it an administrator;
+3. creates the user again (as an administrator) if it was deleted;
+4. sets the same password for Windows file sharing;
+5. records the reset in the audit log (*system*, `user.recover`);
+6. starts OrbitalWindow again, also when something failed.
+
+Log in with the new password and change it (**Change my password** on the dashboard).
+
+If the Samba step fails, the command prints a warning, but the new password works for
+OrbitalWindow. Set the password again on **Users** to fix Windows file sharing.
+
+After 5 failed logins within 5 minutes OrbitalWindow blocks logins from that address, and for
+that user name, for the rest of the 5 minutes. The block is kept in memory: the reset (or
+`make restart`) clears it.
+
 ## Troubleshooting
 
 | Symptom | Check |

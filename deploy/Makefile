@@ -13,6 +13,7 @@
 #   make install-matlab    install the shared MATLAB (matlab add-on)
 #   make backup DEST=…     back up homes, group folders, state and Samba passwords
 #   make export-cert       save the self-signed certificate as orbitalwindow.crt for users' PCs
+#   make reset-admin-password [NAME=admin]   locked out? new password for an admin (#42)
 #
 # The compose files follow .env: compose.nvidia.yaml when OW_GPU_VENDOR=nvidia, compose.intel.yaml
 # when it is intel, compose.tls.yaml when OW_ACME_DNS_PROVIDER is set. DEV=1 (used by the
@@ -31,7 +32,7 @@ COMPOSE ?= docker compose $(COMPOSE_FILES) --env-file .env
 SERVICE ?= orbitalwindow
 KEEP ?= 14
 .PHONY: help init start update stop restart logs status install-conda install-matlab backup \
-  export-cert
+  export-cert reset-admin-password
 
 help: ## List the targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; \
@@ -76,6 +77,15 @@ backup: .env ## Back up to DEST (required), keeping KEEP days (default 14)
 export-cert: ## Save the self-signed certificate as orbitalwindow.crt (install it on users' PCs)
 	docker run --rm -v ow-traefik-certs:/c:ro alpine:3.22 cat /c/default.crt > orbitalwindow.crt
 	@echo "Saved orbitalwindow.crt"
+
+# The service is stopped while the reset runs (the database has one writer) and always started
+# again. NAME, not USER: the shell already sets USER to your own login name.
+reset-admin-password: .env ## Locked out: new password for NAME (default admin), enabled and admin
+	@echo "Stopping OrbitalWindow for a moment (desktops keep running)..."
+	@$(COMPOSE) stop $(SERVICE)
+	@$(COMPOSE) run --rm --no-deps -l traefik.enable=false $(SERVICE) \
+	  orbitalwindow-reset-admin $(or $(NAME),admin); status=$$?; \
+	  echo "Starting OrbitalWindow again..."; $(COMPOSE) start $(SERVICE); exit $$status
 
 .env:
 	@echo "Missing .env in $(CURDIR). Create it with 'make init' (or copy .env.example), then edit it." >&2
