@@ -26,6 +26,7 @@ from docker.types import DeviceRequest, EndpointConfig
 from .addons import Addon
 from .config import Settings
 from .db import Database
+from .terminal import ShellTarget, stop_session
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +99,18 @@ def desktop_path(user: str, session: str = "") -> str:
         ``/desktop/<user>/`` or ``/desktop/<user>/<session>/``.
     """
     return f"/desktop/{user}/{session}/" if session else f"/desktop/{user}/"
+
+
+def desktop_shell(user: str) -> ShellTarget:
+    """Return where a user's terminal runs: in the desktop, as ``abc``, in the home folder.
+
+    Args:
+        user: OrbitalWindow user name.
+
+    Returns:
+        The shell target of the user's desktop.
+    """
+    return ShellTarget(container_name(user), "abc", "/config")
 
 
 def new_session_id() -> str:
@@ -450,13 +463,23 @@ class Desktops:
     # --- helpers -----------------------------------------------------------------------------
 
     def _remove_container(self, name: str) -> None:
-        """Force-remove a user's desktop container, if there is one.
+        """Stop the terminal and force-remove a user's desktop container, if there is one.
 
         Args:
             name: OrbitalWindow user name.
         """
+        try:
+            container = self._client.containers.get(container_name(name))
+        except docker.errors.NotFound:
+            return
+        if container.status == "running":
+            # Stop the terminal first, so its programs get SIGHUP rather than SIGKILL.
+            try:
+                stop_session(self._client, desktop_shell(name))
+            except docker.errors.APIError as exc:
+                log.warning("stop terminal of %s: %s", name, exc)
         with contextlib.suppress(docker.errors.NotFound):
-            self._client.containers.get(container_name(name)).remove(force=True)
+            container.remove(force=True)
 
     def _ensure_network(self, name: str) -> Any:
         """Return a user's own network, creating it if needed.

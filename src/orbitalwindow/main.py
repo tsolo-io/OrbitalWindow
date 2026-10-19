@@ -119,6 +119,7 @@ def mount_ui(app: FastAPI, settings: Settings) -> None:
         help,
         login,
         status,
+        terminal,
     )
 
     ui.run_with(

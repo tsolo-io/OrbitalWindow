@@ -8,6 +8,7 @@ Every state-changing action is recorded in ``audit``. UI and HTTP handlers call 
 and never touch Docker or the DB directly.
 """
 
+import contextlib
 import logging
 import os
 import re
@@ -23,6 +24,7 @@ from . import fit as fit_mod
 from . import groups as groups_mod
 from . import models as models_mod
 from . import ssh as ssh_mod
+from . import terminal as terminal_mod
 from . import users as users_mod
 from .aisession import (
     MIN_CONTEXT,
@@ -47,6 +49,7 @@ from .desktops import (
     GpuVendor,
     SshAccess,
     container_name,
+    desktop_shell,
 )
 from .disk import HostSpace
 from .disk import Usage as DiskUsage
@@ -60,6 +63,7 @@ from .reconcile import reconcile
 from .samba import Samba, SambaError
 from .software import Software
 from .suggestions import LlmFit, Suggestion, SuggestionError
+from .terminal import SessionStart, Terminal
 from .users import ValidationError, validate_password
 
 log = logging.getLogger(__name__)
@@ -1875,6 +1879,74 @@ class Service:
         if by_admin:
             self.db.execute("UPDATE users SET stopped_by_admin = true WHERE id = ?", [user_id])
         self.db.audit(actor, "desktop.stop", user["name"], "by admin" if by_admin else "")
+
+    def open_terminal(self, actor: str, user_id: int, rows: int, cols: int) -> Terminal:
+        """Connect to the terminal in the user's running desktop, starting it if needed.
+
+        The terminal (a tmux session, as the desktop's user ``abc``) keeps running when the page
+        closes. A desktop image without tmux gets a plain shell that ends with the page.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            rows: Terminal height in lines.
+            cols: Terminal width in characters.
+
+        Returns:
+            The open connection; the caller closes it. ``tmux`` is False for a plain shell.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+            DesktopError: When the desktop is not running or the terminal can't start.
+        """
+        user = self._require_user(user_id)
+        if self.desktops.state(user["name"]) is not DesktopState.RUNNING:
+            raise DesktopError("Your desktop is not running. Start it from your dashboard.")
+        target = desktop_shell(user["name"])
+        try:
+            started = terminal_mod.ensure_session(self.client, target, rows, cols)
+        except RuntimeError as exc:
+            raise DesktopError("The terminal could not start. Please try again.") from exc
+        terminal = Terminal(self.client, target, tmux=started is not SessionStart.NO_TMUX)
+        terminal.open(rows, cols)
+        if started is SessionStart.STARTED:
+            self.db.audit(actor, "terminal.start", user["name"])
+        return terminal
+
+    def terminal_running(self, user_id: int) -> bool:
+        """Return whether the user's desktop has a terminal running.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            True while the desktop runs a terminal session.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        if self.desktops.state(user["name"]) is not DesktopState.RUNNING:
+            return False
+        try:
+            return terminal_mod.session_running(self.client, desktop_shell(user["name"]))
+        except docker.errors.APIError:
+            return False
+
+    def stop_terminal(self, actor: str, user_id: int) -> None:
+        """Stop the terminal in the user's desktop and every program started in it.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        with contextlib.suppress(docker.errors.APIError):
+            terminal_mod.stop_session(self.client, desktop_shell(user["name"]))
+        self.db.audit(actor, "terminal.stop", user["name"])
 
     def choose_image(self, actor: str, user_id: int, image_id: int) -> None:
         """Switch a user to another desktop image.

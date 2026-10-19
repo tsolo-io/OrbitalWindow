@@ -9,9 +9,10 @@ FROM ${BASE_IMAGE}
 
 # Ubuntu's nvtop carries cap_perfmon, which is outside Docker's bounding set, so exec
 # fails; drop the capability (NVIDIA stats via NVML don't need it).
+# tmux keeps the browser terminal running without a browser (ADR 0030).
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      git python3 python3-venv curl unzip rsync nano htop nvtop libcap2-bin \
+      git python3 python3-venv curl unzip rsync nano htop nvtop tmux libcap2-bin \
       mesa-utils vulkan-tools fonts-dejavu fonts-liberation fonts-noto-core \
  && (setcap -r /usr/bin/nvtop || true) \
  && rm -rf /var/lib/apt/lists/*

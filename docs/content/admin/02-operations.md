@@ -80,6 +80,10 @@ at start. Running desktops keep running; the web pages are unavailable for under
 service restarts. `make start` applies changes to `.env`. (`make restart` stops the
 whole stack first, which interrupts every service; it is rarely needed.)
 
+When a release changes the desktop base image (`deploy/image/`), for example to add tmux for the
+browser terminal, rebuild the desktops (**Desktops → Rebuild**). Users get the new image at their
+next start.
+
 ## Backup and restore
 
 `make backup` saves homes, group folders, the state folder (database, keys) and the Samba

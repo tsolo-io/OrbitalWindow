@@ -29,6 +29,7 @@ nav = [
     { "SSH and SFTP" = "user/04-ssh.md" },
     { "Problems and questions" = "user/05-help.md" },
     { "AI chat and models" = "user/06-ai.md" },
+    { "Terminal" = "user/07-terminal.md" },
   ] },
   { "Decisions (ADR)" = [
     { "Overview" = "adr/index.md" },
@@ -61,6 +62,7 @@ nav = [
     { "0027 One vLLM AI session" = "adr/0027-one-vllm-ai-session.md" },
     { "0028 Open WebUI chat" = "adr/0028-open-webui-chat.md" },
     { "0029 Coding benchmarks" = "adr/0029-coding-benchmarks.md" },
+    { "0030 Browser terminal" = "adr/0030-browser-terminal.md" },
   ] },
 ]
 

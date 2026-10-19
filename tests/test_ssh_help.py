@@ -145,7 +145,8 @@ def test_ssh_command(service):
 def test_help_pages_are_ordered_and_filled_in():
     """Help pages are ordered and their placeholders and links filled in."""
     pages = list_pages(HELP_DIR)
-    assert [p.slug for p in pages] == ["getting-started", "software", "files", "ssh", "help", "ai"]
+    slugs = ["getting-started", "software", "files", "ssh", "help", "ai", "terminal"]
+    assert [p.slug for p in pages] == slugs
     assert pages[0].title == "Getting started"
     values = {"host": "desk.x", "user": "user1", "samba_path": r"\\desk.x\user1",
               "ssh_cmd": "ssh -p 2222 user1@desk.x", "groups": "**labx**"}  # fmt: skip

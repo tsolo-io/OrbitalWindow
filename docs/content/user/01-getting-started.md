@@ -27,6 +27,9 @@ needs to be installed on your computer.
 
 You can close the browser tab at any time; your desktop keeps running until you press **Stop**.
 
+If you prefer a command line, **Open terminal** gives you one in your desktop, in the browser. It
+keeps running when you close it (see [Terminal](07-terminal.md)).
+
 ## Good to know
 
 - Everything you keep in your home folder stays when the desktop is stopped or restarted.
