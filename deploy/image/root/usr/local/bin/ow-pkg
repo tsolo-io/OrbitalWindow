@@ -1,0 +1,67 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# ow-pkg: one way to use the image's package manager, whatever the distribution (ADR 0034).
+#   ow-pkg manager              print apt, apk, dnf or pacman
+#   ow-pkg install PKG...       install packages (all must exist)
+#   ow-pkg install-any PKG...   install the packages that exist; report the others
+#   ow-pkg index                print the names of all installable packages, one per line
+#   ow-pkg clean                remove package caches and lists
+set -eu
+
+manager() {
+    for tool in apt-get apk dnf pacman; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            [ "$tool" = apt-get ] && echo apt || echo "$tool"
+            return
+        fi
+    done
+    echo unknown
+}
+
+install() {
+    [ $# -gt 0 ] || return 0
+    case "$(manager)" in
+        apt) apt-get update -qq \
+             && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@" ;;
+        apk) apk add --no-cache "$@" ;;
+        dnf) dnf install -y --setopt=install_weak_deps=False "$@" ;;
+        # Arch only supports installing on an up-to-date system.
+        pacman) pacman -Syu --noconfirm --needed "$@" ;;
+        *) echo "ow-pkg: no supported package manager (apt, apk, dnf, pacman)" >&2; return 1 ;;
+    esac
+}
+
+clean() {
+    case "$(manager)" in
+        apt) rm -rf /var/lib/apt/lists/* ;;
+        apk) rm -rf /var/cache/apk/* ;;
+        dnf) dnf clean all >/dev/null ;;
+        pacman) yes | pacman -Scc >/dev/null 2>&1 || true ;;
+    esac
+}
+
+command=${1:-}
+[ $# -gt 0 ] && shift
+case "$command" in
+    manager) manager ;;
+    install) install "$@" && clean ;;
+    install-any)
+        if ! install "$@"; then
+            for package in "$@"; do
+                install "$package" || echo "ow-pkg: $package is not available here; skipped" >&2
+            done
+        fi
+        clean ;;
+    index)
+        case "$(manager)" in
+            apt) apt-get update -qq >/dev/null 2>&1 && apt-cache pkgnames ;;
+            apk) apk update -q >/dev/null 2>&1 && apk search -q ;;
+            dnf) dnf -q repoquery --available --qf '%{name}\n' 2>/dev/null ;;
+            pacman) pacman -Sy >/dev/null 2>&1 && pacman -Slq ;;
+        esac | sort -u ;;
+    clean) clean ;;
+    *) echo "usage: ow-pkg manager|install|install-any|index|clean [PKG...]" >&2; exit 2 ;;
+esac

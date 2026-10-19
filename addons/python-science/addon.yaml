@@ -10,6 +10,7 @@ description: >-
   your home folder.
 restricted: false
 script: install.sh
+managers: [apt, dnf, pacman]   # conda needs glibc: not on Alpine
 launchers: [ow-jupyterlab.desktop, ow-spyder.desktop]
 mounts:
   - {source: shared/conda, target: /opt/conda, read_only: true}

@@ -3,24 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # OrbitalWindow terminal-only image (no desktop), built by the service as ow-terminal:<name>
-# from a LinuxServer base image (ADR 0033). The base gives s6, the abc user from PUID/PGID and
-# /config as home, so add-ons, SSH and the browser terminal work as in a desktop.
+# from a LinuxServer base image of any distribution ow-pkg supports (ADR 0033, ADR 0034). The
+# base gives s6, the abc user from PUID/PGID and /config as home, so add-ons, SSH and the
+# browser terminal work as in a desktop.
 ARG BASE_IMAGE=lscr.io/linuxserver/baseimage-ubuntu:noble
 FROM ${BASE_IMAGE}
 
-# The same command-line tools as the desktop image, plus sudo (the desktops have it too).
-# abc gets bash as its login shell (the base images give it /bin/false), for SSH and tmux, and
-# its password "!" (locked) becomes "*" (no password, not locked): sshd runs without PAM and
-# refuses locked accounts even for key logins.
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      bash ca-certificates git python3 python3-venv curl unzip rsync nano less htop nvtop tmux \
-      sudo procps libcap2-bin \
- && (setcap -r /usr/bin/nvtop || true) \
- && rm -rf /var/lib/apt/lists/* \
- && usermod -s /bin/bash -p '*' abc \
- && echo 'abc ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/abc \
- && chmod 440 /etc/sudoers.d/abc
+COPY root/usr/local/bin/ow-pkg /usr/local/bin/ow-pkg
+COPY base-packages.sh /tmp/base-packages.sh
+RUN sh /tmp/base-packages.sh terminal && rm /tmp/base-packages.sh
 
 COPY root/ /
 

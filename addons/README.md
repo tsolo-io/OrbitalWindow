@@ -16,7 +16,9 @@ key: matlab                 # must equal the folder name: lowercase letters, dig
 label: MATLAB               # shown to users
 description: MATLAB R2026b (shared install). Activate your own licence on first start.
 restricted: true            # an admin must grant it to a user first (default: false)
-apt: [libxt6t64, libnss3]   # Ubuntu packages installed into the user's image
+apt: [libxt6t64, libnss3]   # Ubuntu and Debian packages installed into the user's image
+apk: []                     # the same for Alpine, dnf: for Fedora, pacman: for Arch
+managers: [apt]             # optional: the systems it works on (see below)
 script: install.sh          # optional; run as root during the image build, from this folder
 launchers: [ow-matlab.desktop]   # files in this folder, installed to /usr/share/applications
 mounts:                     # added when the desktop starts (no rebuild needed)
@@ -27,10 +29,17 @@ gui: false                  # true: only useful with a desktop; not offered with
 
 ## Rules
 
-- `apt` entries must be plain package names. They are installed with `--no-install-recommends`.
+- `apt`, `apk`, `dnf` and `pacman` list plain package names for each system. OrbitalWindow
+  installs them with `ow-pkg install` (apt with `--no-install-recommends`, dnf without weak
+  dependencies).
+- **Which systems an add-on works on** (ADR 0034): those in `managers`, if given. Otherwise those
+  it lists packages for. An add-on with only a script counts as written for Ubuntu and Debian
+  (`apt`), and one with neither works everywhere. On other systems users see it greyed out:
+  *Not available for Fedora*.
 - `script` is a file name in the folder. It runs with `sh` as root, with network access, in the
-  folder (copied to `/opt/ow/addons/<key>/`). It may add apt repositories; apt lists are cleaned
-  afterwards. Make it idempotent and fail on errors (`set -eu`).
+  folder (copied to `/opt/ow/addons/<key>/`), with `OW_PKG_MANAGER` set to `apt`, `apk`, `dnf` or
+  `pacman`. It may add package repositories; package caches are cleaned afterwards. Make it
+  idempotent and fail on errors (`set -eu`).
 - `launchers` must be named `ow-<name>.desktop`. Every `ow-*.desktop` in
   `/usr/share/applications` is put on the user's Desktop at start, and icons of add-ons that were
   removed disappear.
@@ -46,7 +55,7 @@ gui: false                  # true: only useful with a desktop; not offered with
 
 ## When changes take effect
 
-- `apt`, `script` and `launchers` are part of the user's own image `ow-user-<name>`. Changing the
+- Packages, `script` and `launchers` are part of the user's own image `ow-user-<name>`. Changing the
   selection, or any file in the add-on folder, rebuilds the image (users press **Apply**; after
   **Reload add-ons**, affected images are rebuilt automatically). Users restart their desktop to
   get the new image.
@@ -56,10 +65,11 @@ gui: false                  # true: only useful with a desktop; not offered with
 
 ## Shipped add-ons
 
-| Key | What | Needs on the server |
-|---|---|---|
-| `matlab` (restricted) | MATLAB runtime libraries, launcher, `/opt/matlab` | `make install-matlab` (deploy folder) |
-| `python-science` | conda in every shell, JupyterLab and Spyder launchers, `/opt/conda` | `make install-conda` (deploy folder) |
-| `vscode` | Visual Studio Code from Microsoft's repository | – |
-| `devtools` | build-essential, cmake, gfortran, pkg-config, git-gui, gitk, git-lfs | – |
-| `rstudio` | R from Ubuntu, RStudio Desktop from Posit | – |
+| Key | What | Systems | Needs on the server |
+|---|---|---|---|
+| `matlab` (restricted) | MATLAB runtime libraries, launcher, `/opt/matlab` (desktop only) | Ubuntu, Debian | `make install-matlab` (deploy folder) |
+| `python-science` | conda in every shell, JupyterLab and Spyder launchers, `/opt/conda` | all but Alpine | `make install-conda` (deploy folder) |
+| `vscode` | Visual Studio Code from Microsoft's repository (desktop only) | Ubuntu, Debian | – |
+| `devtools` | compilers (gcc, gfortran), cmake, pkg-config, git-gui, gitk, git-lfs | all | – |
+| `rstudio` | R from Ubuntu, RStudio Desktop from Posit (desktop only) | Ubuntu, Debian | – |
+| `ssh` | sshd for the SSH gateway, with SFTP | all | – |

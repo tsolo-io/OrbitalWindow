@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""What software a user has: add-ons (open, granted, switched on) and their own apt packages.
+"""What software a user has: add-ons (open, granted, switched on) and their own packages.
 
 Also decides which image a desktop starts from and whether the per-user image is up to date.
 """
@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .addons import Addon, Catalog, load_catalog
+from .addons import MANAGERS, Addon, Catalog, load_catalog
 from .db import Database
 from .users import ValidationError
 
-PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,127}$")
+# Debian names are lower case; Fedora, Alpine and Arch also use upper case, _ and @.
+PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+._@-]{0,127}$")
 MAX_PACKAGES = 200
 
 
@@ -43,6 +44,7 @@ class AddonState:
     granted: bool
     selected: bool
     needs_desktop: bool = False  # a GUI add-on while the user's image has no desktop
+    unsupported: str = ""  # the user's system, when the add-on doesn't work on it
 
     @property
     def available(self) -> bool:
@@ -60,7 +62,7 @@ class AddonState:
         Returns:
             True if the user selected the add-on, may use it, and has a desktop if it needs one.
         """
-        return self.selected and self.available and not self.needs_desktop
+        return self.selected and self.available and not self.needs_desktop and not self.unsupported
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,7 @@ class UserPlan:
     addons: tuple[Addon, ...]  # active add-ons that change the image, sorted by key
     packages: tuple[str, ...]
     hash: str | None
+    manager: str = "apt"  # the image's package manager (ow-pkg)
 
 
 class Software:
@@ -170,15 +173,17 @@ class Software:
         settings = self._settings()
         granted = self._keys("SELECT key FROM addon_grants WHERE user_id = ?", user_id)
         selected = self._keys("SELECT key FROM user_addons WHERE user_id = ?", user_id)
-        has_desktop = self._db.scalar(
-            "SELECT coalesce(i.gui, true) FROM users u LEFT JOIN images i ON i.id = u.image_id "
-            "WHERE u.id = ?",
+        image = self._db.one(
+            "SELECT coalesce(i.gui, true) AS gui, coalesce(i.pkg_manager, 'apt') AS manager "
+            "FROM users u LEFT JOIN images i ON i.id = u.image_id WHERE u.id = ?",
             [user_id],
-        )
+        ) or {"gui": True, "manager": "apt"}
+        system = MANAGERS.get(image["manager"], image["manager"])
         return [
             AddonState(addon, self.is_restricted(addon, settings.get(addon.key)),
                        addon.key in granted, addon.key in selected,
-                       addon.spec.gui and has_desktop is False)
+                       addon.spec.gui and not image["gui"],
+                       "" if addon.spec.supports(image["manager"]) else system)
             for addon in self.enabled_addons()
         ]  # fmt: skip
 
@@ -209,6 +214,9 @@ class Software:
             raise ValidationError("That software is not available.")
         if on and not state.available:
             raise ValidationError(f"Ask your administrator for access to {state.addon.spec.label}.")
+        if on and state.unsupported:
+            label = state.addon.spec.label
+            raise ValidationError(f"{label} is not available for {state.unsupported}.")
         if on and state.needs_desktop:
             raise ValidationError(f"{state.addon.spec.label} needs a desktop.")
         if on:
@@ -223,7 +231,7 @@ class Software:
     # --- packages ----------------------------------------------------------------------------
 
     def packages(self, user_id: int) -> list[str]:
-        """Return the user's own apt packages.
+        """Return the user's own packages.
 
         Args:
             user_id: The user's database id.
@@ -247,18 +255,18 @@ class Software:
         Returns:
             Matching package names, shortest first; empty for no image or an invalid prefix.
         """
-        prefix = prefix.strip().lower()
+        prefix = prefix.strip()
         if image_id is None or not prefix or not PACKAGE_RE.fullmatch(prefix):
             return []
         rows = self._db.all(
-            "SELECT name FROM pkg_index WHERE image_id = ? AND starts_with(name, ?) "
+            "SELECT name FROM pkg_index WHERE image_id = ? AND starts_with(lower(name), ?) "
             "ORDER BY length(name), name LIMIT ?",
-            [image_id, prefix, limit],
+            [image_id, prefix.lower(), limit],
         )
         return [r["name"] for r in rows]
 
     def add_package(self, user_id: int, image_id: int | None, name: str) -> str:
-        """Add an apt package to the user's list.
+        """Add a package to the user's list.
 
         Args:
             user_id: The user's database id.
@@ -273,14 +281,20 @@ class Software:
                 not exist for the desktop (or its package list is not ready) or the user has
                 too many packages.
         """
-        name = name.strip().lower()
+        name = name.strip()
         if not PACKAGE_RE.fullmatch(name):
             raise ValidationError("That is not a valid package name.")
         if image_id is None:
             raise ValidationError("Choose a desktop first.")
-        known = self._db.scalar(
-            "SELECT count(*) FROM pkg_index WHERE image_id = ? AND name = ?", [image_id, name]
+        # The exact name, or else the one name that matches without regard to case.
+        matches = self._db.all(
+            "SELECT name FROM pkg_index WHERE image_id = ? AND lower(name) = lower(?) "
+            "ORDER BY name = ? DESC",
+            [image_id, name, name],
         )
+        known = bool(matches) and (matches[0]["name"] == name or len(matches) == 1)
+        if known:
+            name = matches[0]["name"]
         if not known:
             if not self._db.scalar("SELECT count(*) FROM pkg_index WHERE image_id = ?", [image_id]):
                 raise ValidationError("The package list for this desktop is not ready yet.")
@@ -293,7 +307,7 @@ class Software:
         return name
 
     def remove_package(self, user_id: int, name: str) -> None:
-        """Remove an apt package from the user's list.
+        """Remove a package from the user's list.
 
         Args:
             user_id: The user's database id.
@@ -332,7 +346,7 @@ class Software:
             digest = h.hexdigest()
         return UserPlan(
             user["id"], user["name"], image["id"], image["image_ref"], image["docker_id"],
-            addons, packages, digest,
+            addons, packages, digest, image["pkg_manager"] or "apt",
         )  # fmt: skip
 
     def user_image(self, user_id: int) -> dict[str, Any] | None:
