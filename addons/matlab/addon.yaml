@@ -18,3 +18,4 @@ apt: [ca-certificates, libasound2t64, libcairo-gobject2, libcairo2, libcap2, lib
 launchers: [ow-matlab.desktop]
 mounts:
   - {source: shared/matlab, target: /opt/matlab, read_only: true}
+gui: true                   # needs a desktop

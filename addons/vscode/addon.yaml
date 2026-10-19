@@ -9,3 +9,4 @@ restricted: false
 apt: [gpg, apt-transport-https]
 script: install.sh
 launchers: [ow-vscode.desktop]
+gui: true                   # needs a desktop

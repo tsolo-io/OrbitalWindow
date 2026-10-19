@@ -34,6 +34,12 @@ and user names must differ.
 - **Desktops**: add a LinuxServer webtop tag to build a new desktop; **Rebuild** picks up base image
   updates (do this regularly for security updates). Users' own images are rebuilt automatically
   afterwards. A desktop can only be removed when nobody uses it.
+- **Terminal only**: choose *Terminal only* and give a LinuxServer base image (for example
+  `baseimage-ubuntu:noble`, or a full reference such as `lscr.io/linuxserver/baseimage-ubuntu:noble`)
+  for users who work in the terminal and want a little more performance. It has the same GPU, CPU,
+  memory and folders as a desktop, but no desktop: users reach it with **Open terminal** and SSH.
+  Choosing one switches SSH on for the user (unless SSH is restricted and not granted). Add-ons
+  marked as needing a desktop (VS Code, RStudio, MATLAB) are not offered with it.
 - **Add-ons** are folders in `addons/` (format in `addons/README.md`). After editing one, press
   **Reload add-ons**; images that include it are rebuilt. Invalid add-ons are listed with their error.
 

@@ -29,7 +29,7 @@ RESERVED_ENV = frozenset(
     {
         "PUID", "PGID", "TZ", "TITLE", "CUSTOM_USER", "PASSWORD", "SUBFOLDER",
         "PIXELFLUX_WAYLAND", "START_DOCKER", "NVIDIA_DRIVER_CAPABILITIES", "OW_GROUPS",
-        "OW_USER_ENV",
+        "OW_USER_ENV", "OW_GUI",
     }
 )  # fmt: skip
 # Container paths an add-on mount may not cover.
@@ -104,6 +104,7 @@ class AddonSpec(BaseModel):
     launchers: list[str] = []
     mounts: list[Mount] = []
     env: dict[str, str] = {}
+    gui: bool = False  # only useful with a desktop: not offered for terminal-only containers
 
     @field_validator("apt")
     @classmethod

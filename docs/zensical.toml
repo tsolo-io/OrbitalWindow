@@ -66,6 +66,7 @@ nav = [
     { "0030 Browser terminal" = "adr/0030-browser-terminal.md" },
     { "0031 Longer contexts" = "adr/0031-longer-default-context.md" },
     { "0032 Environment variables" = "adr/0032-user-environment-variables.md" },
+    { "0033 Terminal-only containers" = "adr/0033-terminal-only-containers.md" },
   ] },
 ]
 

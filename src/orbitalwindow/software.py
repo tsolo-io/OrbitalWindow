@@ -42,6 +42,7 @@ class AddonState:
     restricted: bool
     granted: bool
     selected: bool
+    needs_desktop: bool = False  # a GUI add-on while the user's image has no desktop
 
     @property
     def available(self) -> bool:
@@ -57,9 +58,9 @@ class AddonState:
         """Tell whether the add-on is in use: switched on and available.
 
         Returns:
-            True if the user selected the add-on and may use it.
+            True if the user selected the add-on, may use it, and has a desktop if it needs one.
         """
-        return self.selected and self.available
+        return self.selected and self.available and not self.needs_desktop
 
 
 @dataclass(frozen=True)
@@ -169,9 +170,15 @@ class Software:
         settings = self._settings()
         granted = self._keys("SELECT key FROM addon_grants WHERE user_id = ?", user_id)
         selected = self._keys("SELECT key FROM user_addons WHERE user_id = ?", user_id)
+        has_desktop = self._db.scalar(
+            "SELECT coalesce(i.gui, true) FROM users u LEFT JOIN images i ON i.id = u.image_id "
+            "WHERE u.id = ?",
+            [user_id],
+        )
         return [
             AddonState(addon, self.is_restricted(addon, settings.get(addon.key)),
-                       addon.key in granted, addon.key in selected)
+                       addon.key in granted, addon.key in selected,
+                       addon.spec.gui and has_desktop is False)
             for addon in self.enabled_addons()
         ]  # fmt: skip
 
@@ -202,6 +209,8 @@ class Software:
             raise ValidationError("That software is not available.")
         if on and not state.available:
             raise ValidationError(f"Ask your administrator for access to {state.addon.spec.label}.")
+        if on and state.needs_desktop:
+            raise ValidationError(f"{state.addon.spec.label} needs a desktop.")
         if on:
             self._db.execute(
                 "INSERT INTO user_addons VALUES (?, ?) ON CONFLICT DO NOTHING", [user_id, key]

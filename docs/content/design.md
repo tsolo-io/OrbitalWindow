@@ -244,6 +244,14 @@ env: {}                     # extra container environment
   runs.
 - tmux is in the desktop base image. Older desktops get a plain shell that ends with the page.
 
+### Terminal-only containers (ticket #40, ADR 0033)
+- An image row with `gui = false` is built from a LinuxServer base image (`base_image`, for
+  example `lscr.io/linuxserver/baseimage-ubuntu:noble`) with `deploy/image/Dockerfile.terminal`,
+  as `ow-terminal:<name>`. It sits in the same slot as a desktop: one container per user.
+- The container has the same resources but no Traefik route or desktop settings. It is used
+  through **Open terminal** and SSH, and SSH is switched on when it is chosen. Add-ons with
+  `gui: true` are not offered.
+
 ### Environment variables (ticket #41, ADR 0032)
 - Page `/environment` (linked from the desktop card): the user's own variables (`user_env`), set
   in every desktop they start, whichever desktop it is. They win over add-on `env`. Names
