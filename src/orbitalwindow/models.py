@@ -7,6 +7,7 @@
 Each model is a plain folder (``hf download --local-dir``), not the Hub cache: its size is one
 walk, deleting it is one ``rmtree``, and vLLM or Python code load it by path. Only the files an
 inference engine needs are downloaded (``INCLUDE``); duplicate original checkpoints are skipped.
+For llama.cpp, a GGUF repository is downloaded as one chosen file (one quantisation) per folder.
 """
 
 import contextlib
@@ -22,9 +23,13 @@ from typing import Any
 
 import httpx2
 
+from . import gguf as gguf_mod
+from .fit import Shape
+from .gguf import GgufModel
 from .users import ValidationError
 
 HUB_URL = "https://huggingface.co"
+GGUF_RANGE = 4 << 20  # bytes of a GGUF file fetched at a time to read its metadata
 INCLUDE = ("*.json", "*.safetensors", "*.txt", "*.model", "*.tiktoken", "*.jinja")
 EXCLUDE = ("original/*",)
 # Folder hf keeps resume metadata in, inside each model folder.
@@ -96,6 +101,24 @@ class RepoInfo:
     parameters: int | None
     license: str
     files: tuple[tuple[str, int], ...]  # (path, bytes) of the files that will be downloaded
+    gguf: tuple[GgufModel, ...] = ()  # GGUF models (one per quantisation), for llama.cpp
+
+    def gguf_model(self, name: str) -> GgufModel:
+        """Return one of the repository's GGUF models.
+
+        Args:
+            name: Its file name (the first part of a split model), as listed in ``gguf``.
+
+        Returns:
+            The model.
+
+        Raises:
+            ValidationError: If the repository has no such GGUF file.
+        """
+        for model in self.gguf:
+            if model.name == name:
+                return model
+        raise ValidationError(f"{self.repo} has no GGUF file {name}.")
 
     @property
     def total_bytes(self) -> int:
@@ -128,21 +151,27 @@ def parse_repo_info(data: dict[str, Any]) -> RepoInfo:
     config = data.get("config") or {}
     architectures = config.get("architectures") or []
     safetensors = data.get("safetensors") or {}
+    gguf = data.get("gguf") or {}  # GGUF repositories: architecture and parameters from the file
     card = data.get("cardData") or {}
-    files = tuple(
-        (sibling["rfilename"], int(sibling.get("size") or 0))
+    siblings = [
+        (sibling.get("rfilename", ""), int(sibling.get("size") or 0))
         for sibling in data.get("siblings") or []
-        if wanted(sibling.get("rfilename", ""))
-    )
+    ]
+    files = tuple((path, size) for path, size in siblings if wanted(path))
     licence = card.get("license") or ""
     return RepoInfo(
         repo=data.get("id", ""),
         revision=data.get("sha", ""),
         gated=bool(data.get("gated")),
-        architecture=architectures[0] if architectures else config.get("model_type", ""),
-        parameters=safetensors.get("total"),
+        architecture=(
+            architectures[0]
+            if architectures
+            else config.get("model_type") or gguf.get("architecture", "")
+        ),
+        parameters=safetensors.get("total") or gguf.get("total"),
         license=licence if isinstance(licence, str) else ", ".join(licence),
         files=files,
+        gguf=tuple(gguf_mod.group_files(siblings)),
     )
 
 
@@ -214,6 +243,43 @@ class HubClient:
             return None
         return data if isinstance(data, dict) else None
 
+    def gguf_shape(self, repo: str, revision: str, name: str, token: str | None) -> Shape | None:
+        """Read the attention shape from the metadata at the start of a GGUF file on the Hub.
+
+        Args:
+            repo: Model id, already validated.
+            revision: Commit, branch or tag, already validated.
+            name: The GGUF file (the first part of a split model).
+            token: Hugging Face token, or None.
+
+        Returns:
+            The shape, or None if it can't be read.
+        """
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+        def fetch(offset: int) -> bytes:
+            """Fetch the next part of the file.
+
+            Args:
+                offset: Where the part starts.
+
+            Returns:
+                The bytes, b"" at the end or on an error.
+            """
+            ranged = headers | {"Range": f"bytes={offset}-{offset + GGUF_RANGE - 1}"}
+            try:
+                response = self._client.get(
+                    f"/{repo}/resolve/{revision}/{name}", headers=ranged, follow_redirects=True
+                )
+            except httpx2.HTTPError:
+                return b""
+            return response.content if response.status_code in (200, 206) else b""
+
+        try:
+            return gguf_mod.shape_from_metadata(gguf_mod.read_metadata(fetch(0), fetch))
+        except gguf_mod.GgufError:
+            return None
+
 
 @dataclass(frozen=True)
 class LocalModel:
@@ -221,6 +287,30 @@ class LocalModel:
     path: Path
     bytes: int
     modified: datetime
+
+    @property
+    def gguf(self) -> GgufModel | None:
+        """Return the model's GGUF file, for llama.cpp.
+
+        Returns:
+            The GGUF model (one quantisation per folder), or None if there is none.
+        """
+        files = [
+            (str(file.relative_to(self.path)), file.stat().st_size)
+            for file in self.path.rglob("*.gguf")
+            if HF_META_DIR not in file.relative_to(self.path).parts
+        ]
+        found = gguf_mod.group_files(files)
+        return found[0] if found else None
+
+    @property
+    def has_safetensors(self) -> bool:
+        """Tell whether vLLM can load the model (a ``config.json`` and safetensors weights).
+
+        Returns:
+            True if it can.
+        """
+        return (self.path / "config.json").is_file() and self.weights > 0
 
     @property
     def weights(self) -> int:
@@ -306,7 +396,7 @@ class ModelLibrary:
         return self.root / repo
 
     def models(self) -> list[LocalModel]:
-        """List the downloaded models: folders ``<org>/<name>`` that contain a ``config.json``.
+        """List the downloaded models: folders ``<org>/<name>`` with a ``config.json`` or GGUF file.
 
         Returns:
             The models, sorted by id.
@@ -318,14 +408,25 @@ class ModelLibrary:
             if not org.is_dir() or org.name.startswith("."):
                 continue
             for folder in sorted(org.iterdir()):
-                config = folder / "config.json"
-                if folder.is_dir() and config.is_file():
+                if not folder.is_dir():
+                    continue
+                marker = folder / "config.json"
+                if not marker.is_file():
+                    marker = next(
+                        (
+                            file
+                            for file in folder.rglob("*.gguf")
+                            if HF_META_DIR not in file.relative_to(folder).parts
+                        ),
+                        None,
+                    )
+                if marker is not None:
                     found.append(
                         LocalModel(
                             repo=f"{org.name}/{folder.name}",
                             path=folder,
                             bytes=folder_bytes(folder),
-                            modified=datetime.fromtimestamp(config.stat().st_mtime, UTC),
+                            modified=datetime.fromtimestamp(marker.stat().st_mtime, UTC),
                         )
                     )
         return found

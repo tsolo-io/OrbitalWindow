@@ -38,4 +38,5 @@ Set `OW_GPU_VENDOR=nvidia` in `.env` (or **Settings → GPU**). Then:
 - `make start` adds `compose.nvidia.yaml`, so the dashboard and System page show GPU load and memory
   (from NVML). For a plain `docker compose`, add it to `COMPOSE_FILE`.
 - The desktop stream uses NVENC for video encoding. OpenGL runs through zink on Vulkan.
-- The AI session (vLLM), model suggestions and MATLAB GPU computing (`gpuArray`) work.
+- The AI session runs with vLLM or llama.cpp (**Settings → AI**). Model suggestions and MATLAB GPU
+  computing (`gpuArray`) work.

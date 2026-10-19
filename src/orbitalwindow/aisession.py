@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""The AI session: one vLLM container serving one downloaded model on one GPU.
+"""The AI session: one vLLM or llama.cpp container serving one downloaded model on one GPU.
 
 The container ``ow-ai-model`` runs on its own internal network ``ow-ai`` and serves vLLM's
 OpenAI-compatible API on port 8000, protected by an API key. When the API is made reachable
@@ -45,6 +45,11 @@ MAX_SEQS = 16
 # garbage, so vLLM's whole cache must stay one block below that).
 XE_HPG_NAMES = ("Arc A", "Flex 1")
 XE_HPG_KV_BYTES = int(3.75 * 1024**3)
+# llama.cpp (ADR 0039): requests served at once; they share one KV cache of the session's context.
+LLAMACPP_SLOTS = 4
+# llama.cpp's image per GPU vendor: CUDA, SYCL (Intel's oneAPI; much faster than Vulkan on an
+# Arc A770) and ROCm.
+LLAMACPP_BACKENDS = {"nvidia": "cuda", "intel": "intel", "amd": "rocm"}
 LABEL_REPO = "ow.ai.repo"
 LABEL_SESSION = "ow.ai.session"
 # vLLM's tool call parser per model family (config.json ``model_type``). Open WebUI asks the model
@@ -81,6 +86,8 @@ class SessionRequest:
     reasoning_parser: str = ""  # vLLM reasoning parser; empty: thinking stays in the answer
     gpu_vendor: str = "nvidia"  # nvidia: CUDA image; intel: XPU image
     xe_hpg: bool = False  # Intel Arc A-series or Flex: see XE_HPG_NAMES
+    engine: str = "vllm"  # vllm | llamacpp
+    model_file: str = ""  # llama.cpp: the GGUF file in the model folder
 
 
 def is_xe_hpg(vendor: str, gpu_name: str) -> bool:
@@ -165,6 +172,8 @@ def session_spec(
             f"traefik.http.routers.{ROUTER}.service": ROUTER,
             f"traefik.http.services.{ROUTER}.loadbalancer.server.port": str(PORT),
         }
+    if request.engine == "llamacpp":
+        return llamacpp_spec(request, settings, api_key, labels)
     intel = request.gpu_vendor == "intel"
     return {
         "image": settings.vllm_intel_image if intel else settings.vllm_image,
@@ -230,6 +239,92 @@ def session_spec(
             "interval": 10 * 10**9,
             "timeout": 5 * 10**9,
             # Loading, compiling and capturing CUDA graphs can take many minutes the first time.
+            "start_period": 30 * 60 * 10**9,
+            "start_interval": 5 * 10**9,
+            "retries": 3,
+        },
+        "restart_policy": {"Name": "no"},
+    }
+
+
+def llamacpp_image(settings: Settings, vendor: str) -> str:
+    """Return the llama.cpp server image for a GPU vendor.
+
+    Args:
+        settings: Application settings (repository and build).
+        vendor: The GPU setting.
+
+    Returns:
+        For example ``ghcr.io/ggml-org/llama.cpp:server-intel-b11382``.
+    """
+    backend = LLAMACPP_BACKENDS.get(vendor, "vulkan")
+    return f"{settings.llamacpp_image}:server-{backend}-{settings.llamacpp_build}"
+
+
+def llamacpp_spec(
+    request: SessionRequest, settings: Settings, api_key: str, labels: dict[str, str]
+) -> dict[str, Any]:
+    """Build the ``containers.run`` arguments for a llama.cpp session.
+
+    Same name, network, port and key as a vLLM session, so the chat, the API and the benchmarks
+    don't depend on the engine.
+
+    Args:
+        request: What to serve and with which resources (``model_file`` is the GGUF file).
+        settings: Application settings.
+        api_key: The key clients must send.
+        labels: The container labels.
+
+    Returns:
+        Keyword arguments for ``client.containers.run``.
+    """
+    index = str(request.gpu_index)
+    environment = {"LLAMA_API_KEY": api_key, "TZ": settings.tz}
+    devices: list[str] = []
+    device_requests: list[DeviceRequest] = []
+    if request.gpu_vendor == "nvidia":
+        device_requests.append(DeviceRequest(device_ids=[index], capabilities=[["gpu"]]))
+    elif request.gpu_vendor == "intel":
+        devices.append("/dev/dri:/dev/dri:rwm")
+        environment["ONEAPI_DEVICE_SELECTOR"] = f"level_zero:{index}"
+    else:
+        devices += ["/dev/dri:/dev/dri:rwm", "/dev/kfd:/dev/kfd:rwm"]
+        environment["HIP_VISIBLE_DEVICES"] = index
+    return {
+        "image": llamacpp_image(settings, request.gpu_vendor),
+        "command": [
+            "--model",
+            f"{MOUNT}/{request.repo}/{request.model_file}",
+            "--alias",
+            request.repo,
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(PORT),
+            "--ctx-size",
+            str(request.context),
+            "--n-gpu-layers",
+            "999",
+            "--parallel",
+            str(LLAMACPP_SLOTS),
+            "--kv-unified",
+            "--jinja",  # the model's own chat template: tool calls and thinking
+            "--no-webui",
+        ],
+        "name": CONTAINER,
+        "hostname": CONTAINER,
+        "detach": True,
+        "labels": labels,
+        "environment": environment,
+        "volumes": {str(settings.models_dir): {"bind": MOUNT, "mode": "ro"}},
+        "devices": devices,
+        "device_requests": device_requests,
+        "network": NETWORK,
+        "security_opt": ["no-new-privileges"],
+        "healthcheck": {
+            "test": ["CMD", "curl", "-fsS", "-o", "/dev/null", f"http://localhost:{PORT}/health"],
+            "interval": 10 * 10**9,
+            "timeout": 5 * 10**9,
             "start_period": 30 * 60 * 10**9,
             "start_interval": 5 * 10**9,
             "retries": 3,

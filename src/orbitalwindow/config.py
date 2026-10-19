@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     vllm_image: str = "vllm/vllm-openai:v0.30.0"
     # vLLM image for Intel GPUs (XPU; about 17 GB).
     vllm_intel_image: str = "vllm/vllm-openai-xpu:v0.30.0"
+    # llama.cpp server images: <image>:server-<cuda|intel|rocm>-<build> (ADR 0039).
+    llamacpp_image: str = "ghcr.io/ggml-org/llama.cpp"
+    llamacpp_build: str = "b11382"
     # Open WebUI image for the AI chat, served on its own port (it can't run under a path).
     openwebui_image: str = "ghcr.io/open-webui/open-webui:v0.11.4"
     chat_port: int = 8443

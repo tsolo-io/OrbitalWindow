@@ -147,6 +147,8 @@ services:
       OW_VLLM_IMAGE: ${OW_VLLM_IMAGE:-vllm/vllm-openai:v0.30.0}
       OW_VLLM_INTEL_IMAGE: ${OW_VLLM_INTEL_IMAGE:-vllm/vllm-openai-xpu:v0.30.0}
       OW_OPENWEBUI_IMAGE: ${OW_OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.11.4}
+      OW_AI_ENGINE: ${OW_AI_ENGINE:-vllm}
+      OW_LLAMACPP_BUILD: ${OW_LLAMACPP_BUILD:-b11382}
     volumes:
       # Same path inside and outside, so mount sources we give Docker are valid host paths.
       - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}

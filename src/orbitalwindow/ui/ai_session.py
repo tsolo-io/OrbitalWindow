@@ -51,13 +51,14 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
                 "Start a downloaded model. Everyone can then use it, and it keeps running until it "
                 "is stopped. One model runs at a time."
             ).classes("text-caption text-grey-7")
+            engine_label = ui.label().classes("text-caption text-grey-7")
             with ui.row().classes("items-end gap-4 w-full"):
                 model_in = ui.select([], label="Model").classes("min-w-[20rem]")
                 gpu_in = ui.select({}, label="GPU").classes("min-w-[16rem]")
                 context_in = ui.number(
                     "Context (tokens)", value=SUGGESTED_CONTEXT, min=256, step=1024
                 ).classes("w-40")
-            with ui.row().classes("items-center gap-2 w-full"):
+            with ui.row().classes("items-center gap-2 w-full") as share_row:
                 ui.label("GPU memory for the model:")
                 share_in = ui.slider(min=0.1, max=0.95, step=0.05, value=0.9).classes("w-64")
                 share_label = ui.label()
@@ -154,9 +155,10 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
         badge.props(f"color={STATUS_COLORS.get(state.status, 'grey')}")
         if state.status in ("starting", "running"):
             started = local_time(state.started_at)
+            share = f"{state.gpu_share:.0%} of the GPU · " if state.gpu_share else ""
             status.set_text(
                 f"{state.repo} on GPU {state.gpu_index} · {state.context:,} tokens · "
-                f"{state.gpu_share:.0%} of the GPU · started by {state.started_by} {started}"
+                f"{share}started by {state.started_by} {started}"
                 + (LOADING if state.status == "starting" else "")
             )
         elif state.status == "failed":
@@ -175,7 +177,19 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
             if result is None:  # None: the page closed or the app is stopping
                 return
             library = result[0]
-            options = [model.repo for model in library]
+            engine = await run.io_bound(svc.ai_engine)
+            llamacpp = engine == "llamacpp"
+            engine_label.set_text(
+                "AI engine: llama.cpp (GGUF models; its GPU memory follows the context)."
+                if llamacpp
+                else "AI engine: vLLM (safetensors models)."
+            )
+            share_row.set_visibility(not llamacpp)
+            options = [
+                model.repo
+                for model in library
+                if (model.gguf is not None if llamacpp else model.has_safetensors)
+            ]
             if options != model_in.options:
                 keep = model_in.value if model_in.value in options else None
                 model_in.set_options(options, value=keep)

@@ -235,6 +235,12 @@ MIGRATIONS: list[str] = [
     ALTER TABLE images ADD COLUMN IF NOT EXISTS pkg_manager VARCHAR DEFAULT 'apt';
     UPDATE images SET pkg_manager = 'apt' WHERE pkg_manager IS NULL;
     """,
+    # 13: GGUF downloads for llama.cpp (#54): the files of the chosen quantisation, space-separated;
+    # empty for a safetensors model (the files in models.INCLUDE)
+    """
+    ALTER TABLE model_downloads ADD COLUMN files VARCHAR DEFAULT '';
+    UPDATE model_downloads SET files = '' WHERE files IS NULL;
+    """,
 ]
 
 

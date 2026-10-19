@@ -119,7 +119,10 @@ class Estimate:
 
 
 def estimate(
-    weights: float, config: dict[str, Any] | None, context: int = DEFAULT_CONTEXT
+    weights: float,
+    config: dict[str, Any] | None,
+    context: int = DEFAULT_CONTEXT,
+    shape: Shape | None = None,
 ) -> Estimate:
     """Estimate the GPU memory for serving a model.
 
@@ -127,11 +130,12 @@ def estimate(
         weights: Size of the weight files in bytes.
         config: The model's ``config.json``, or None if it couldn't be read.
         context: Context length to plan the KV cache for (capped at the model's maximum).
+        shape: The attention shape when there is no ``config.json`` (a GGUF file's metadata).
 
     Returns:
         The estimate.
     """
-    shape = shape_from_config(config) if config else None
+    shape = shape or (shape_from_config(config) if config else None)
     if shape is not None and shape.max_context:
         context = min(context, shape.max_context)
     kv_cache = shape.kv_per_token * context if shape else None

@@ -51,4 +51,5 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0035](0035-intel-gpus.md) | Intel GPUs: `gpu_vendor=intel` passes only `/dev/dri` | accepted |
 | [0036](0036-intel-gpu-numbers.md) | Intel GPU numbers: an exporter with only `CAP_PERFMON` | accepted |
 | [0037](0037-vendor-packages-in-images.md) | GPU vendor packages in images, and GPU device groups for `abc` | accepted |
-| [0038](0038-ai-session-on-intel.md) | The AI session on Intel GPUs: vLLM's XPU image, with limits on Arc A-series | proposed |
+| [0038](0038-ai-session-on-intel.md) | The AI session on Intel GPUs: vLLM's XPU image, with limits on Arc A-series | accepted in part (see 0039) |
+| [0039](0039-llama-cpp-engine.md) | A second AI engine: llama.cpp with GGUF models, for Intel and AMD | accepted |

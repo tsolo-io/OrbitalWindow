@@ -21,6 +21,7 @@ import docker
 
 from . import disk, userenv
 from . import fit as fit_mod
+from . import gguf as gguf_mod
 from . import groups as groups_mod
 from . import models as models_mod
 from . import ssh as ssh_mod
@@ -78,6 +79,10 @@ DEFAULT_SETTINGS = {
     "scratch_retention_days": "30",
 }
 GPU_VENDORS = tuple(v.value for v in GpuVendor)
+AI_ENGINES = ("vllm", "llamacpp")
+# GPU vendors each AI engine runs on. vLLM's Intel image hangs Arc A-series GPUs on long
+# contexts (ADR 0038), so Intel hosts should use llama.cpp; it is allowed for newer Intel GPUs.
+ENGINE_VENDORS = {"vllm": ("nvidia", "intel"), "llamacpp": ("nvidia", "intel", "amd")}
 
 
 @dataclass
@@ -157,6 +162,9 @@ class Service:
                 self.db.set_setting(key, value)
         if self.db.get_setting("gpu_vendor") is None:
             self.db.set_setting("gpu_vendor", os.environ.get("OW_GPU_VENDOR", GpuVendor.NVIDIA))
+        if self.db.get_setting("ai_engine") is None:
+            engine = os.environ.get("OW_AI_ENGINE", "vllm")
+            self.db.set_setting("ai_engine", engine if engine in AI_ENGINES else "vllm")
         if self.db.get_setting("hostname") is None:
             self.db.set_setting("hostname", self.settings.hostname)
         # The layout was prepared before the DB was open; write the scratch README with the
@@ -677,32 +685,44 @@ class Service:
         revision = models_mod.validate_revision(revision)
         return self.hub.inspect(repo, revision, self.hf_token())
 
-    def download_model(self, actor: str, repo: str, revision: str = "") -> int:
+    def download_model(self, actor: str, repo: str, revision: str = "", gguf: str = "") -> int:
         """Inspect a model and queue its download.
 
         Args:
             actor: Name recorded in the audit log.
             repo: Model id as typed.
             revision: Branch, tag or commit; empty means ``main``.
+            gguf: The GGUF file to download (for llama.cpp); empty for the safetensors weights.
 
         Returns:
             The download id.
 
         Raises:
-            ValidationError: When the model can't be found, has no safetensors weights, is
-                already being downloaded or doesn't fit on the disk.
+            ValidationError: When the model can't be found, has no such weights, already has
+                another GGUF file, is already being downloaded or doesn't fit on the disk.
         """
         info = self.inspect_model(repo, revision)
-        have = models_mod.folder_bytes(self.models.path_for(info.repo))
-        needed = max(info.total_bytes - have, 0)
+        chosen = info.gguf_model(gguf) if gguf else None
+        path = self.models.path_for(info.repo)
+        if chosen is not None:
+            existing = next((m for m in self.models.models() if m.repo == info.repo), None)
+            other = existing.gguf if existing else None
+            if other is not None and other.name != chosen.name:
+                raise ValidationError(
+                    f"{info.repo} already has {other.name}. Delete it first to download another "
+                    "GGUF file: a model folder holds one."
+                )
+        have = models_mod.folder_bytes(path)
+        needed = max((chosen.bytes if chosen else info.total_bytes) - have, 0)
         free = self.models.space().free
         if needed > free:
             raise ValidationError(
                 f"{info.repo} needs {needed / 1024**3:.1f} GB but only {free / 1024**3:.1f} GB "
                 "is free."
             )
-        download_id = self.downloads.queue(info, actor)
-        self.db.audit(actor, "ai.download", info.repo, info.revision)
+        download_id = self.downloads.queue(info, actor, chosen)
+        detail = f"{info.revision} {chosen.name}" if chosen else info.revision
+        self.db.audit(actor, "ai.download", info.repo, detail)
         return download_id
 
     def cancel_download(self, actor: str, download_id: int) -> None:
@@ -751,24 +771,64 @@ class Service:
         if not stats:
             return None
         best = max(stats, key=lambda gpu: gpu.mem_total)
-        limit = XE_HPG_KV_BYTES if is_xe_hpg(self.desktops.gpu_vendor().value, best.name) else None
+        xe_hpg = is_xe_hpg(self.desktops.gpu_vendor().value, best.name)
+        limit = XE_HPG_KV_BYTES if xe_hpg and self.ai_engine() == "vllm" else None
         return fit_mod.Gpu(
             best.name, float(best.mem_total), float(best.mem_total - best.mem_used), limit
         )
 
-    def fit_for_download(self, info: RepoInfo) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
+    def fit_for_download(
+        self, info: RepoInfo, gguf: str = ""
+    ) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
         """Estimate whether an inspected model fits on the GPU.
 
         Args:
             info: The inspected model.
+            gguf: One of its GGUF files (for llama.cpp); empty for the safetensors weights.
 
         Returns:
             The memory estimate and the verdict for the GPU.
         """
-        weights = sum(size for path, size in info.files if path.endswith(".safetensors"))
-        config = self.hub.config(info.repo, info.revision, self.hf_token())
-        estimate = fit_mod.estimate(weights, config)
+        if gguf:
+            chosen = info.gguf_model(gguf)
+            shape = self.hub.gguf_shape(info.repo, info.revision, chosen.name, self.hf_token())
+            estimate = fit_mod.estimate(chosen.bytes, None, shape=shape)
+        else:
+            weights = sum(size for path, size in info.files if path.endswith(".safetensors"))
+            config = self.hub.config(info.repo, info.revision, self.hf_token())
+            estimate = fit_mod.estimate(weights, config)
         return estimate, fit_mod.verdict(estimate.total, self.model_gpu(), estimate.kv_cache)
+
+    def _uses_gguf(self, model: LocalModel) -> bool:
+        """Tell whether a model runs from its GGUF file (llama.cpp) rather than safetensors.
+
+        Args:
+            model: The downloaded model.
+
+        Returns:
+            True with the llama.cpp engine, or for a model that has only a GGUF file.
+        """
+        if model.gguf is None:
+            return False
+        return self.ai_engine() == "llamacpp" or not model.has_safetensors
+
+    def _estimate(
+        self, model: LocalModel, context: int = fit_mod.DEFAULT_CONTEXT
+    ) -> fit_mod.Estimate:
+        """Estimate the GPU memory for serving a downloaded model with the current engine.
+
+        Args:
+            model: The downloaded model.
+            context: Context length to plan for.
+
+        Returns:
+            The estimate.
+        """
+        found = model.gguf if self._uses_gguf(model) else None
+        if found is not None:
+            shape = gguf_mod.shape_of_file(str(model.path / found.name))
+            return fit_mod.estimate(found.bytes, None, context, shape)
+        return fit_mod.estimate(model.weights, model.config(), context)
 
     def fit_for_local(self, model: LocalModel) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
         """Estimate whether a downloaded model fits on the GPU.
@@ -779,8 +839,17 @@ class Service:
         Returns:
             The memory estimate and the verdict for the GPU.
         """
-        estimate = fit_mod.estimate(model.weights, model.config())
+        estimate = self._estimate(model)
         return estimate, fit_mod.verdict(estimate.total, self.model_gpu(), estimate.kv_cache)
+
+    def ai_engine(self) -> str:
+        """Return the AI engine setting.
+
+        Returns:
+            ``vllm`` or ``llamacpp``.
+        """
+        engine = self.db.get_setting("ai_engine")
+        return engine if engine in AI_ENGINES else "vllm"
 
     def model_suggestions(self) -> list[Suggestion]:
         """Return llmfit's model suggestions for the GPU.
@@ -898,11 +967,11 @@ class Service:
         model = self._local_model(repo)
         gpu = self.model_gpu()
         if context is None:
-            planned = fit_mod.estimate(model.weights, model.config())
+            planned = self._estimate(model)
             context = fit_mod.suggest_context(
                 planned, gpu.total if gpu else None, gpu.kv_limit if gpu else None
             )
-        estimate = fit_mod.estimate(model.weights, model.config(), context)
+        estimate = self._estimate(model, context)
         share = 0.9
         if gpu is not None:
             share = min(max(round((estimate.total / gpu.total + 0.1) * 20) / 20, 0.3), 0.9)
@@ -940,10 +1009,16 @@ class Service:
             The GPUs, at least one.
 
         Raises:
-            ValidationError: On an AMD host or one without a GPU, or without GPU numbers.
+            ValidationError: On a host whose GPU the engine doesn't support, or without GPU
+                numbers.
         """
-        if self.desktops.gpu_vendor() not in (GpuVendor.NVIDIA, GpuVendor.INTEL):
-            raise ValidationError("The AI session needs an NVIDIA or Intel GPU.")
+        engine = self.ai_engine()
+        if self.desktops.gpu_vendor().value not in ENGINE_VENDORS[engine]:
+            raise ValidationError(
+                "The AI session with vLLM needs an NVIDIA or Intel GPU; llama.cpp also runs on AMD."
+                if engine == "vllm"
+                else "The AI session needs a GPU (NVIDIA, Intel or AMD)."
+            )
         gpus = self.gpus.stats()
         if not gpus:
             raise ValidationError("The AI session needs the GPU's numbers, which are missing.")
@@ -957,39 +1032,54 @@ class Service:
         Args:
             actor: Name recorded in the audit log.
             repo: Model id.
-            gpu_index: NVIDIA GPU number.
+            gpu_index: GPU number (as the GPU numbers list it).
             context: Context length in tokens.
-            gpu_share: Share of the GPU's memory vLLM may use (0.1–0.95).
+            gpu_share: Share of the GPU's memory vLLM may use (0.1–0.95); llama.cpp ignores it
+                (its memory follows the context).
 
         Returns:
             The session id.
 
         Raises:
-            ValidationError: For a model that isn't downloaded, an unknown GPU, values out of range,
-                or when a session is already running.
+            ValidationError: For a model that isn't downloaded or doesn't suit the engine, an
+                unknown GPU, values out of range, or when a session is already running.
         """
         model = self._local_model(repo)
+        engine = self.ai_engine()
+        found = model.gguf
+        if engine == "llamacpp" and found is None:
+            raise ValidationError(
+                f"{model.repo} has no GGUF file, which llama.cpp needs. Download a GGUF version "
+                "of the model (often named …-GGUF)."
+            )
+        if engine == "vllm" and not model.has_safetensors:
+            raise ValidationError(
+                f"{model.repo} is a GGUF model. Choose llama.cpp as the AI engine (Settings) to "
+                "run it."
+            )
         gpus = self._ai_gpus()
         index = _int_in(gpu_index, 0, max(g.index for g in gpus), "GPU")
         if index not in {g.index for g in gpus}:
             raise ValidationError("Unknown GPU.")
-        shape = fit_mod.shape_from_config(model.config() or {})
+        shape = self._estimate(model).shape
         top = shape.max_context if shape and shape.max_context else 1_048_576
         tokens = _int_in(context, MIN_CONTEXT, top, "Context length")
         gpu = next(g for g in gpus if g.index == index)
         vendor = self.desktops.gpu_vendor().value
-        xe_hpg = is_xe_hpg(vendor, gpu.name)
+        xe_hpg = engine == "vllm" and is_xe_hpg(vendor, gpu.name)
         if xe_hpg and shape and tokens * shape.kv_per_token > XE_HPG_KV_BYTES:
             longest = int(XE_HPG_KV_BYTES // shape.kv_per_token)
             raise ValidationError(
                 f"On the {gpu.name} the context can be at most {longest:,} tokens for this model."
             )
-        try:
-            share = round(float(gpu_share), 2)
-        except TypeError, ValueError:
-            raise ValidationError("The GPU share must be a number.") from None
-        if not 0.1 <= share <= 0.95:
-            raise ValidationError("The GPU share must be between 10 % and 95 %.")
+        share = 0.0
+        if engine == "vllm":
+            try:
+                share = round(float(gpu_share), 2)
+            except TypeError, ValueError:
+                raise ValidationError("The GPU share must be a number.") from None
+            if not 0.1 <= share <= 0.95:
+                raise ValidationError("The GPU share must be between 10 % and 95 %.")
         config, template = model.config() or {}, model.chat_template()
         request = SessionRequest(
             model.repo,
@@ -1001,12 +1091,17 @@ class Service:
             reasoning_parser(config, template),
             vendor,
             xe_hpg,
+            engine,
+            found.name if found and engine == "llamacpp" else "",
         )
         session_id = self.ai.start(request, self.ai_api_key(), actor)
         # Open WebUI starts alongside (its image may need pulling: don't hold up the page).
         threading.Thread(target=self.sync_chat, name="ow-chat", daemon=True).start()
         self.db.audit(
-            actor, "ai.session.start", model.repo, f"gpu={index} context={tokens} share={share}"
+            actor,
+            "ai.session.start",
+            model.repo,
+            f"engine={engine} gpu={index} context={tokens} share={share}",
         )
         return session_id
 
@@ -1046,6 +1141,8 @@ class Service:
         model = next((m for m in self.models.models() if m.repo == repo), None) if repo else None
         if model is None:
             return False
+        if self.ai_engine() == "llamacpp":
+            return True  # --jinja: llama.cpp parses tool calls with the model's own template
         return bool(tool_parser(model.config() or {}, model.repo, model.chat_template()))
 
     def chat_url(self) -> str:
@@ -1799,6 +1896,10 @@ class Service:
             if values["gpu_vendor"] not in GPU_VENDORS:
                 raise ValidationError("Unknown GPU vendor.")
             clean["gpu_vendor"] = values["gpu_vendor"]
+        if "ai_engine" in values:
+            if values["ai_engine"] not in AI_ENGINES:
+                raise ValidationError("Unknown AI engine.")
+            clean["ai_engine"] = values["ai_engine"]
         if "hostname" in values:
             host = str(values["hostname"]).strip().lower()
             if not HOSTNAME_RE.fullmatch(host):

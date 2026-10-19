@@ -406,3 +406,77 @@ def test_delete_refused_while_downloading(service, monkeypatch, tmp_path):
     service.download_model("boss", "Qwen/Qwen3-0.6B")
     with pytest.raises(ValidationError, match="being downloaded"):
         service.delete_model("boss", "Qwen/Qwen3-0.6B")
+
+
+# --- GGUF (llama.cpp) -------------------------------------------------------------------------
+
+
+def gguf_info(repo="Qwen/Qwen3-8B-GGUF") -> RepoInfo:
+    """Return a GGUF repository as the Hub describes it: no safetensors, two quantisations."""
+    return parse_repo_info(
+        {
+            "id": repo,
+            "sha": "def456",
+            "gguf": {"total": 8190735360, "architecture": "qwen3", "context_length": 40960},
+            "siblings": [
+                {"rfilename": "README.md", "size": 7577},
+                {"rfilename": "Qwen3-8B-Q4_K_M.gguf", "size": 5027783488},
+                {"rfilename": "Qwen3-8B-Q8_0.gguf", "size": 8709518112},
+            ],
+        }
+    )
+
+
+def test_parse_repo_info_lists_gguf_models():
+    """A GGUF repository has no safetensors files but one GGUF model per quantisation."""
+    found = gguf_info()
+    assert not found.has_safetensors and found.files == ()
+    assert (found.architecture, found.parameters) == ("qwen3", 8190735360)
+    sizes = [(m.quant, m.bytes) for m in found.gguf]
+    assert sizes == [("Q4_K_M", 5027783488), ("Q8_0", 8709518112)]
+    assert found.gguf_model("Qwen3-8B-Q8_0.gguf").quant == "Q8_0"
+    with pytest.raises(ValidationError, match="no GGUF file"):
+        found.gguf_model("other.gguf")
+
+
+def test_library_lists_gguf_models(tmp_path):
+    """A folder with only a GGUF file is a model too; partial files in .cache don't count."""
+    folder = tmp_path / "Qwen" / "Qwen3-8B-GGUF"
+    (folder / ".cache").mkdir(parents=True)
+    (folder / ".cache" / "x.gguf").write_bytes(b"partial")
+    (tmp_path / "Qwen" / "Empty" / ".cache").mkdir(parents=True)
+    (tmp_path / "Qwen" / "Empty" / ".cache" / "y.gguf").write_bytes(b"partial")
+    (folder / "Qwen3-8B-Q4_K_M.gguf").write_bytes(b"x" * 50)
+    make_model(tmp_path, "Qwen/Qwen3-0.6B")
+    found = {m.repo: m for m in ModelLibrary(tmp_path).models()}
+    assert sorted(found) == ["Qwen/Qwen3-0.6B", "Qwen/Qwen3-8B-GGUF"]
+    model = found["Qwen/Qwen3-8B-GGUF"]
+    assert model.gguf.name == "Qwen3-8B-Q4_K_M.gguf" and not model.has_safetensors
+    assert found["Qwen/Qwen3-0.6B"].has_safetensors and found["Qwen/Qwen3-0.6B"].gguf is None
+
+
+def test_gguf_download_fetches_only_the_chosen_files(downloader):
+    """A GGUF download includes only the chosen quantisation's files and counts their size."""
+    cmd = dl.download_command("Qwen/Qwen3-8B-GGUF", "def456", ("Qwen3-8B-Q4_K_M.gguf",))
+    assert cmd.count("--include") == 1 and "Qwen3-8B-Q4_K_M.gguf" in cmd and "original/*" not in cmd
+    found = gguf_info()
+    with pytest.raises(ValidationError, match="Choose one of its GGUF files"):
+        downloader.queue(found, "boss")
+    download_id = downloader.queue(found, "boss", found.gguf[0])
+    row = downloader._db.one("SELECT * FROM model_downloads WHERE id = ?", [download_id])
+    assert row["files"] == "Qwen3-8B-Q4_K_M.gguf" and row["bytes_total"] == 5027783488
+    downloader.step()
+    _, command, _ = downloader._client.containers.runs[0]
+    assert command.count("--include") == 1
+
+
+def test_a_model_folder_holds_one_gguf_file(service, monkeypatch, tmp_path):
+    """Downloading another quantisation into a folder with a GGUF file is refused."""
+    monkeypatch.setattr(service.hub, "inspect", lambda repo, rev, token: gguf_info(repo))
+    monkeypatch.setattr(service.models, "space", lambda: Space(10**12, 0, 10**12))
+    folder = service.models.path_for("Qwen/Qwen3-8B-GGUF")
+    folder.mkdir(parents=True)
+    (folder / "Qwen3-8B-Q4_K_M.gguf").write_bytes(b"x")
+    with pytest.raises(ValidationError, match="already has Qwen3-8B-Q4_K_M.gguf"):
+        service.download_model("boss", "Qwen/Qwen3-8B-GGUF", "", "Qwen3-8B-Q8_0.gguf")
+    assert service.download_model("boss", "Qwen/Qwen3-8B-GGUF", "", "Qwen3-8B-Q4_K_M.gguf") > 0

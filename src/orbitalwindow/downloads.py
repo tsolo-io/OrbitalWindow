@@ -20,6 +20,7 @@ from typing import Any
 import docker
 
 from .db import Database
+from .gguf import GgufModel
 from .models import EXCLUDE, INCLUDE, ModelLibrary, RepoInfo, folder_bytes
 from .users import ValidationError
 
@@ -36,17 +37,22 @@ POLL_SECONDS = 2.0
 ACTIVE = ("queued", "running", "cancelling")
 
 
-def download_command(repo: str, revision: str) -> list[str]:
+def download_command(repo: str, revision: str, files: tuple[str, ...] = ()) -> list[str]:
     """Build the ``hf download`` command for a model.
 
     Args:
         repo: Validated model id.
         revision: Commit to download.
+        files: The GGUF files of one quantisation; empty for a safetensors model.
 
     Returns:
         The argv for the download container.
     """
     cmd = ["hf", "download", repo, "--revision", revision, "--local-dir", f"{MOUNT}/{repo}"]
+    if files:
+        for name in files:
+            cmd += ["--include", name]
+        return [*cmd, "--format", "quiet"]
     for pattern in INCLUDE:
         cmd += ["--include", pattern]
     for pattern in EXCLUDE:
@@ -106,22 +112,26 @@ class Downloader:
 
     # --- requests ----------------------------------------------------------------------------
 
-    def queue(self, info: RepoInfo, actor: str) -> int:
+    def queue(self, info: RepoInfo, actor: str, gguf: GgufModel | None = None) -> int:
         """Queue a download of an inspected model.
 
         Args:
             info: The model's details from ``HubClient.inspect`` (pins the commit).
             actor: Who asked for it.
+            gguf: The GGUF model (quantisation) to download for llama.cpp; None for the
+                safetensors weights.
 
         Returns:
             The download id.
 
         Raises:
-            ValidationError: If the model has no safetensors weights or is already being downloaded.
+            ValidationError: If the model has no safetensors weights (and no GGUF file was
+                chosen) or is already being downloaded.
         """
-        if not info.has_safetensors:
+        if gguf is None and not info.has_safetensors:
             raise ValidationError(
-                f"{info.repo} has no weights in safetensors format, which the AI session needs."
+                f"{info.repo} has no weights in safetensors format (for vLLM)"
+                + (". Choose one of its GGUF files (for llama.cpp)." if info.gguf else ".")
             )
         with self._db.transaction():
             if self._db.scalar(
@@ -131,9 +141,15 @@ class Downloader:
             ):
                 raise ValidationError(f"{info.repo} is already being downloaded.")
             download_id = self._db.scalar(
-                "INSERT INTO model_downloads (repo, revision, status, bytes_total, requested_by) "
-                "VALUES (?, ?, 'queued', ?, ?) RETURNING id",
-                [info.repo, info.revision, info.total_bytes, actor],
+                "INSERT INTO model_downloads (repo, revision, status, bytes_total, requested_by, "
+                "files) VALUES (?, ?, 'queued', ?, ?, ?) RETURNING id",
+                [
+                    info.repo,
+                    info.revision,
+                    gguf.bytes if gguf else info.total_bytes,
+                    actor,
+                    " ".join(gguf.files) if gguf else "",
+                ],
             )
         self._wake.set()
         return download_id
@@ -323,7 +339,7 @@ class Downloader:
             environment["HF_TOKEN"] = token
         self._client.containers.run(
             HF_IMAGE,
-            download_command(row["repo"], row["revision"]),
+            download_command(row["repo"], row["revision"], tuple((row["files"] or "").split())),
             name=CONTAINER,
             detach=True,
             user=f"{self._uid}:{self._uid}",

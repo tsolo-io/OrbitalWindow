@@ -6,7 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0038 The AI session on Intel GPUs: vLLM's XPU image, with limits on Arc A-series
 
-- Status: proposed (blocked: contexts over about 5,000 tokens hang the A770, see below)
+- Status: accepted in part: the code stays, but Intel hosts use llama.cpp (ADR 0039), because
+  contexts over about 5,100 tokens hang the A770 (see below)
 - Date: 2026-10-18
 
 ## Context
@@ -45,8 +46,9 @@ Tests on Wired (Arc A770, 16 GB, i915, no Resizable BAR) with Qwen3-0.6B:
 - Other Intel GPUs (Arc B-series and newer) run with vLLM's defaults.
 
 ## Consequences
-- **Blocking on the A770:** with vLLM v0.30.0, a context over about 5,100 tokens hangs the GPU
-  (finding 6), so the chat does not work. This needs a decision before the ADR is accepted.
+- **Not usable on the A770:** with vLLM v0.30.0, a context over about 5,100 tokens hangs the GPU
+  (finding 6), so the chat does not work. ADR 0039 adds llama.cpp, which works, and the settings
+  page says that vLLM does not work on Intel.
 - On the A770 the longest context is short: about 27,000 tokens for an 8B model (Qwen3-8B), below
   the 32,768 that coding tools need (ADR 0031). Smaller models get more.
 - float16 instead of bfloat16 can lose accuracy for some models.

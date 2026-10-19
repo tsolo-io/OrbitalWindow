@@ -9,12 +9,14 @@ from fastapi.responses import RedirectResponse
 from nicegui import run, ui
 
 from ..fit import CODING_CONTEXT, Estimate, Gpu, Verdict
+from ..gguf import preferred
 from ..users import ValidationError
 from .ai_session import session_card
 from .common import authenticate, frame, guarded, local_time, service
 
 MODEL_COLUMNS = [
     {"name": "repo", "label": "Model", "field": "repo", "align": "left"},
+    {"name": "format", "label": "Format", "field": "format", "align": "left"},
     {"name": "size", "label": "Size", "field": "size", "align": "right"},
     {"name": "modified", "label": "Downloaded", "field": "modified", "align": "left"},
     {"name": "fit", "label": "GPU fit", "field": "fit", "align": "left"},
@@ -91,6 +93,22 @@ def fit_details(estimate: Estimate, verdict: Verdict, gpu: Gpu | None) -> None:
             ).classes("text-caption text-orange-9")
 
 
+def model_format(model) -> str:
+    """Name the formats a downloaded model has.
+
+    Args:
+        model: The downloaded model (``LocalModel``).
+
+    Returns:
+        For example ``safetensors`` or ``GGUF Q4_K_M``.
+    """
+    parts = ["safetensors"] if model.has_safetensors else []
+    found = model.gguf
+    if found is not None:
+        parts.append(f"GGUF {found.quant or found.name}")
+    return " + ".join(parts)
+
+
 def gb(size: int | None) -> str:
     """Format a byte count in GB for the page.
 
@@ -137,8 +155,9 @@ def ai_page(request: Request) -> RedirectResponse | None:
         with ui.card().classes("w-full"):
             ui.label("Download a model").classes("text-h6")
             ui.label(
-                "Enter the model id from its Hugging Face page, for example Qwen/Qwen3-8B. "
-                "Inspect shows its size before you download it."
+                "Enter the model id from its Hugging Face page, for example Qwen/Qwen3-8B "
+                "(safetensors, for vLLM) or Qwen/Qwen3-8B-GGUF (GGUF, for llama.cpp). Inspect "
+                "shows its size before you download it."
             ).classes("text-caption text-grey-7")
             with ui.row().classes("items-end gap-2 w-full"):
                 repo_in = (
@@ -150,6 +169,8 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 inspect_btn = ui.button("Inspect", icon="search").props("no-caps outline")
                 download_btn = ui.button("Download", icon="download").props("no-caps")
             info_box = ui.column().classes("gap-1")
+            # The weights to download: "" for safetensors, else a GGUF file (set by Inspect).
+            choice = {"gguf": ""}
 
         ui.label("Downloads").classes("text-h6")
         downloads = ui.table(columns=DOWNLOAD_COLUMNS, rows=[], row_key="id").classes("w-full")
@@ -296,6 +317,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
             models.rows = [
                 {
                     "repo": model.repo,
+                    "format": model_format(model),
                     "size": gb(model.bytes),
                     "modified": local_time(model.modified),
                     "fit": f"{FIT_LABELS[verdict.level]} · {gb(estimate.total)}",
@@ -315,6 +337,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
                     "id": row["id"],
                     "repo": row["repo"],
                     "revision": row["revision"],
+                    "gguf": (row.get("files") or "").split(" ")[0],
                     "status": row["status"],
                     "error": row["error"] if row["status"] == "failed" else "",
                     "fraction": row["bytes_done"] / row["bytes_total"] if row["bytes_total"] else 0,
@@ -421,25 +444,50 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 ui.label(info.repo).classes("text-subtitle1 font-medium")
                 params = f"{info.parameters / 1e9:.1f} B parameters · " if info.parameters else ""
                 ui.label(
-                    f"{params}{info.architecture or 'unknown architecture'} · "
-                    f"download {gb(info.total_bytes)} in {len(info.files)} files"
+                    f"{params}{info.architecture or 'unknown architecture'}"
                     f"{' · licence ' + info.license if info.license else ''}"
                 )
                 if info.gated:
                     ui.label(
                         "Gated model: accept its licence on Hugging Face and store a token below."
                     ).classes("text-orange-9")
-                if not info.has_safetensors:
+                if not info.has_safetensors and not info.gguf:
                     ui.label(
-                        "This model has no safetensors weights and can't be used by the AI session."
+                        "This model has no safetensors weights (for vLLM) and no GGUF file (for "
+                        "llama.cpp), so the AI session can't use it."
                     ).classes("text-negative")
                     return
-                spinner = ui.spinner()
-            estimate, verdict = await run.io_bound(svc.fit_for_download, info)
-            gpu = await run.io_bound(svc.model_gpu)
-            spinner.delete()
-            with info_box:
-                fit_details(estimate, verdict, gpu)
+                options = {}
+                if info.has_safetensors:
+                    options[""] = (
+                        f"safetensors, {gb(info.total_bytes)} in {len(info.files)} files (vLLM)"
+                    )
+                for model in info.gguf:
+                    label = model.quant or model.name
+                    options[model.name] = f"GGUF {label}, {gb(model.bytes)} (llama.cpp)"
+                engine = await run.io_bound(svc.ai_engine)
+                best = preferred(list(info.gguf))
+                first = best.name if best and (engine == "llamacpp" or "" not in options) else ""
+                choice["gguf"] = first
+                weights = ui.select(options, label="Weights to download", value=first).classes(
+                    "min-w-[24rem]"
+                )
+                fit_box = ui.column().classes("gap-1")
+
+            async def show_fit() -> None:
+                """Show the GPU memory estimate of the chosen weights."""
+                choice["gguf"] = weights.value or ""
+                fit_box.clear()
+                with fit_box:
+                    spinner = ui.spinner()
+                estimate, verdict = await run.io_bound(svc.fit_for_download, info, choice["gguf"])
+                gpu = await run.io_bound(svc.model_gpu)
+                spinner.delete()
+                with fit_box:
+                    fit_details(estimate, verdict, gpu)
+
+            weights.on_value_change(guarded(auth, show_fit))
+            await show_fit()
 
         async def on_suggest() -> None:
             """Run llmfit (or use its recent answer) and show the suggestions."""
@@ -480,10 +528,12 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 svc.download_model,
                 repo_in.value or "",
                 rev_in.value or "",
+                choice["gguf"],
                 done="Download queued. It runs in the background.",
             )
             if ok:
                 info_box.clear()
+                choice["gguf"] = ""
 
         async def on_cancel(event) -> None:
             """Cancel a download.
@@ -503,6 +553,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 svc.download_model,
                 event.args["repo"],
                 event.args["revision"],
+                event.args.get("gguf") or "",
                 done="Download queued again.",
             )
 
