@@ -19,7 +19,7 @@ from typing import Any
 
 import docker
 
-from . import disk
+from . import disk, userenv
 from . import fit as fit_mod
 from . import groups as groups_mod
 from . import models as models_mod
@@ -567,6 +567,7 @@ class Service:
                 "user_image",
                 "group_members",
                 "ssh_keys",
+                "user_env",
             ):
                 self.db.execute(f"DELETE FROM {table} WHERE user_id = ?", [user_id])
             self.db.execute("DELETE FROM users WHERE id = ?", [user_id])
@@ -1252,6 +1253,113 @@ class Service:
             return False
         return True
 
+    # --- environment variables -----------------------------------------------------------------
+
+    def user_env(self, user_id: int) -> list[dict[str, Any]]:
+        """Return a user's own environment variables, by name.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            Rows with name, value and when they were last changed.
+        """
+        return self.db.all(
+            "SELECT name, value, updated_at FROM user_env WHERE user_id = ? ORDER BY name",
+            [user_id],
+        )
+
+    def user_env_values(self, user_id: int) -> dict[str, str]:
+        """Return a user's own environment variables as a mapping.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            Value by name.
+        """
+        return {row["name"]: row["value"] for row in self.user_env(user_id)}
+
+    def set_user_env(
+        self, actor: str, user_id: int, name: str, value: str, old_name: str | None = None
+    ) -> str:
+        """Add or change one of a user's environment variables.
+
+        The value is not written to the audit log: it may be a password or a token.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            name: The variable's name.
+            value: Its value.
+            old_name: The name it had, when an existing variable is renamed.
+
+        Returns:
+            The stored name.
+
+        Raises:
+            ValidationError: When the user no longer exists, the name or value is not allowed,
+                the name is taken, or there are too many variables.
+        """
+        user = self._require_user(user_id)
+        name = userenv.validate_name(name)
+        value = userenv.validate_value(value)
+        with self.db.transaction():
+            names = {row["name"] for row in self.user_env(user_id)}
+            if old_name is not None and old_name not in names:
+                raise ValidationError(f"{old_name} no longer exists.")
+            if name in names and name != old_name:
+                raise ValidationError(f"You already have a variable called {name}.")
+            if name not in names and old_name is None and len(names) >= userenv.MAX_VARS:
+                raise ValidationError(f"You can have at most {userenv.MAX_VARS} variables.")
+            if old_name is not None:
+                self.db.execute(
+                    "DELETE FROM user_env WHERE user_id = ? AND name = ?", [user_id, old_name]
+                )
+            self.db.execute(
+                "INSERT OR REPLACE INTO user_env (user_id, name, value, updated_at) "
+                "VALUES (?, ?, ?, current_timestamp)",
+                [user_id, name, value],
+            )
+        renamed = f" (was {old_name})" if old_name not in (None, name) else ""
+        self.db.audit(actor, "env.set", user["name"], name + renamed)
+        return name
+
+    def remove_user_env(self, actor: str, user_id: int, name: str) -> None:
+        """Remove one of a user's environment variables.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            name: The variable's name.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        self.db.execute("DELETE FROM user_env WHERE user_id = ? AND name = ?", [user_id, name])
+        self.db.audit(actor, "env.remove", user["name"], name)
+
+    def env_restart_needed(self, user_id: int) -> bool:
+        """Return whether the running desktop has other environment variables than saved.
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            True when the desktop runs and was started with different variables.
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        try:
+            container = self.client.containers.get(container_name(user["name"]))
+        except docker.errors.NotFound:
+            return False
+        started = container.labels.get(userenv.LABEL_ENV, userenv.env_hash({}))
+        return started != userenv.env_hash(self.user_env_values(user_id))
+
     # --- SSH keys ----------------------------------------------------------------------------
 
     def ssh_keys(self, user_id: int) -> list[dict[str, Any]]:
@@ -1867,6 +1975,7 @@ class Service:
             addons,
             groups_mod.groups_of(self.db, user_id),
             self._ssh_access(user) if any(a.key == ssh_mod.SSH_ADDON for a in addons) else None,
+            self.user_env_values(user_id),
         )
         self.db.audit(actor, "desktop.start", user["name"])
 

@@ -14,7 +14,7 @@ import logging
 import secrets
 import threading
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -27,6 +27,7 @@ from .addons import Addon
 from .config import Settings
 from .db import Database
 from .terminal import ShellTarget, stop_session
+from .userenv import LABEL_ENV, NAMES_VAR, RESERVED, env_hash
 
 log = logging.getLogger(__name__)
 
@@ -147,6 +148,7 @@ def build_spec(
     groups: Sequence[dict[str, Any]] = (),
     ssh: SshAccess | None = None,
     session: str = "",
+    user_env: Mapping[str, str] | None = None,
 ) -> DesktopSpec:
     """Build the container spec for ``user``.
 
@@ -162,6 +164,7 @@ def build_spec(
         groups: Group rows whose folders are mounted under ``/groups``.
         ssh: SSH gateway access, or None for no SSH.
         session: Start id for the URL path; a new one is generated when empty.
+        user_env: The user's own environment variables; they win over add-ons' ones.
 
     Returns:
         The desktop container spec.
@@ -233,6 +236,12 @@ def build_spec(
             volumes[str(root / mount.source)] = {"bind": mount.target, "mode": mode}
         for key, value in addon.spec.env.items():
             environment.setdefault(key, value)
+    # Validated when saved; reserved names are skipped again in case the rules changed since.
+    own = {k: v for k, v in (user_env or {}).items() if k.upper() not in RESERVED}
+    environment.update(own)
+    # The init hook writes these into a profile script, so SSH logins get them too.
+    environment[NAMES_VAR] = " ".join(sorted(own))
+    labels[LABEL_ENV] = env_hash(own)
 
     devices: list[str] = []
     device_requests: list[DeviceRequest] = []
@@ -390,6 +399,7 @@ class Desktops:
         addons: Sequence[Addon] = (),
         groups: Sequence[dict[str, Any]] = (),
         ssh: SshAccess | None = None,
+        user_env: Mapping[str, str] | None = None,
     ) -> None:
         """Start a fresh desktop container for a user, replacing any existing one.
 
@@ -401,6 +411,7 @@ class Desktops:
             addons: Add-ons enabled for this start.
             groups: Group rows whose folders are mounted.
             ssh: SSH gateway access, or None for no SSH.
+            user_env: The user's own environment variables.
 
         Raises:
             DesktopError: The account is disabled, an add-on's mount source is not installed,
@@ -427,6 +438,7 @@ class Desktops:
                 addons,
                 groups,
                 ssh,
+                user_env=user_env,
             )
             network = self._ensure_network(name)
             self._connect_traefik(network)

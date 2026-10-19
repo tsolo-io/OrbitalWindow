@@ -29,6 +29,7 @@ RESERVED_ENV = frozenset(
     {
         "PUID", "PGID", "TZ", "TITLE", "CUSTOM_USER", "PASSWORD", "SUBFOLDER",
         "PIXELFLUX_WAYLAND", "START_DOCKER", "NVIDIA_DRIVER_CAPABILITIES", "OW_GROUPS",
+        "OW_USER_ENV",
     }
 )  # fmt: skip
 # Container paths an add-on mount may not cover.

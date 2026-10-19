@@ -30,6 +30,7 @@ nav = [
     { "Problems and questions" = "user/05-help.md" },
     { "AI chat and models" = "user/06-ai.md" },
     { "Terminal" = "user/07-terminal.md" },
+    { "Environment variables" = "user/08-environment.md" },
   ] },
   { "Decisions (ADR)" = [
     { "Overview" = "adr/index.md" },
@@ -64,6 +65,7 @@ nav = [
     { "0029 Coding benchmarks" = "adr/0029-coding-benchmarks.md" },
     { "0030 Browser terminal" = "adr/0030-browser-terminal.md" },
     { "0031 Longer contexts" = "adr/0031-longer-default-context.md" },
+    { "0032 Environment variables" = "adr/0032-user-environment-variables.md" },
   ] },
 ]
 
