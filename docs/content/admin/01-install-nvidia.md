@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 # Preparing an NVIDIA host
 
 Do these steps before [Installing](01-install.md) on a server with NVIDIA GPU(s). NVIDIA is the
-best-supported vendor: only NVIDIA hosts show GPU numbers and run the AI session.
+best-supported vendor.
 
 ## Driver
 

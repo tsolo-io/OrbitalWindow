@@ -44,10 +44,13 @@ Set `OW_GPU_VENDOR=intel` in `.env` (or **Settings → GPU**). Then:
   `Render node 0 encodes H264, VP9, AV1, H265 on vaapi`.
 - OpenGL and Vulkan in the desktop run on the GPU: `glxinfo -B` shows
   `OpenGL renderer string: Mesa Intel(R) Arc(tm) A770 Graphics (DG2)`.
-- **GPU numbers** (load, memory) on the dashboard and System page are hidden: they come from
-  NVIDIA's NVML. The **Server status** page shows the GPU temperature (node-exporter) as
-  *Intel GPU*.
-- The **AI session** (vLLM) and model suggestions need NVIDIA.
+- `make start` adds `compose.intel.yaml`. It starts `ow-gpu-stats`, a small exporter that reads the
+  GPU's load, memory and temperature (for a plain `docker compose`, add it to `COMPOSE_FILE`). The
+  dashboard, System, Server status and AI pages then show the GPU numbers, and the AI page can
+  check if a model fits and suggest models. The exporter runs as root with only the
+  `CAP_PERFMON` capability, which the kernel requires for these numbers.
+- **GPU load** is the busiest engine (render, compute, copy or video) in the last 2 seconds.
+- The **AI session** (vLLM) needs NVIDIA.
 - **GPU computing** (OpenCL, oneAPI) is not in the desktop image. **MATLAB** GPU computing
   (`gpuArray`) needs NVIDIA; MATLAB itself runs fine.
 - OrbitalWindow starts every desktop with `PIXELFLUX_WAYLAND=false`. On Intel the Wayland mode may

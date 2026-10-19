@@ -4,7 +4,7 @@
 
 import httpx2
 
-from orbitalwindow.metrics import ContainerMetrics, GpuMetrics, fmt_bytes
+from orbitalwindow.metrics import ContainerMetrics, GpuMetrics, GpuStat, fmt_bytes
 
 A, B, C = "a" * 64, "b" * 64, "c" * 64
 SUMMARY = {
@@ -94,3 +94,37 @@ def test_gpu_temperature_and_slowdown_from_nvml():
     assert gpus._temperatures("gpu0") == (61, 88)
     gpus._nvml.nvmlDeviceGetTemperatureThreshold = unsupported
     assert gpus._temperatures("gpu0") == (61, None)
+
+
+def test_gpu_metrics_from_the_intel_exporter():
+    """With an exporter URL, GPU numbers come from its JSON; a failing exporter gives none."""
+    answer = [
+        {
+            "index": 0,
+            "name": "Intel Arc A770",
+            "util_percent": 37,
+            "mem_used": 1024**3,
+            "mem_total": 16 * 1024**3,
+            "temperature": 49,
+            "slowdown": None,
+        }
+    ]
+
+    def transport(status, body):
+        """Return a client whose every request gets this answer.
+
+        Args:
+            status: HTTP status.
+            body: JSON body.
+
+        Returns:
+            The client.
+        """
+        handler = lambda request: httpx2.Response(status, json=body)  # noqa: E731
+        return httpx2.Client(transport=httpx2.MockTransport(handler))
+
+    url = "http://gpu-stats:9400/"
+    gpus = GpuMetrics(url, transport(200, answer)).stats()
+    assert gpus == [GpuStat(0, "Intel Arc A770", 37, 1024**3, 16 * 1024**3, 49, None)]
+    assert GpuMetrics(url, transport(503, {})).stats() == []
+    assert GpuMetrics(url, transport(200, [{"index": 0}])).stats() == []

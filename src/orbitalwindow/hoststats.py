@@ -39,6 +39,8 @@ CHIP_LABELS = {
     "xe": "Intel GPU",
     "iwlwifi": "Wi-Fi",
 }
+# Labels of GPU chips; the status page drops them when the GPU numbers have a temperature.
+GPU_CHIP_LABELS = ("AMD GPU", "Intel GPU")
 # Readings outside this range are unconnected or broken sensors (and bogus limits).
 TEMP_RANGE = (0.0, 150.0)
 TEMP_WARN_MARGIN = 10.0  # warm when the hottest sensor is this close to the critical limit

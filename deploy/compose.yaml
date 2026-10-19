@@ -7,8 +7,8 @@
 #   gitea.tu.tsolo.net/kuat/orbitalwindow-samba:${OW_VERSION}  (Windows file sharing)
 # built by CI (.gitea/workflows/build.yaml). OW_VERSION is a release tag (e.g. v1.0.0) or `main`.
 #
-# On a server, copy the deploy/ folder (this file, traefik/, the optional compose.nvidia.yaml and
-# compose.tls.yaml, .env.example), create .env and run:
+# On a server, copy the deploy/ folder (this file, traefik/, scripts/, the optional
+# compose.nvidia.yaml, compose.intel.yaml and compose.tls.yaml, .env.example), create .env and run:
 #   docker compose -f compose.yaml --env-file .env up -d          (or `make start PROD=1`)
 # For development, `make start` adds compose.dev.yaml, which builds both images from the checkout.
 #

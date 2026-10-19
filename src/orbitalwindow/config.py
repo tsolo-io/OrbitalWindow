@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     cadvisor_url: str = "http://cadvisor:8080/admin/cadvisor"
     # Prometheus node-exporter on the host (installed by the admin), for the server status page.
     node_exporter_url: str = "http://host.docker.internal:9100/metrics"
+    # GPU exporter for Intel GPUs (compose.intel.yaml sets it); empty: NVML (NVIDIA) or none.
+    gpu_stats_url: str = ""
     # llmfit image for model suggestions; change the tag to follow llmfit releases.
     llmfit_image: str = "ghcr.io/alexsjones/llmfit:1.1.15"
     # vLLM image for the AI session (CUDA 13; tens of GB, pulled on first start).

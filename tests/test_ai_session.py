@@ -289,6 +289,13 @@ def test_start_needs_an_nvidia_gpu(service, model_on_disk):
         service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192, 0.5)
 
 
+def test_start_needs_an_nvidia_host(service, model_on_disk):
+    """GPU numbers alone (an Intel host) are not enough for the CUDA vLLM image."""
+    service.db.set_setting("gpu_vendor", "intel")
+    with pytest.raises(ValidationError, match="NVIDIA"):
+        service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192, 0.5)
+
+
 def test_session_defaults(service, model_on_disk):
     """Defaults cap the context at the model's maximum and size the GPU share from the estimate."""
     defaults = service.session_defaults("Qwen/Qwen3-0.6B", 100_000)

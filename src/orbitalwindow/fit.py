@@ -186,7 +186,7 @@ def verdict(needed: float, gpu: Gpu | None) -> Verdict:
         The level and a short explanation.
     """
     if gpu is None:
-        return Verdict("unknown", "No GPU information (NVIDIA only).")
+        return Verdict("unknown", "No GPU information (NVIDIA and Intel only).")
     usable = gpu.total * GPU_SHARE
     if needed <= usable:
         if needed <= gpu.free:
