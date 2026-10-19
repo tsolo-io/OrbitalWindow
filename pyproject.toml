@@ -32,6 +32,7 @@ dependencies = [
 
 [project.scripts]
 orbitalwindow = "orbitalwindow.main:run"
+orbitalwindow-reset-admin = "orbitalwindow.recover:main"
 
 [tool.hatch.version]
 path = "src/orbitalwindow/__init__.py"

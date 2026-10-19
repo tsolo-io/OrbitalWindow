@@ -54,3 +54,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0038](0038-ai-session-on-intel.md) | The AI session on Intel GPUs: vLLM's XPU image, with limits on Arc A-series | accepted in part (see 0039) |
 | [0039](0039-llama-cpp-engine.md) | A second AI engine: llama.cpp with GGUF models, for Intel and AMD | accepted |
 | [0040](0040-vs-code-without-a-desktop.md) | VS Code without a desktop: code-server per user, on demand | accepted |
+| [0041](0041-admin-lock-out-recovery.md) | Lock-out recovery: a one-off container while the service is stopped | accepted |

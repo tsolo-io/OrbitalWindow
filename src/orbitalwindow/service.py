@@ -419,6 +419,55 @@ class Service:
         result.warnings += self._samba_password(user["name"], new).warnings
         return result
 
+    def recover_admin(self, name: str) -> Result:
+        """Get a locked-out administrator back in (``make reset-admin-password``, #42).
+
+        Gives the user a new generated password, enables the account and makes it an
+        administrator; a user that was deleted is created again. Samba is updated too, but a
+        Samba problem is only a warning: the reset itself must not fail in an emergency.
+
+        Args:
+            name: The user to recover; usually ``admin``.
+
+        Returns:
+            Warnings and the new password (to show once).
+
+        Raises:
+            ValidationError: When the name is not a valid user name.
+        """
+        user = users_mod.get_user_by_name(self.db, name)
+        if user is None:
+            result = self.create_user(
+                actor="system",
+                name=name,
+                display_name="Administrator",
+                is_admin=True,
+                allow_reserved=True,
+            )
+            self.db.audit("system", "user.recover", name, "created again")
+            return result
+        result = Result(password=generate_password())
+        with self.db.transaction():
+            self.db.execute(
+                "UPDATE users SET disabled = false, is_admin = true WHERE id = ?", [user["id"]]
+            )
+            users_mod.set_password_hash(self.db, user["id"], result.password)
+        changes = (("enabled", user["disabled"]), ("made admin", not user["is_admin"]))
+        detail = ", ".join(part for part, changed in changes if changed)
+        self.db.audit("system", "user.recover", name, detail)
+        # Any Samba problem (Samba or the socket proxy down) is a warning: the reset stands.
+        try:
+            if user["disabled"]:
+                self.samba.set_enabled(name, True)
+            self.samba.set_password(name, result.password)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("samba during recovery of %s: %s", name, exc)
+            result.warnings.append(
+                f"Windows file sharing (Samba) was not updated: {exc}. The new password works "
+                "for OrbitalWindow; set it again on the Users page to fix Samba."
+            )
+        return result
+
     def _samba_password(self, name: str, password: str) -> Result:
         """Set the Samba password of a user, turning failures into warnings.
 

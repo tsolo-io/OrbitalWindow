@@ -25,6 +25,7 @@ Later tickets, all merged by 2026-10-11:
   benchmarks, ADR 0029). Fixes: vLLM tool calling (#30) and hybrid or thinking models such as Qwen3.5 (#31).
   #54 adds llama.cpp as a second AI engine (GGUF models; ADR 0039): the one for Intel and AMD hosts.
 - **VS Code without a desktop:** #49, code-server per user on demand at `/code/<user>/` (ADR 0040).
+- **Lock-out recovery:** #42, `make reset-admin-password [NAME=…]` (ADR 0041).
 - **Deploy and CI:** #3 (CI) and #14 (deploy Makefile, ADR 0023).
 - **Server status:** #22 (node-exporter, ADR 0025) and temperatures (#33).
 - **Local time:** #32. Times are stored in UTC and shown in `TZ` through `ui.common.local_time`. A test
