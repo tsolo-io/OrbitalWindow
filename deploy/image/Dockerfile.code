@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# VS Code in the browser (ow-code-<user>, ADR 0040): LinuxServer's code-server with the user's home
+# at /config, the same path as in their desktop. Built by the service as ow-code:<hash of this
+# folder's code files>; OW_CODE_SERVER_IMAGE picks the code-server version.
+ARG BASE_IMAGE=lscr.io/linuxserver/code-server:4.140.0-ls368
+FROM ${BASE_IMAGE}
+
+# Python for VS Code's Python support and small scripts; programs belong in the desktop.
+COPY root/usr/local/bin/ow-pkg /usr/local/bin/ow-pkg
+RUN ow-pkg install python3 python3-venv && ow-pkg clean
+
+# Groups, GPU groups and the user's environment variables, as in desktops (OW_GUI=false).
+COPY root/custom-cont-init.d/50-ow-setup /custom-cont-init.d/50-ow-setup
+# code-server keeps its settings and extensions in ~/.local/share/code-server, not in visible
+# folders of the home, and never changes the owner of the home's files.
+COPY code/ /

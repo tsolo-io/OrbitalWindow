@@ -55,6 +55,7 @@ Further services:
 Browser ──443──► Traefik ─┬─ /                  ─► orbitalwindow (FastAPI + NiceGUI) ── DuckDB file
                           ├─ /desktop/<user>/   ─► forwardAuth(user) ─► ow-<user>:3000
                           ├─ /files/<user>/     ─► forwardAuth(user) ─► ow-files-<user> (FileBrowser Quantum)
+                          ├─ /code/<user>/      ─► forwardAuth(user) ─► ow-code-<user> (code-server, on demand)
                           ├─ /admin/cadvisor/   ─► forwardAuth(admin) ─► cadvisor:8080
                           └─ /admin/logs/       ─► forwardAuth(admin) ─► dozzle:8080
 Windows Explorer ─445───► samba     \\desk.<domain>\<user>, \\…\<group>, \\…\scratch
@@ -158,6 +159,16 @@ env: {}                     # extra container environment
 - **Lifecycle:** created with the user, stopped while the user is disabled, removed when the user is deleted. Group changes recreate it, which takes about 1 second.
 - **Used for:** browse, upload and download large files in the browser, zip, preview. Share links are turned off; users share files through group folders and scratch.
 - **Fallback if Quantum proves unsuitable:** a minimal upload/download page in OrbitalWindow.
+
+### VS Code in the browser (code-server, on demand; #49, ADR 0040)
+- **Container `ow-code-<user>`:** image `ow-code:<hash>`, built by the service from
+  `deploy/image/Dockerfile.code` on LinuxServer's code-server (`OW_CODE_SERVER_IMAGE`). The user's
+  home is `/config` (as in the desktop), with the groups, scratch and `/shared` read-only. Settings
+  and extensions live in `~/.local/share/code-server`; nothing visible is added to the home.
+- **Access:** `/code/<user>/` through owner-only forwardAuth, then the prefix is stripped. No
+  password in code-server; its network `ow-cnet-<user>` is joined only by Traefik.
+- **Lifecycle:** the user starts and stops it on the dashboard; it keeps running until stopped (and
+  over restarts). Stopped when the user is disabled, removed with the user.
 
 ### Sharing files between users
 - **Group/project folders** (admin managed):

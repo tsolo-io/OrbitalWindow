@@ -1,0 +1,26 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Replaces LinuxServer's init: /config is the user's home (shared with their desktop), so no
+# folders are created in it and no files change owner. abc already has the home's UID (PUID).
+
+data=/config/.local/share/code-server
+mkdir -p "$data/extensions"
+chown abc:abc /config/.local /config/.local/share "$data" "$data/extensions" 2>/dev/null || true
+# First-start settings (users can change them later): the home is the user's own, so VS Code
+# doesn't open it in Restricted Mode. Workspace trust is an application setting, which VS Code
+# reads only from the user settings, not the machine ones.
+settings="$data/User/settings.json"
+if [[ ! -e "$settings" ]]; then
+    install -d -o abc -g abc "$data/User"
+    printf '{\n    "security.workspace.trust.enabled": false\n}\n' > "$settings"
+    chown abc:abc "$settings"
+fi
+for file in .bashrc .profile; do
+    if [[ ! -e "/config/$file" ]]; then
+        install -o abc -g abc -m 644 "/root/$file" "/config/$file"
+    fi
+done

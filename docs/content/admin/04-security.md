@@ -46,6 +46,10 @@ remain.
   network only Traefik joins (it trusts the user-name header). Inline views of uploaded files are
   sent with `Content-Security-Policy: script-src 'none'` and downloads as attachments, so a file
   another user drops in a shared folder does not run as you (tested with HTML and SVG).
+- **VS Code (code-server):** owner-only forwardAuth for `/code/<user>/` (admins too are refused);
+  code-server itself has no password, so it runs on a network only Traefik joins
+  (`ow-cnet-<user>`), like the file manager. It runs as the user's UID with
+  `no-new-privileges` (no sudo), `NET_RAW` dropped, a process limit and the user's CPU and RAM limits.
 - **Windows sharing:** SMB2+, mandatory signing, no guest, per-user share lists; passwords are never
   stored by OrbitalWindow.
 - **SSH:** key-only through the gateway, which blocks an address for 60 minutes after 5 failures;

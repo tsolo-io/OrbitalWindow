@@ -17,8 +17,8 @@ SPDX-License-Identifier: Apache-2.0
 | Software access | Grant or revoke restricted add-ons (MATLAB). Revoking switches it off and stops a desktop that uses it. |
 | Make / remove administrator | Admins manage everything but never get into other users' desktops or files. |
 | Stop desktop | Stops and removes the container; files are kept. The user sees "stopped by an administrator". |
-| Disable / enable | Disable: signed out, no login, desktop and file manager stopped, Windows sharing blocked. Enable restores access (the user starts the desktop again). |
-| Delete | Removes the desktop, file manager, software image, Windows share and settings. The home folder is kept unless you tick the box. User numbers are never reused. |
+| Disable / enable | Disable: signed out, no login, desktop, VS Code and file manager stopped, Windows sharing blocked. Enable restores access (the user starts the desktop again). |
+| Delete | Removes the desktop, VS Code, file manager, software image, Windows share and settings. The home folder is kept unless you tick the box. User numbers are never reused. |
 
 You cannot disable or delete yourself or the last administrator.
 

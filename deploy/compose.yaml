@@ -149,6 +149,7 @@ services:
       OW_OPENWEBUI_IMAGE: ${OW_OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.11.4}
       OW_AI_ENGINE: ${OW_AI_ENGINE:-vllm}
       OW_LLAMACPP_BUILD: ${OW_LLAMACPP_BUILD:-b11382}
+      OW_CODE_SERVER_IMAGE: ${OW_CODE_SERVER_IMAGE:-lscr.io/linuxserver/code-server:4.140.0-ls368}
     volumes:
       # Same path inside and outside, so mount sources we give Docker are valid host paths.
       - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}
@@ -182,6 +183,11 @@ services:
       traefik.http.middlewares.ow-files-slash.redirectregex.regex: ^(https?://[^/]+/files/[a-z0-9]+)$$
       traefik.http.middlewares.ow-files-slash.redirectregex.replacement: $${1}/
       traefik.http.middlewares.ow-files-slash.redirectregex.permanent: "true"
+      # Used by every VS Code router (labels set by OrbitalWindow on ow-code-<user>).
+      traefik.http.middlewares.ow-auth-code.forwardauth.address: http://orbitalwindow:8000/auth/code
+      traefik.http.middlewares.ow-code-slash.redirectregex.regex: ^(https?://[^/]+/code/[a-z0-9]+)$$
+      traefik.http.middlewares.ow-code-slash.redirectregex.replacement: $${1}/
+      traefik.http.middlewares.ow-code-slash.redirectregex.permanent: "true"
       # Admin-only tools (cAdvisor, later Dozzle).
       traefik.http.middlewares.ow-auth-admin.forwardauth.address: http://orbitalwindow:8000/auth/admin
       traefik.http.middlewares.ow-auth-admin.forwardauth.authResponseHeaders: Remote-User
