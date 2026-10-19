@@ -27,6 +27,12 @@ SKIP_RE = re.compile(r"(^|/)(mmproj|imatrix|mtp)[^/]*$|(^|/)mtp/", re.IGNORECASE
 QUANT_RE = re.compile(r"(?:^|[-_.])((?:I?Q\d[A-Z0-9_]*)|BF16|F16|F32)(?:[-_.]|$)", re.IGNORECASE)
 PREFERRED = "Q4_K_M"  # the usual balance of size and quality
 KV_BYTES = 2  # llama.cpp keeps the KV cache in float16 by default
+# llama.cpp's sliding-window cache: one window per request slot (aisession.LLAMACPP_SLOTS) plus a
+# batch (n_ubatch), rounded up to 256 cells. gpt-oss-20b: 128 × 4 + 512 = 1,024 cells.
+SWA_SEQS = 4
+SWA_BATCH = 512
+# llama.cpp's built-in sliding-window periods for files without sliding_window_pattern.
+SWA_PATTERNS = {"gpt-oss": 2, "gemma2": 2, "gemma3": 6, "cohere2": 4}
 # Metadata value types: struct format and size of the fixed-size ones.
 SCALARS = {
     0: ("<B", 1),
@@ -222,7 +228,11 @@ def read_metadata(
 
 
 def shape_from_metadata(metadata: dict[str, Any]) -> Shape | None:
-    """Read the attention shape that the KV cache size depends on.
+    """Read the attention shape that the KV cache size depends on, layer by layer.
+
+    Full-attention layers cache every token of the context. Sliding-window layers keep only
+    ``SWA_SEQS`` windows and a batch, as llama.cpp sizes that cache. Linear-attention layers of
+    hybrid models (Qwen3.5) and layers that reuse another layer's cache keep nothing that grows.
 
     Args:
         metadata: The file's metadata.
@@ -231,34 +241,83 @@ def shape_from_metadata(metadata: dict[str, Any]) -> Shape | None:
         The shape, or None if the metadata lacks the needed keys.
     """
     arch = metadata.get("general.architecture")
+
+    def key(name: str, default: Any = None) -> Any:
+        """Return an architecture key of the metadata.
+
+        Args:
+            name: The key without the architecture, e.g. ``attention.key_length``.
+            default: Returned when the key is missing.
+
+        Returns:
+            The value.
+        """
+        return metadata.get(f"{arch}.{name}", default)
+
     try:
-        layers = int(metadata[f"{arch}.block_count"])
-        heads = metadata[f"{arch}.attention.head_count"]
-        kv_heads = metadata.get(f"{arch}.attention.head_count_kv", heads)
-        # Hybrid models (Qwen3.5, Qwen3-Next) have full attention only in every n-th layer; the
-        # others use linear attention, whose state doesn't grow with the context.
-        interval = metadata.get(f"{arch}.full_attention_interval")
-        if interval and int(interval) > 1:
-            layers //= int(interval)
-        # Some models list the heads per layer; layers without KV heads have no cache.
-        if isinstance(kv_heads, list):
-            with_cache = [int(count) for count in kv_heads if count]
-            layers, kv_heads = len(with_cache), max(with_cache, default=0)
+        count = int(key("block_count"))
+        heads = key("attention.head_count")
         if isinstance(heads, list):
-            heads = max(int(count) for count in heads)
-        head_dim = metadata.get(f"{arch}.attention.key_length") or (
-            int(metadata[f"{arch}.embedding_length"]) // int(heads)
-        )
-        context = metadata.get(f"{arch}.context_length")
-        return Shape(
-            layers=layers,
-            kv_heads=int(kv_heads),
-            head_dim=int(head_dim),
-            kv_bytes=KV_BYTES,
-            max_context=int(context) if context else None,
-        )
+            heads = max(int(value) for value in heads)
+        kv_heads = key("attention.head_count_kv", heads)
+        k_full = int(key("attention.key_length") or int(key("embedding_length")) // int(heads))
+        v_full = int(key("attention.value_length") or k_full)
+        k_swa = int(key("attention.key_length_swa") or k_full)
+        v_swa = int(key("attention.value_length_swa") or v_full)
+        window = int(key("attention.sliding_window") or 0)
+        pattern = key("attention.sliding_window_pattern", SWA_PATTERNS.get(arch))
+        interval = int(key("full_attention_interval") or 0)
+        shared = int(key("attention.shared_kv_layers") or 0)
+        context = key("context_length")
     except KeyError, TypeError, ValueError, ZeroDivisionError:
         return None
+    full_layers = full_bytes = swa_bytes = 0
+    full_heads = 0
+    for layer in range(count - shared):
+        if interval > 1 and (layer + 1) % interval:
+            continue  # linear attention (hybrid models)
+        if isinstance(kv_heads, list):
+            layer_heads = int(kv_heads[layer]) if layer < len(kv_heads) else 0
+        else:
+            layer_heads = int(kv_heads)
+        if not layer_heads:
+            continue
+        if window and _is_sliding(pattern, layer):
+            swa_bytes += layer_heads * (k_swa + v_swa) * KV_BYTES
+        else:
+            full_layers += 1
+            full_heads = max(full_heads, layer_heads)
+            full_bytes += layer_heads * (k_full + v_full) * KV_BYTES
+    cells = -(-(window * SWA_SEQS + SWA_BATCH) // 256) * 256 if swa_bytes else 0
+    return Shape(
+        layers=full_layers,
+        kv_heads=full_heads,
+        head_dim=k_full,
+        kv_bytes=KV_BYTES,
+        max_context=int(context) if context else None,
+        full_bytes=full_bytes,
+        swa_bytes=swa_bytes,
+        swa_tokens=cells,
+    )
+
+
+def _is_sliding(pattern: Any, layer: int) -> bool:
+    """Tell whether a layer uses the sliding window, as llama.cpp decides it.
+
+    Args:
+        pattern: ``sliding_window_pattern`` from the file (one bool per layer), or the period
+            ``n`` of llama.cpp's built-in pattern (layer ``i`` slides when ``i % n < n - 1``), or
+            None (every layer slides, as in Mistral 7B).
+        layer: The layer number.
+
+    Returns:
+        True for a sliding-window layer.
+    """
+    if isinstance(pattern, list):
+        return bool(pattern[layer]) if layer < len(pattern) else False
+    if pattern:
+        return layer % int(pattern) < int(pattern) - 1
+    return True
 
 
 def shape_of_file(path: str) -> Shape | None:

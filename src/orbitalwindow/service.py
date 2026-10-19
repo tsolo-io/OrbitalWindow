@@ -845,12 +845,15 @@ class Service:
         if gguf:
             chosen = info.gguf_model(gguf)
             shape = self.hub.gguf_shape(info.repo, info.revision, chosen.name, self.hf_token())
-            estimate = fit_mod.estimate(chosen.bytes, None, shape=shape)
+            estimate = fit_mod.estimate(chosen.bytes, None, shape=shape, engine="llamacpp")
         else:
             weights = sum(size for path, size in info.files if path.endswith(".safetensors"))
             config = self.hub.config(info.repo, info.revision, self.hf_token())
             estimate = fit_mod.estimate(weights, config)
-        return estimate, fit_mod.verdict(estimate.total, self.model_gpu(), estimate.kv_cache)
+        verdict = fit_mod.verdict(
+            estimate.total, self.model_gpu(), estimate.kv_cache, estimate.share
+        )
+        return estimate, verdict
 
     def _uses_gguf(self, model: LocalModel) -> bool:
         """Tell whether a model runs from its GGUF file (llama.cpp) rather than safetensors.
@@ -880,7 +883,7 @@ class Service:
         found = model.gguf if self._uses_gguf(model) else None
         if found is not None:
             shape = gguf_mod.shape_of_file(str(model.path / found.name))
-            return fit_mod.estimate(found.bytes, None, context, shape)
+            return fit_mod.estimate(found.bytes, None, context, shape, "llamacpp")
         return fit_mod.estimate(model.weights, model.config(), context)
 
     def fit_for_local(self, model: LocalModel) -> tuple[fit_mod.Estimate, fit_mod.Verdict]:
@@ -893,7 +896,10 @@ class Service:
             The memory estimate and the verdict for the GPU.
         """
         estimate = self._estimate(model)
-        return estimate, fit_mod.verdict(estimate.total, self.model_gpu(), estimate.kv_cache)
+        verdict = fit_mod.verdict(
+            estimate.total, self.model_gpu(), estimate.kv_cache, estimate.share
+        )
+        return estimate, verdict
 
     def ai_engine(self) -> str:
         """Return the AI engine setting.
@@ -1033,7 +1039,7 @@ class Service:
             "max_context": estimate.shape.max_context if estimate.shape else None,
             "gpu_share": share,
             "estimate": estimate,
-            "verdict": fit_mod.verdict(estimate.total, gpu, estimate.kv_cache),
+            "verdict": fit_mod.verdict(estimate.total, gpu, estimate.kv_cache, estimate.share),
             "short_for_coding": estimate.context < fit_mod.CODING_CONTEXT,
         }
 

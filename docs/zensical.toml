@@ -80,6 +80,7 @@ nav = [
     { "0039 llama.cpp engine" = "adr/0039-llama-cpp-engine.md" },
     { "0040 VS Code without a desktop" = "adr/0040-vs-code-without-a-desktop.md" },
     { "0041 Lock-out recovery" = "adr/0041-admin-lock-out-recovery.md" },
+    { "0042 Fit: sliding windows" = "adr/0042-fit-sliding-window-and-engines.md" },
   ] },
 ]
 
