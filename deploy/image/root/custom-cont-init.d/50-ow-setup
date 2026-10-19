@@ -19,6 +19,21 @@ for entry in ${OW_GROUPS:-}; do
     usermod -aG "$name" abc
 done
 
+# GPU device nodes (/dev/dri, and /dev/kfd on AMD) belong to the host's video and render groups,
+# whose GIDs the image may not know. Add abc to each owning group, creating a group for an
+# unknown GID. Webtop desktops do this themselves; terminal-only images don't (ADR 0037).
+for dev in /dev/dri/* /dev/kfd; do
+    [ -c "$dev" ] || continue
+    gid=$(stat -c %g "$dev")
+    [ "$gid" = 0 ] && continue
+    group=$(getent group "$gid" | cut -d: -f1)
+    if [ -z "$group" ]; then
+        group="ow-gpu$gid"
+        groupadd -g "$gid" "$group"
+    fi
+    usermod -aG "$group" abc
+done
+
 # Launcher icons (desktops only): every ow-*.desktop that add-ons installed goes on the Desktop;
 # icons of add-ons that are no longer installed are removed. Other files are left alone.
 if [ "${OW_GUI:-true}" != "false" ]; then

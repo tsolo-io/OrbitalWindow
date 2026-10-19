@@ -184,6 +184,14 @@ class Builder:
 
     # --- queueing ----------------------------------------------------------------------------
 
+    def _gpu_vendor(self) -> str:
+        """Return the GPU setting, for the base image's vendor packages.
+
+        Returns:
+            ``nvidia``, ``amd``, ``intel`` or ``none``.
+        """
+        return self._db.get_setting("gpu_vendor") or "nvidia"
+
     def queue_base(self, image_id: int) -> int:
         """Queue a base image build.
 
@@ -340,7 +348,7 @@ class Builder:
                     path=str(self._context),
                     dockerfile="Dockerfile" if image["gui"] else "Dockerfile.terminal",
                     tag=image["image_ref"],
-                    buildargs={"BASE_IMAGE": base},
+                    buildargs={"BASE_IMAGE": base, "GPU_VENDOR": self._gpu_vendor()},
                     pull=True,
                     rm=True,
                     forcerm=True,

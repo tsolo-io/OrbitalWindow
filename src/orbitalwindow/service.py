@@ -1787,11 +1787,19 @@ class Service:
             if not HOSTNAME_RE.fullmatch(host):
                 raise ValidationError("The host name may contain letters, digits, dots and '-'.")
             clean["hostname"] = host
+        vendor_changed = "gpu_vendor" in clean and clean["gpu_vendor"] != self.db.get_setting(
+            "gpu_vendor"
+        )
         with self.db.transaction():
             for key, value in clean.items():
                 self.db.set_setting(key, value)
         detail = ", ".join(f"{k}={v}" for k, v in clean.items())
         self.db.audit(actor, "settings.update", detail=detail)
+        if vendor_changed:
+            # The images carry the vendor's packages (Intel's compute runtime); users' images
+            # follow their base image.
+            for image in self.db.all("SELECT id FROM images WHERE status <> 'building'"):
+                self.rebuild_image(actor, image["id"])
         if "scratch_retention_days" in clean:
             # Rewrites the scratch README with the new number of days.
             self.hostops.prepare_layout(os.getuid(), int(clean["scratch_retention_days"]))

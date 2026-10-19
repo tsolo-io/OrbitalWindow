@@ -32,6 +32,10 @@ the NVIDIA Container Toolkit.
 3. Optional: `sudo apt install intel-gpu-tools`, then `sudo intel_gpu_top` shows the GPU load on
    the host.
 
+Switch on **Resizable BAR** (also called *Re-Size BAR* or *Smart Access Memory*) and *Above 4G
+decoding* in the BIOS. Arc GPUs are much slower without it, and the compute runtime warns
+`Resizable BAR not detected` when it is off.
+
 If the server also has a GPU in the CPU (integrated graphics), switch it off in the BIOS. If not,
 desktops can use the integrated GPU instead of the Arc card. Servers with two GPUs are untested.
 
@@ -51,7 +55,11 @@ Set `OW_GPU_VENDOR=intel` in `.env` (or **Settings → GPU**). Then:
   `CAP_PERFMON` capability, which the kernel requires for these numbers.
 - **GPU load** is the busiest engine (render, compute, copy or video) in the last 2 seconds.
 - The **AI session** (vLLM) needs NVIDIA.
-- **GPU computing** (OpenCL, oneAPI) is not in the desktop image. **MATLAB** GPU computing
-  (`gpuArray`) needs NVIDIA; MATLAB itself runs fine.
+- **GPU computing:** desktop and terminal-only images built on an Intel host get Intel's compute
+  runtime: OpenCL (`intel-opencl-icd`), oneAPI Level Zero (`libze-intel-gpu1`) and `clinfo`.
+  `clinfo -l` in a desktop lists the GPU. Programs such as PyTorch for Intel GPUs (XPU) use it.
+  When you change the GPU setting, OrbitalWindow rebuilds every desktop image, and users get the
+  new image the next time they start their desktop. **MATLAB** GPU computing (`gpuArray`) needs
+  NVIDIA; MATLAB itself runs fine.
 - OrbitalWindow starts every desktop with `PIXELFLUX_WAYLAND=false`. On Intel the Wayland mode may
   also work; it is untested.
