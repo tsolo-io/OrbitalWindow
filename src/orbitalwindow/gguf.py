@@ -234,6 +234,11 @@ def shape_from_metadata(metadata: dict[str, Any]) -> Shape | None:
         layers = int(metadata[f"{arch}.block_count"])
         heads = metadata[f"{arch}.attention.head_count"]
         kv_heads = metadata.get(f"{arch}.attention.head_count_kv", heads)
+        # Hybrid models (Qwen3.5, Qwen3-Next) have full attention only in every n-th layer; the
+        # others use linear attention, whose state doesn't grow with the context.
+        interval = metadata.get(f"{arch}.full_attention_interval")
+        if interval and int(interval) > 1:
+            layers //= int(interval)
         # Some models list the heads per layer; layers without KV heads have no cache.
         if isinstance(kv_heads, list):
             with_cache = [int(count) for count in kv_heads if count]

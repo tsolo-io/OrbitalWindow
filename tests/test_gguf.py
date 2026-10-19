@@ -93,6 +93,22 @@ def test_per_layer_kv_heads_count_only_layers_with_a_cache():
     assert (shape.layers, shape.kv_heads) == (2, 8)
 
 
+def test_hybrid_models_count_only_full_attention_layers():
+    """Qwen3.5-9B: full attention in every 4th of 32 layers, so 8 layers have a KV cache."""
+    metadata = {
+        "general.architecture": "qwen35",
+        "qwen35.block_count": 32,
+        "qwen35.context_length": 262144,
+        "qwen35.embedding_length": 4096,
+        "qwen35.attention.head_count": 16,
+        "qwen35.attention.head_count_kv": 4,
+        "qwen35.attention.key_length": 256,
+        "qwen35.full_attention_interval": 4,
+    }
+    shape = gguf.shape_from_metadata(metadata)
+    assert shape.layers == 8 and shape.kv_per_token == 2 * 8 * 4 * 256 * 2
+
+
 def test_errors():
     """Other files and cut-off metadata raise GgufError; missing keys give no shape."""
     with pytest.raises(gguf.GgufError, match="not a GGUF"):
