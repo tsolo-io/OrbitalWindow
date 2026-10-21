@@ -152,3 +152,57 @@ def test_shape_of_a_local_file(tmp_path):
     bad = tmp_path / "bad.gguf"
     bad.write_bytes(b"GGUF")
     assert gguf.shape_of_file(str(bad)) is None
+
+
+# The metadata of unsloth/gpt-oss-20b-GGUF Q4_K_M (October 2026): a 128-token window in every
+# other layer, set by llama.cpp's built-in pattern (the file has no sliding_window_pattern).
+GPT_OSS_20B = {
+    "general.architecture": "gpt-oss",
+    "gpt-oss.block_count": 24,
+    "gpt-oss.context_length": 131072,
+    "gpt-oss.embedding_length": 2880,
+    "gpt-oss.attention.head_count": 64,
+    "gpt-oss.attention.head_count_kv": 8,
+    "gpt-oss.attention.key_length": 64,
+    "gpt-oss.attention.value_length": 64,
+    "gpt-oss.attention.sliding_window": 128,
+}
+
+
+def test_gpt_oss_matches_llama_cpp():
+    """llama.cpp at 131,072 tokens: 3,072 MiB for 12 full layers, 24 MiB (1,024 cells) for SWA."""
+    shape = gguf.shape_from_metadata(GPT_OSS_20B)
+    assert (shape.layers, shape.swa_tokens) == (12, 1024)
+    assert shape.kv_per_token * 131072 == 3072 * 2**20
+    assert shape.swa_bytes * shape.swa_tokens == 24 * 2**20
+    assert shape.kv_cache(131072) == 3096 * 2**20
+    assert shape.kv_cache(100) == (shape.kv_per_token + shape.swa_bytes) * 100  # inside the window
+
+
+def test_gemma_4_pattern_and_layer_sizes():
+    """Gemma 4: the file lists sliding layers; full and sliding layers differ in heads and size."""
+    pattern = ([True] * 5 + [False]) * 8
+    metadata = {
+        "general.architecture": "gemma4",
+        "gemma4.block_count": 48,
+        "gemma4.context_length": 262144,
+        "gemma4.embedding_length": 3840,
+        "gemma4.attention.head_count": 16,
+        "gemma4.attention.head_count_kv": [1 if not s else 8 for s in pattern],
+        "gemma4.attention.key_length": 512,
+        "gemma4.attention.value_length": 512,
+        "gemma4.attention.key_length_swa": 256,
+        "gemma4.attention.value_length_swa": 256,
+        "gemma4.attention.sliding_window": 1024,
+        "gemma4.attention.sliding_window_pattern": pattern,
+        "gemma4.attention.shared_kv_layers": 0,
+    }
+    shape = gguf.shape_from_metadata(metadata)
+    assert shape.layers == 8 and shape.kv_per_token == 8 * 1 * (512 + 512) * 2
+    assert shape.swa_bytes == 40 * 8 * (256 + 256) * 2 and shape.swa_tokens == 1024 * 4 + 512
+
+
+def test_without_a_window_every_layer_is_full():
+    """Models without sliding_window keep the plain formula (Qwen3-8B)."""
+    shape = gguf.shape_from_metadata(QWEN3_8B)
+    assert (shape.layers, shape.swa_bytes, shape.swa_tokens) == (36, 0, 0)

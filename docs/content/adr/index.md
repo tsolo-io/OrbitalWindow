@@ -55,3 +55,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0039](0039-llama-cpp-engine.md) | A second AI engine: llama.cpp with GGUF models, for Intel and AMD | accepted |
 | [0040](0040-vs-code-without-a-desktop.md) | VS Code without a desktop: code-server per user, on demand | accepted |
 | [0041](0041-admin-lock-out-recovery.md) | Lock-out recovery: a one-off container while the service is stopped | accepted |
+| [0042](0042-fit-sliding-window-and-engines.md) | Fit check: sliding-window layers, and overhead and share per engine | accepted |

@@ -283,3 +283,33 @@ def test_kv_limit_shortens_the_context_and_the_verdict():
     assert fit.verdict(long.total, arc, long.kv_cache).level == "tight"
     short = fit.estimate(8e9, QWEN3_8B, 16384)
     assert fit.verdict(short.total, arc, short.kv_cache).level == "fits"
+
+
+def test_sliding_window_layers_from_config():
+    """config.json layer_types: sliding layers cache only their window, per request (vLLM)."""
+    config = {
+        "num_hidden_layers": 24,
+        "num_attention_heads": 64,
+        "num_key_value_heads": 8,
+        "head_dim": 64,
+        "max_position_embeddings": 131072,
+        "sliding_window": 128,
+        "layer_types": ["sliding_attention", "full_attention"] * 12,
+    }
+    shape = fit.shape_from_config(config)
+    assert shape.layers == 12 and shape.swa_tokens == 128 * fit.VLLM_SEQS
+    assert shape.kv_cache(131072) == 12 * 2048 * 131072 + 12 * 2048 * 128 * fit.VLLM_SEQS
+
+
+def test_llama_cpp_estimate_matches_the_a770():
+    """gpt-oss-20b Q4_K_M at 131,072 tokens used 13.8 GiB on Wired; the estimate is within 5 %."""
+    from test_gguf import GPT_OSS_20B
+
+    from orbitalwindow import gguf
+
+    shape = gguf.shape_from_metadata(GPT_OSS_20B)
+    estimate = fit.estimate(11624759488, None, 131072, shape, engine="llamacpp")
+    assert abs(estimate.total / fit.GIB - 13.8) / 13.8 < 0.05
+    arc = fit.Gpu("Intel Arc A770", 15.9 * fit.GIB, 15.9 * fit.GIB)
+    verdict = fit.verdict(estimate.total, arc, estimate.kv_cache, estimate.share)
+    assert verdict.level == "fits"  # was "too big" before #60

@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0026 Model fit: our own estimate, llmfit only for ideas
 
-- Status: accepted
+- Status: accepted (0042 adds sliding-window layers and per-engine overhead)
 - Date: 2026-10-10
 
 ## Context
