@@ -6,9 +6,10 @@
 
 It is LinuxServer's code-server image with OrbitalWindow's changes
 (``deploy/image/Dockerfile.code``), built on first use as ``ow-code:<hash>``. It runs as the user's
-UID with their home at ``/config`` and the same folders as their desktop, starts and stops on
-demand, and has no password: like the file manager it lives on its own network ``ow-cnet-<user>``
-that only Traefik joins, and Traefik's forwardAuth lets only the owner in.
+UID with their home at ``/home`` (``/config`` in the desktop) and the desktop's other folders,
+starts and stops on demand, and has no password: like the file manager it lives on its own
+network ``ow-cnet-<user>`` that only Traefik joins, and Traefik's forwardAuth lets only the owner
+in.
 """
 
 import contextlib
@@ -135,7 +136,8 @@ def build_code_spec(
     path = code_path(name)
     router = cname
     volumes = {
-        str(root / "users" / name): {"bind": "/config", "mode": "rw"},
+        # /home, not /config as in the desktop: the folder VS Code users expect (and look in).
+        str(root / "users" / name): {"bind": "/home", "mode": "rw"},
         str(root / "shared" / "scratch"): {"bind": "/scratch", "mode": "rw"},
         str(root / "shared" / "data"): {"bind": "/shared", "mode": "ro"},
     }
@@ -148,6 +150,7 @@ def build_code_spec(
         "PUID": str(uid),
         "PGID": str(uid),
         "TZ": settings.tz,
+        "HOME": "/home",
         "OW_GUI": "false",  # the init hook makes no desktop icons
         "OW_GROUPS": " ".join(f"{g['name']}:{g['gid']}" for g in groups),
     }

@@ -9,6 +9,10 @@ SPDX-License-Identifier: Apache-2.0
 VS Code is a program to edit code and text files. You can use it in your browser without starting
 your desktop.
 
+There are two ways to use VS Code. This page is about **VS Code in the browser**, started from the
+dashboard. You can also switch on **Visual Studio Code** under *Software* to get it as a program
+inside your desktop, where it can run all of your desktop's software.
+
 ## Start and open it
 
 1. On the dashboard, find **VS Code** and press **Start VS Code**. The first start takes a minute
@@ -21,14 +25,15 @@ VS Code keeps running when you close the tab, and also when the server restarts,
 
 ## Your files
 
-VS Code opens your home folder. The folders are the same as in your desktop:
+VS Code opens your home folder. It is the same folder as in your desktop, but here it is called
+`/home`:
 
-| Folder | Path |
-|---|---|
-| Your home folder | `/config` |
-| Group folders | `/groups/<name>` |
-| Shared scratch | `/scratch` |
-| Shared data (read only) | `/shared` |
+| Folder | In VS Code | In the desktop |
+|---|---|---|
+| Your home folder | `/home` | `/config` |
+| Group folders | `/groups/<name>` | `/groups/<name>` |
+| Shared scratch | `/scratch` | `/scratch` |
+| Shared data (read only) | `/shared` | `/shared` |
 
 Changes you save are at once in your desktop, in the web file manager and in Windows Explorer.
 

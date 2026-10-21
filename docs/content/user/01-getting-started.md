@@ -30,6 +30,9 @@ You can close the browser tab at any time; your desktop keeps running until you 
 If you prefer a command line, **Open terminal** gives you one in your desktop, in the browser. It
 keeps running when you close it (see [Terminal](07-terminal.md)).
 
+To edit files without starting your desktop, use **VS Code** on the dashboard: it opens VS Code
+in your browser, with your home folder (see [VS Code](09-vscode.md)).
+
 If you only work in the terminal, choose an option marked **(terminal only)** in the **Desktop**
 list. It has no desktop, which leaves a little more of the server for your work. You use it with
 **Open terminal** or SSH; SSH is switched on for you. Software that needs a desktop, such as VS
