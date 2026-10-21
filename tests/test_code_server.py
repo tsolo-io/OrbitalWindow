@@ -25,11 +25,12 @@ GROUPS = [{"name": "labx", "gid": 3001}]
 
 
 def test_spec_mounts_the_home_like_a_desktop(settings):
-    """The home is /config, group folders and scratch are mounted, shared data read-only."""
+    """The home is /home (and HOME); groups and scratch are mounted, shared data read-only."""
     spec = build_code_spec(USER, GROUPS, settings, {"MY_VAR": "1", "PATH": "/evil"})
     kwargs = spec.kwargs
     root = settings.root
-    assert kwargs["volumes"][str(root / "users" / "user1")] == {"bind": "/config", "mode": "rw"}
+    assert kwargs["volumes"][str(root / "users" / "user1")] == {"bind": "/home", "mode": "rw"}
+    assert kwargs["environment"]["HOME"] == "/home"
     assert kwargs["volumes"][str(root / "groups" / "labx")]["bind"] == "/groups/labx"
     assert kwargs["volumes"][str(root / "shared" / "data")]["mode"] == "ro"
     env = kwargs["environment"]

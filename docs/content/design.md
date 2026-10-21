@@ -163,8 +163,9 @@ env: {}                     # extra container environment
 ### VS Code in the browser (code-server, on demand; #49, ADR 0040)
 - **Container `ow-code-<user>`:** image `ow-code:<hash>`, built by the service from
   `deploy/image/Dockerfile.code` on LinuxServer's code-server (`OW_CODE_SERVER_IMAGE`). The user's
-  home is `/config` (as in the desktop), with the groups, scratch and `/shared` read-only. Settings
-  and extensions live in `~/.local/share/code-server`; nothing visible is added to the home.
+  home is `/home` (and `HOME`; in the desktop it is `/config`), with the groups, scratch and
+  `/shared` read-only. Settings and extensions live in `~/.local/share/code-server`; nothing visible
+  is added to the home.
 - **Access:** `/code/<user>/` through owner-only forwardAuth, then the prefix is stripped. No
   password in code-server; its network `ow-cnet-<user>` is joined only by Traefik.
 - **Lifecycle:** the user starts and stops it on the dashboard; it keeps running until stopped (and

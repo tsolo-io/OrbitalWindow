@@ -6,8 +6,9 @@ SPDX-License-Identifier: Apache-2.0
 
 # Files
 
-Your files are the same everywhere: in your desktop, in the web file manager and in Windows
-Explorer.
+Your files are the same everywhere: in your desktop, in VS Code in the browser, in the web file
+manager and in Windows Explorer. In VS Code your home folder is called `/home` (see
+[VS Code](09-vscode.md)).
 
 | Folder | In the desktop | In Windows Explorer |
 |---|---|---|

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # VS Code in the browser (ow-code-<user>, ADR 0040): LinuxServer's code-server with the user's home
-# at /config, the same path as in their desktop. Built by the service as ow-code:<hash of this
+# at /home (in their desktop it is /config). Built by the service as ow-code:<hash of this
 # folder's code files>; OW_CODE_SERVER_IMAGE picks the code-server version.
 ARG BASE_IMAGE=lscr.io/linuxserver/code-server:4.140.0-ls368
 FROM ${BASE_IMAGE}
