@@ -122,7 +122,7 @@ def test_chat_follows_the_session(chat, tmp_path):
     client = chat._client
     chat.ensure(True, "k1", "desk.test")
     assert client.pulls == ["ghcr.io/open-webui/open-webui:v0.11.4"] and len(client.runs) == 1
-    assert client.network.connected == ["ow-traefik"]
+    assert client.network.connected == ["ow-traefik", "orbitalwindow"]  # the service: chat keys
     assert (tmp_path / "state" / "openwebui").is_dir()
     secret = (tmp_path / "state" / "openwebui_secret").read_text().strip()
     assert client.runs[0][1]["environment"]["WEBUI_SECRET_KEY"] == secret

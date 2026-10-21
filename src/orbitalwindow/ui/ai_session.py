@@ -69,7 +69,9 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
             ui.label(
                 "Programs talk to the model with the OpenAI API (for example the openai Python "
                 "package). Inside the server, only Open WebUI and OrbitalWindow reach it. Switch "
-                "this on to reach it from other computers, such as a desktop or a laptop."
+                "this on to reach it from other computers, such as a desktop or a laptop. This key "
+                "is for this address only; users get their own key for the chat's address on the "
+                "dashboard (AI model → Use the model from your own code)."
             ).classes("text-caption text-grey-7")
             public_in = ui.switch("Reachable from other computers", value=svc.ai_api_public())
             api_url = ui.label().classes("font-mono")

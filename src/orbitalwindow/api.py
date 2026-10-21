@@ -9,6 +9,7 @@ set the HttpOnly session cookie and passwords never travel over the UI websocket
 """
 
 import re
+import ssl
 from enum import IntEnum
 from typing import Annotated
 from urllib.parse import quote, urlsplit
@@ -17,6 +18,7 @@ from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 
 from .auth import COOKIE_NAME, SessionUser
+from .chat import trusted_headers
 from .service import Service
 from .users import ValidationError
 
@@ -389,9 +391,6 @@ def benchmark_file(request: Request, bench_id: int, name: str) -> Response:
     )
 
 
-CHAT_EMAIL_DOMAIN = "orbitalwindow.local"
-
-
 @router.get("/auth/ai")
 def auth_ai(request: Request) -> Response:
     """Traefik forwardAuth for the chat (Open WebUI): every logged-in user.
@@ -417,12 +416,32 @@ def auth_ai(request: Request) -> Response:
         hostname = host.rsplit(":", 1)[0] if not host.endswith("]") else host
         return RedirectResponse(f"{proto}://{hostname}/login?next=/", status_code=302)
     return PlainTextResponse(
-        "ok",
-        headers={
-            "X-OW-Email": f"{user.name}@{CHAT_EMAIL_DOMAIN}",
-            "X-OW-Name": quote(user.display_name),
-            "X-OW-Role": "admin" if user.is_admin else "user",
-        },
+        "ok", headers=trusted_headers(user.name, user.display_name, user.is_admin)
+    )
+
+
+@router.get("/orbitalwindow.crt", include_in_schema=False)
+def certificate(request: Request) -> Response:
+    """Serve the server's TLS certificate, for programs that should trust it (#61).
+
+    It is the certificate Traefik presents (public: every browser receives it), read from
+    Traefik's TLS handshake, so it follows a renewed or real certificate.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        The certificate in PEM format, or 503 when Traefik can't be reached.
+    """
+    traefik = svc(request).settings.traefik_container
+    try:
+        pem = ssl.get_server_certificate((traefik, 443), timeout=5)
+    except OSError:
+        return PlainTextResponse("The certificate is not available right now.", status_code=503)
+    return Response(
+        pem,
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": 'attachment; filename="orbitalwindow.crt"'},
     )
 
 

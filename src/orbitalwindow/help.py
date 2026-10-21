@@ -12,7 +12,16 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-PLACEHOLDERS = ("host", "user", "samba_path", "ssh_cmd", "groups")
+PLACEHOLDERS = (
+    "host",
+    "user",
+    "samba_path",
+    "ssh_cmd",
+    "groups",
+    "chat_api",
+    "model",
+    "context",
+)
 COMMENT_RE = re.compile(r"<!--.*?-->\s*", re.S)
 SLUG_RE = re.compile(r"^[0-9]{2}-([a-z0-9-]+)\.md$")
 

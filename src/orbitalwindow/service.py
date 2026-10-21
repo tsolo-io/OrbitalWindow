@@ -43,7 +43,7 @@ from .benchmarks import ACTIVE as BENCH_ACTIVE
 from .benchmarks import CONTEXT as BENCH_CONTEXT
 from .benchmarks import SUITES, Benchmarker
 from .builds import TAG_RE, Builder, desktop_image_ref, terminal_image_ref
-from .chat import Chat
+from .chat import Chat, ChatKeyError, ChatKeys
 from .codeserver import CodeServers, CodeState, code_path
 from .config import Settings
 from .db import Database
@@ -138,6 +138,7 @@ class Service:
         self.llmfit = LlmFit(client, settings.llmfit_image)
         self.ai = AiSessions(client, self.db, settings)
         self.chat = Chat(client, settings)
+        self.chat_keys = ChatKeys()
         self.benchmarks = Benchmarker(
             client,
             self.db,
@@ -1211,6 +1212,72 @@ class Service:
             ``https://<host>:<chat port>/``.
         """
         return f"https://{self.public_hostname()}:{self.settings.chat_port}/"
+
+    def chat_api_url(self) -> str:
+        """Return the address programs use with a personal chat API key.
+
+        Returns:
+            ``https://<host>:<chat port>/api``.
+        """
+        return f"https://{self.public_hostname()}:{self.settings.chat_port}/api"
+
+    def chat_access(self, user_id: int) -> dict[str, Any]:
+        """Return what a user needs to call the model from their own code (#61).
+
+        Args:
+            user_id: Id of the user.
+
+        Returns:
+            ``url``, ``model`` and ``context`` of the running session (empty without one), and
+            ``key``: the user's chat API key, or None when they have none yet or the chat is not
+            running (``error`` then says why).
+
+        Raises:
+            ValidationError: When the user no longer exists.
+        """
+        user = self._require_user(user_id)
+        state = self.ai.state()
+        running = state.status == "running"
+        access: dict[str, Any] = {
+            "url": self.chat_api_url(),
+            "model": state.repo if running else "",
+            "context": state.context if running else None,
+            "key": None,
+            "error": "",
+        }
+        if not self.chat_ready():
+            access["error"] = "The chat is not running, so there is no key to show now."
+            return access
+        try:
+            access["key"] = self.chat_keys.get(user["name"], user["display_name"], user["is_admin"])
+        except ChatKeyError as exc:
+            access["error"] = str(exc)
+        return access
+
+    def create_chat_key(self, actor: str, user_id: int, renew: bool = False) -> str:
+        """Create a user's chat API key, or replace it.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user.
+            renew: Replace an existing key (programs with the old one stop working).
+
+        Returns:
+            The key.
+
+        Raises:
+            ValidationError: When the user no longer exists, the chat is not running or refuses.
+        """
+        user = self._require_user(user_id)
+        if not self.chat_ready():
+            raise ValidationError("The chat is not running. Try again when a model is running.")
+        args = (user["name"], user["display_name"], user["is_admin"])
+        try:
+            key = self.chat_keys.renew(*args) if renew else self.chat_keys.get(*args, create=True)
+        except ChatKeyError as exc:
+            raise ValidationError(str(exc)) from exc
+        self.db.audit(actor, "chat.key.renew" if renew else "chat.key.create", user["name"])
+        return key or ""
 
     def chat_ready(self) -> bool:
         """Tell whether the chat can be opened (Open WebUI is up and the model is running).
