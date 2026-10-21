@@ -6,7 +6,7 @@
 #
 # Replaces LinuxServer's service: no password (Traefik's forwardAuth lets only the owner in, and
 # only Traefik shares the container's network), settings in ~/.local/share/code-server, and the
-# home (/home) opened as the workspace.
+# home (/home) opened as the workspace every time (not the folder code-server last showed).
 
 data=/home/.local/share/code-server
 exec \
@@ -20,4 +20,5 @@ exec \
                 --disable-update-check \
                 --auth none \
                 --app-name "VS Code" \
+                --ignore-last-opened \
                 /home
