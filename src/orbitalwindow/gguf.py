@@ -21,8 +21,9 @@ from .fit import Shape
 
 MAGIC = b"GGUF"
 SPLIT_RE = re.compile(r"-(\d{5})-of-(\d{5})\.gguf$")
-# Vision projectors and other helper files are not models of their own.
-SKIP_RE = re.compile(r"(^|/)(mmproj|imatrix)[^/]*$", re.IGNORECASE)
+# Vision projectors, importance matrices and multi-token-prediction drafts (MTP) are helper files,
+# not models of their own.
+SKIP_RE = re.compile(r"(^|/)(mmproj|imatrix|mtp)[^/]*$|(^|/)mtp/", re.IGNORECASE)
 QUANT_RE = re.compile(r"(?:^|[-_.])((?:I?Q\d[A-Z0-9_]*)|BF16|F16|F32)(?:[-_.]|$)", re.IGNORECASE)
 PREFERRED = "Q4_K_M"  # the usual balance of size and quality
 KV_BYTES = 2  # llama.cpp keeps the KV cache in float16 by default
@@ -234,6 +235,11 @@ def shape_from_metadata(metadata: dict[str, Any]) -> Shape | None:
         layers = int(metadata[f"{arch}.block_count"])
         heads = metadata[f"{arch}.attention.head_count"]
         kv_heads = metadata.get(f"{arch}.attention.head_count_kv", heads)
+        # Hybrid models (Qwen3.5, Qwen3-Next) have full attention only in every n-th layer; the
+        # others use linear attention, whose state doesn't grow with the context.
+        interval = metadata.get(f"{arch}.full_attention_interval")
+        if interval and int(interval) > 1:
+            layers //= int(interval)
         # Some models list the heads per layer; layers without KV heads have no cache.
         if isinstance(kv_heads, list):
             with_cache = [int(count) for count in kv_heads if count]

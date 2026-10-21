@@ -127,7 +127,7 @@ def session_card(auth: PageAuth, svc: Service) -> Callable[[], Awaitable[None]]:
             estimate_label.set_text(str(exc))
             return
         if defaults["max_context"]:
-            context_in.props(f"max={defaults['max_context']}")
+            context_in.max = defaults["max_context"]  # a number: props() would store a string
         context_in.set_value(defaults["context"])
         share_in.set_value(defaults["gpu_share"])
         estimate = defaults["estimate"]

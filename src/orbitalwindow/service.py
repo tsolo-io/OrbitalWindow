@@ -2796,7 +2796,7 @@ def _int_in(value: Any, low: int, high: int, what: str) -> int:
     """Parse a whole number within a range.
 
     Args:
-        value: Value as entered.
+        value: Value as entered; number fields give floats such as ``131072.0``.
         low: Smallest allowed number.
         high: Largest allowed number.
         what: Name of the value for error messages.
@@ -2807,6 +2807,8 @@ def _int_in(value: Any, low: int, high: int, what: str) -> int:
     Raises:
         ValidationError: When the value is not a whole number or is out of range.
     """
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
     try:
         number = int(str(value).strip())
     except ValueError:

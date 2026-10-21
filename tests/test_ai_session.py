@@ -454,3 +454,13 @@ def test_benchmark_settings_without_a_gpu_share():
     row = {"gpu_index": 0, "context": 40960, "gpu_share": 0.0}
     assert settings_text(row) == "GPU 0 · 40,960 tokens"
     assert settings_text(row | {"gpu_share": 0.35}) == "GPU 0 · 40,960 tokens · 35%"
+
+
+def test_context_typed_in_a_number_field(service, model_on_disk):
+    """A number field gives 8192.0: whole floats are accepted, fractions are not."""
+    service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0.0, 8192.0, 0.5)
+    command = service.ai._client.runs[0][1]["command"]
+    assert command[command.index("--max-model-len") + 1] == "8192"
+    service.stop_ai_session("boss")
+    with pytest.raises(ValidationError, match="whole number"):
+        service.start_ai_session("boss", "Qwen/Qwen3-0.6B", 0, 8192.5, 0.5)
