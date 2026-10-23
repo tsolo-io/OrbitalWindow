@@ -11,7 +11,7 @@ on:
 
 jobs:
   publish:
-    runs-on: "linux"
+    runs-on: "native"
     container:
       image: gitea.tu.tsolo.net/tsolo/ubuntu:24-ci
     steps:
