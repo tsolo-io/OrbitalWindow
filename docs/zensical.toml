@@ -10,6 +10,9 @@ use_directory_urls = false
 copyright = "Copyright &copy; 2026 Tsolo.io"
 site_author = "Tsolo.io"
 dev_addr = "0.0.0.0:8765"
+site_url = "https://tsolo-io.github.io/OrbitalWindow/"
+repo_url = "https://github.com/tsolo-io/OrbitalWindow"
+repo_name = "tsolo-io/OrbitalWindow"
 site_description = "Manage GPU-accelerated research/science desktop environments on Docker"
 nav = [
   { "Home" = "index.md" },
@@ -97,5 +100,5 @@ inherited_members = true
 show_source = false
 
 [[project.extra.social]]
-icon = "fontawesome/solid/briefcase"
-link = "https://docs.tu.tsolo.net/index/index.html"
+icon = "fontawesome/brands/github"
+link = "https://github.com/tsolo-io/OrbitalWindow"
