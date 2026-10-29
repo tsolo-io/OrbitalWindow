@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Dependabot on the GitHub mirror. GitHub is a read-only copy of the Gitea repository, so its pull
+# requests can't be merged there: use them as a weekly list of updates and make the change in Gitea.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns: ["*"]
+  - package-ecosystem: "docker"
+    directories: ["/", "/deploy/samba"]
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
