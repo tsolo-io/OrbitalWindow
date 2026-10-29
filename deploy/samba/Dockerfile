@@ -4,7 +4,7 @@
 
 # Samba for Windows file access. Users and shares come from /etc/ow/users.json, written by
 # OrbitalWindow; see ow-sync and ow-passwd.
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache samba samba-common-tools jq tini
 COPY smb.conf /etc/samba/smb.conf
 COPY entrypoint.sh ow-sync ow-passwd /usr/local/bin/
