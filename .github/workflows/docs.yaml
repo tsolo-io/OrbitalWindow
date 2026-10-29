@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The documentation on GitHub Pages (https://tsolo-io.github.io/OrbitalWindow/), built with the same
+# Zensical setup as `hatch run docs:build`. Needs Settings -> Pages -> Source: GitHub Actions.
+---
+name: Documentation
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push replaces a queued one, a running one finishes.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Build the site
+        run: |
+          pip install hatch
+          hatch run docs:build --clean
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/site
+      - id: deployment
+        uses: actions/deploy-pages@v4
