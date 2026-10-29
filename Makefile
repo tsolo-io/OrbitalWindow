@@ -21,7 +21,7 @@
 
 # PROD=1 uses the published images; otherwise compose.dev.yaml builds them from this checkout.
 DEPLOY := $(MAKE) -C deploy $(if $(PROD),,DEV=1)
-.PHONY: test format lint start update stop restart logs status
+.PHONY: test format lint start update stop restart logs status docs
 
 -include .tidy/*.mk
 
