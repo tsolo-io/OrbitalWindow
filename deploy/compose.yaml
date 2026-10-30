@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # OrbitalWindow stack — production. Uses the published images
-#   gitea.tu.tsolo.net/kuat/orbitalwindow:${OW_VERSION}        (the service)
-#   gitea.tu.tsolo.net/kuat/orbitalwindow-samba:${OW_VERSION}  (Windows file sharing)
-# built by CI (.gitea/workflows/build.yaml). OW_VERSION is a release tag (e.g. v1.0.0) or `main`.
+#   ghcr.io/tsolo-io/orbitalwindow:${OW_VERSION}        (the service)
+#   ghcr.io/tsolo-io/orbitalwindow-samba:${OW_VERSION}  (Windows file sharing)
+# built by CI (.github/workflows/publish.yaml). OW_VERSION is a release tag (e.g. v1.0.0) or `main`.
 #
 # On a server, copy the deploy/ folder (this file, traefik/, scripts/, the optional
 # compose.nvidia.yaml, compose.intel.yaml and compose.tls.yaml, .env.example), create .env and run:
@@ -131,7 +131,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   orbitalwindow:
-    image: ${OW_IMAGE:-gitea.tu.tsolo.net/kuat/orbitalwindow}:${OW_VERSION:-main}
+    image: ${OW_IMAGE:-ghcr.io/tsolo-io/orbitalwindow}:${OW_VERSION:-main}
     container_name: orbitalwindow
     restart: unless-stopped
     logging: *logging
@@ -287,7 +287,7 @@ services:
       traefik.http.services.ow-dozzle.loadbalancer.server.port: "8080"
 
   samba:
-    image: ${OW_SAMBA_IMAGE:-gitea.tu.tsolo.net/kuat/orbitalwindow-samba}:${OW_VERSION:-main}
+    image: ${OW_SAMBA_IMAGE:-ghcr.io/tsolo-io/orbitalwindow-samba}:${OW_VERSION:-main}
     container_name: ow-samba
     restart: unless-stopped
     logging: *logging

@@ -7,13 +7,14 @@ SPDX-License-Identifier: Apache-2.0
 # Installing OrbitalWindow
 
 This guide sets up OrbitalWindow on one server: Ubuntu 24.04 Server with NVIDIA, AMD or Intel
-GPU(s), on the local network.
+GPU(s), on the local network. You prepare the server (step 1), then an install script does the rest
+(step 2).
 
 ## 1. Host preparation
 
 ```bash
 sudo apt update && sudo apt full-upgrade
-sudo apt install docker.io docker-compose-v2 make git
+sudo apt install docker.io docker-compose-v2 make
 ```
 
 Prepare the GPU. Each vendor has its own page:
@@ -46,24 +47,70 @@ and **2222** (SSH gateway). If the host already runs Samba, disable it: `sudo sy
 Disk: each desktop image is about 5 GB, and each user's software adds to that. Put Docker's data
 (`/var/lib/docker`) and the OrbitalWindow data folder on a disk with plenty of space.
 
-The admin account that runs OrbitalWindow needs to be in the `docker` group
-(`sudo usermod -aG docker <you>`, then log in again).
+## 2. Install
 
-## 2. Get OrbitalWindow and configure it
+Download the install script and run it:
 
-A server runs the published images (`gitea.tu.tsolo.net/kuat/orbitalwindow` and
-`…/orbitalwindow-samba`, built by CI). It needs only a copy of the repository's `deploy/` folder:
-the compose files, `traefik/`, `scripts/`, the `Makefile` and `.env.example`. Keep that folder
+```bash
+curl -fsSLO https://github.com/tsolo-io/OrbitalWindow/releases/latest/download/install.sh
+sudo bash install.sh
+```
+
+The script:
+
+1. Checks Docker and Docker Compose. If one is missing it says how to install it and stops.
+2. Looks for GPUs and checks their driver (on NVIDIA also the NVIDIA Container Toolkit). If there is
+   no GPU, or its driver doesn't work yet, it says so and installs without a GPU: desktops then
+   render in software.
+3. Asks three questions; press Enter to take the suggestion:
+    - the name or IP address users type in the browser (suggested: this server's IP address),
+    - the data folder (suggested: `/srv/orbitalwindow`),
+    - the time zone (suggested: the server's).
+4. Checks that ports 80, 443, 445, 2222 and 8443 are free.
+5. Downloads the latest release into `/opt/orbitalwindow` and writes the settings to `.env` there.
+6. Adds you to the `docker` group, so the `make` commands work without `sudo` (log out and in again
+   first), and installs `make` if it is missing.
+7. Starts OrbitalWindow and prints the address and the first admin password.
+
+Options, for example to install a particular version or without questions:
+
+| Option | Meaning |
+|---|---|
+| `--version v1.2.0` | Install this release; `main` is the latest development build. Default: the latest release. |
+| `--hostname NAME` | Name or IP address users type. |
+| `--data DIR` | Data folder (`OW_ROOT`). |
+| `--dir DIR` | Folder for the deploy files. Default `/opt/orbitalwindow`. |
+| `--gpu VENDOR` | `nvidia`, `amd`, `intel` or `none`, instead of what the script detects. |
+| `--yes` | Don't ask; take the suggestions. |
+
+All `make` commands below run in `/opt/orbitalwindow` (`make help` lists them). Then continue with
+[First login](#3-first-login).
+
+### Changing the GPU later
+
+If the server was installed without a GPU and the driver works now (check again with
+`sudo bash install.sh`, which updates and reports what it finds):
+
+1. In `/opt/orbitalwindow/.env`, set `OW_GPU_VENDOR` (`nvidia`, `amd` or `intel`), and set
+   `COMPOSE_FILE` to `compose.yaml:compose.nvidia.yaml` (NVIDIA), `compose.yaml:compose.intel.yaml`
+   (Intel) or `compose.yaml` (AMD).
+2. Run `make update` in that folder.
+3. In OrbitalWindow, choose the GPU under **Settings → GPU**.
+
+### Installing by hand
+
+Without the script: download the release's `orbitalwindow-deploy-<version>.tar.gz` (or copy the
+repository's `deploy/` folder), unpack it in `/opt/orbitalwindow`, and create `.env`. Keep that folder
 apart from the data folder (`OW_ROOT`), so it can be replaced on an update without touching data:
 
 ```bash
 sudo mkdir -p /opt/orbitalwindow && sudo chown $USER /opt/orbitalwindow
-cp -r deploy/. /opt/orbitalwindow/ && cd /opt/orbitalwindow   # from a fresh clone (no .env in it)
+tar -xzf orbitalwindow-deploy-<version>.tar.gz --strip-components=1 -C /opt/orbitalwindow && cd /opt/orbitalwindow
 make init                     # creates .env (mode 600) and prints the first admin password
-docker login gitea.tu.tsolo.net                                # if the registry needs it
 ```
 
-All `make` commands below run in this folder (`make help` lists them). Edit `.env`:
+The admin account that runs OrbitalWindow needs to be in the `docker` group
+(`sudo usermod -aG docker <you>`, then log in again). Edit `.env`:
 
 | Setting | Meaning |
 |---|---|
@@ -74,10 +121,10 @@ All `make` commands below run in this folder (`make help` lists them). Edit `.en
 | `OW_GPU_VENDOR` | `nvidia`, `amd`, `intel` or `none` (no GPU, for testing only). |
 | `OW_DEFAULT_DESKTOP` | LinuxServer webtop tag built on first start, e.g. `ubuntu-xfce` or `ubuntu-kde`. |
 | `CONTROL_ADMIN_PASSWORD` | Password of the first admin (user `admin`), generated by `make init`. Used only while there are no users. |
-| `COMPOSE_FILE` | Compose files for a plain `docker compose` (see [Start](#3-start)); `make` ignores it. |
+| `COMPOSE_FILE` | Compose files for a plain `docker compose` (see below); `make` ignores it. |
 | `OW_ACME_DNS_PROVIDER`, `OW_ACME_EMAIL` | Optional: real certificate, see [TLS](#4-tls-certificate). |
 
-## 3. Start
+Then start it:
 
 ```bash
 make start            # pulls the published images and starts; `make status`, `make logs`
@@ -90,6 +137,11 @@ make start            # pulls the published images and starts; `make status`, `m
 takes the files from `COMPOSE_FILE` in `.env`, which must list the same files. On a development
 checkout, `make start` in the repository root builds both images from source instead
 (`compose.dev.yaml`); `make start PROD=1` there uses the published images.
+
+The images come from the GitHub container registry (`ghcr.io/tsolo-io/orbitalwindow` and
+`…/orbitalwindow-samba`); no login is needed.
+
+## 3. First login
 
 The first start pulls the images and builds the default desktop (10–20 minutes). Then open
 `https://<OW_HOSTNAME>/`, log in as `admin` with `CONTROL_ADMIN_PASSWORD`, and:
