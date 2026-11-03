@@ -45,8 +45,11 @@ and MATLAB in a desktop (needs a licence). Martin's testers will log new tickets
 - **Database:** DuckDB, single writer (the service process). Docker access through the Docker SDK (`docker` package)
   via a socket proxy. Never mount the raw socket into anything except the proxies.
 - **Images:** the service image is built from the root `Dockerfile` (desktop image context, add-ons and help
-  pages baked in); Samba from `deploy/samba/`. CI (`.gitea/workflows/build.yaml`) publishes both to
-  `gitea.tu.tsolo.net/kuat/orbitalwindow{,-samba}` (`:nightly` on every push, `:main`, `:<git tag>`).
+  pages baked in); Samba from `deploy/samba/`. Gitea is the main repository; it mirrors to
+  github.com/tsolo-io/OrbitalWindow, where `.github/workflows/publish.yaml` publishes both to
+  `ghcr.io/tsolo-io/orbitalwindow{,-samba}` (`:main`, `:<tag>`, `:latest`) and makes the release
+  (deploy bundle and `deploy/install.sh`, the installer; ADR 0043). `.github/workflows/docs.yaml`
+  publishes the docs to GitHub Pages. The Gitea CI (`.gitea/workflows/`) still builds for the office registry.
 - **Compose:** `deploy/compose.yaml` is the production stack (published images, `OW_VERSION`);
   `deploy/compose.dev.yaml` overrides it to build from the checkout. `make start` = dev, `make start PROD=1` = prod.
 - **Servers** need only a copy of `deploy/`: `deploy/Makefile` (`make init`, `start`, `update`, `install-conda`,

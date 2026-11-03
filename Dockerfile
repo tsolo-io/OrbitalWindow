@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# The OrbitalWindow service image. Built by CI (.gitea/workflows/build.yaml) and published as
-# gitea.tu.tsolo.net/kuat/orbitalwindow:<tag>; locally by deploy/compose.yaml.
+# The OrbitalWindow service image. Built by CI (.github/workflows/publish.yaml) and published as
+# ghcr.io/tsolo-io/orbitalwindow:<tag>; locally by deploy/compose.yaml.
 #
 # Everything the service reads at runtime is baked in, so a production server needs only the
 # published images and deploy/compose.production.yaml:
@@ -31,7 +31,7 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 LABEL org.opencontainers.image.title="OrbitalWindow" \
       org.opencontainers.image.description="Manage GPU-accelerated research desktops on Docker" \
-      org.opencontainers.image.source="https://gitea.tu.tsolo.net/Kuat/OrbitalWindow" \
+      org.opencontainers.image.source="https://github.com/tsolo-io/OrbitalWindow" \
       org.opencontainers.image.licenses="Apache-2.0"
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"]

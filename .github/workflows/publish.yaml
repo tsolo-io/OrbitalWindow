@@ -6,7 +6,7 @@
 #
 #   push to main   ghcr.io/<owner>/orbitalwindow{,-samba}:main
 #   tag v*         ghcr.io/<owner>/orbitalwindow{,-samba}:<tag> and :latest, plus a GitHub release
-#                  with the deploy folder as orbitalwindow-deploy-<tag>.tar.gz
+#                  with the deploy folder as orbitalwindow-deploy-<tag>.tar.gz and install.sh
 ---
 name: Publish
 on:
@@ -79,10 +79,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - name: Create the release with the deploy folder
+      - name: Create the release with the deploy folder and the installer
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           bundle="orbitalwindow-deploy-${GITHUB_REF_NAME}.tar.gz"
           git archive --format=tar.gz --prefix=orbitalwindow/ -o "$bundle" "${GITHUB_REF_NAME}:deploy"
-          gh release create "$GITHUB_REF_NAME" "$bundle" --verify-tag --generate-notes
+          gh release create "$GITHUB_REF_NAME" "$bundle" deploy/install.sh --verify-tag --generate-notes

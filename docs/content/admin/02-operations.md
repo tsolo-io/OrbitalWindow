@@ -77,16 +77,17 @@ it grows quickly (Docker rotates it at 3 × 10 MB).
 
 ## Updating OrbitalWindow
 
-Set `OW_VERSION` in `.env` to the new release (or keep `main` for the latest build), then, in the
-deploy folder:
+Run the install script again. It keeps `.env`, `acme.env` and the data folder, replaces the deploy
+files (compose files, `Makefile`, scripts) with those of the new release, sets `OW_VERSION` and pulls
+the new images:
 
 ```bash
-make update              # pulls the images and recreates only what changed
+curl -fsSLO https://github.com/tsolo-io/OrbitalWindow/releases/latest/download/install.sh
+sudo bash install.sh                     # or: sudo bash install.sh --version v1.2.0
 ```
 
-If the release changed the deploy files (compose files, `Makefile`, scripts), copy the new
-`deploy/` from a fresh clone over the folder first; `.env` and `acme.env` are not in the repository,
-so they stay as they are.
+To pull newer images of the same version only (for example with `OW_VERSION=main`), run
+`make update` in the deploy folder.
 On a development checkout, `git pull && make update` rebuilds the images from source instead. Database changes are applied automatically
 at start. Running desktops keep running; the web pages are unavailable for under a minute while the
 service restarts. `make start` applies changes to `.env`. (`make restart` stops the
