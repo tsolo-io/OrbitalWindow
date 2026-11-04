@@ -5,11 +5,11 @@
 """Users' chat API keys on the dashboard (#61)."""
 
 import json
-import ssl
 
 import httpx2
 import pytest
 
+from orbitalwindow import api
 from orbitalwindow.chat import ChatKeyError, ChatKeys, trusted_headers
 from orbitalwindow.users import ValidationError
 
@@ -114,9 +114,9 @@ def test_service_shows_and_creates_keys(service, users, webui, monkeypatch):
 
 
 def test_certificate_download(client, monkeypatch):
-    """/orbitalwindow.crt serves Traefik's certificate as a file, without a login."""
+    """/orbitalwindow.crt serves the CA of Traefik's certificate as a file, without a login."""
     pem = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
-    monkeypatch.setattr(ssl, "get_server_certificate", lambda address, timeout: pem)
+    monkeypatch.setattr(api, "served_ca", lambda address, timeout: pem)
     response = client.get("/orbitalwindow.crt")
     assert response.status_code == 200 and response.text == pem
     assert "orbitalwindow.crt" in response.headers["content-disposition"]
@@ -133,7 +133,7 @@ def test_certificate_download(client, monkeypatch):
         """
         raise OSError("refused")
 
-    monkeypatch.setattr(ssl, "get_server_certificate", down)
+    monkeypatch.setattr(api, "served_ca", down)
     assert client.get("/orbitalwindow.crt").status_code == 503
 
 

@@ -305,6 +305,14 @@ if [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
   fi
 fi
 
+# Before #74 the certificate was its own CA, which rustls programs (such as the Zed editor) refuse.
+# The update replaces it with one signed by a CA; PCs that trusted the old one need the new file.
+old_cert=0
+if [[ $update == 1 ]] && docker volume inspect ow-traefik-certs >/dev/null 2>&1 &&
+  ! docker run --rm -v ow-traefik-certs:/c:ro alpine:3.22 test -s /c/ca.crt; then
+  old_cert=1
+fi
+
 if [[ $update == 1 ]]; then
   step "Updating OrbitalWindow"
   make -C "$INSTALL_DIR" --no-print-directory update
@@ -332,6 +340,11 @@ step "Done"
 url="https://$(get_env OW_HOSTNAME)/"
 if [[ $update == 1 ]]; then
   printf '  OrbitalWindow is updated to %s: %s\n' "$VERSION" "$url"
+  if [[ $old_cert == 1 ]]; then
+    warn "The server has a new certificate, signed by its own OrbitalWindow CA. Browsers warn once again."
+    warn "  PCs that trusted the old orbitalwindow.crt: remove it and install the new one"
+    warn "  (dashboard link, or: cd $INSTALL_DIR && make export-cert)."
+  fi
 else
   printf '  Open %s%s%s in a browser (accept the certificate warning the first time).\n' "$BOLD" "$url" "$RESET"
   printf '  Log in as %sadmin%s with password %s%s%s and change it on the dashboard.\n' \

@@ -85,6 +85,7 @@ nav = [
     { "0041 Lock-out recovery" = "adr/0041-admin-lock-out-recovery.md" },
     { "0042 Fit: sliding windows" = "adr/0042-fit-sliding-window-and-engines.md" },
     { "0043 Distribution and installer" = "adr/0043-distribution-github-and-installer.md" },
+    { "0044 Private CA for the certificate" = "adr/0044-private-ca-for-the-default-certificate.md" },
   ] },
 ]
 

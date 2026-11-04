@@ -209,7 +209,7 @@ env: {}                     # extra container environment
 ### TLS with a domain
 - **Name:** `desk.<domain>` resolves to the server's LAN IP (a public record pointing to a private IP is fine, or split DNS).
 - **Certificate:** Traefik certresolver `le` with a DNS-01 challenge, so the server never needs to be reachable from the internet. The provider token lives in `deploy/acme.env`; setting `OW_ACME_DNS_PROVIDER` in `deploy/.env` adds `compose.tls.yaml` (ADR 0019).
-- **Until the provider is known:** keep Traefik's self-signed default. DNS-01 is built but untested, since no domain exists yet. Route53 and a Cloudflare zone per research station are both being considered.
+- **Until the provider is known:** a server certificate signed by a private CA for this server (ADR 0044); users trust the CA. DNS-01 is built but untested, since no domain exists yet. Route53 and a Cloudflare zone per research station are both being considered.
 - **Remote access** (from home, only where a university approves) is an open question and not built. Options discussed on 2026-10-11: Cloudflare Tunnel with Access, Microsoft Entra Application Proxy, Tailscale or NetBird, or a self-hosted relay on AWS (Pangolin, or WireGuard with Traefik). Whichever is chosen, OrbitalWindow's own login stays on for LAN users.
 - **Samba and SSH** use the same hostname (`\\desk.<domain>\<user>`, `ssh -p 2222 <user>@desk.<domain>`).
 

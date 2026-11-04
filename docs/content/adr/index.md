@@ -57,3 +57,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0041](0041-admin-lock-out-recovery.md) | Lock-out recovery: a one-off container while the service is stopped | accepted |
 | [0042](0042-fit-sliding-window-and-engines.md) | Fit check: sliding-window layers, and overhead and share per engine | accepted |
 | [0043](0043-distribution-github-and-installer.md) | Distribution: public images on GitHub, and an install script | accepted |
+| [0044](0044-private-ca-for-the-default-certificate.md) | A private CA signs the default certificate | accepted |

@@ -16,7 +16,7 @@ services:
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=ow-core
       - --providers.docker.allowEmptyServices=true
-      - --providers.file.filename=/etc/traefik/dynamic.yaml
+      - --providers.file.filename=/certs/tls.yaml
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
@@ -43,7 +43,6 @@ services:
       - --global.sendanonymoususage=false
     env_file: [acme.env]
     volumes:
-      - ./traefik/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
       - traefik-certs:/certs:ro
       - traefik-acme:/acme
 

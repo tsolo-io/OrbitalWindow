@@ -46,7 +46,8 @@ Testing on the VM showed three problems:
   certificate and was refused (`tls: unknown certificate` in Traefik's debug log; "WebSocket
   connection failed", code 1006, in the browser). A `certs` service now creates one self-signed
   certificate for `OW_HOSTNAME` (10 years, in the `ow-traefik-certs` volume, recreated only when the
-  host name changes) and Traefik serves it as its default (`deploy/traefik/dynamic.yaml`).
+  host name changes) and Traefik serves it as its default (`deploy/traefik/dynamic.yaml`). ADR 0044
+  replaces it with a server certificate signed by a private CA.
 - Migration 5 drops the secondary index on `pkg_index` (a scan of ~80k rows per desktop is fast).
 - On any `duckdb.FatalException`, the service logs it and exits; Docker's restart policy starts it
   again and DuckDB recovers from its WAL, instead of every request failing.
