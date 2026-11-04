@@ -450,7 +450,9 @@ class Service:
         result = Result(password=generate_password())
         with self.db.transaction():
             self.db.execute(
-                "UPDATE users SET disabled = false, is_admin = true WHERE id = ?", [user["id"]]
+                "UPDATE users SET disabled = false, is_admin = true, gpu_access = true "
+                "WHERE id = ?",
+                [user["id"]],
             )
             users_mod.set_password_hash(self.db, user["id"], result.password)
         changes = (("enabled", user["disabled"]), ("made admin", not user["is_admin"]))
@@ -665,7 +667,12 @@ class Service:
         user = self._require_user(user_id)
         if not is_admin:
             self._guard_admin_change(actor_id, user, "remove administrator rights from")
-        self.db.execute("UPDATE users SET is_admin = ? WHERE id = ?", [is_admin, user_id])
+            self.db.execute("UPDATE users SET is_admin = false WHERE id = ?", [user_id])
+        else:
+            # Administrators always have GPU access (#67).
+            self.db.execute(
+                "UPDATE users SET is_admin = true, gpu_access = true WHERE id = ?", [user_id]
+            )
         self.db.audit(actor, "user.admin" if is_admin else "user.unadmin", user["name"])
 
     def set_ai_manager(self, actor: str, user_id: int, on: bool) -> None:
@@ -677,11 +684,48 @@ class Service:
             on: True to grant, False to remove the role.
 
         Raises:
-            ValidationError: When the user no longer exists.
+            ValidationError: When the user no longer exists, or has no GPU access.
         """
         user = self._require_user(user_id)
+        if on and not user["gpu_access"]:
+            raise ValidationError(
+                f"{user['name']} has no GPU access, so they cannot be an AI manager. "
+                "Give them GPU access first."
+            )
         self.db.execute("UPDATE users SET is_ai_manager = ? WHERE id = ?", [on, user_id])
         self.db.audit(actor, "user.ai_manager" if on else "user.not_ai_manager", user["name"])
+
+    def set_gpu_access(self, actor: str, user_id: int, on: bool) -> None:
+        """Give a user access to the GPU in their containers, or take it away (#67).
+
+        Without GPU access the user's desktop (or terminal-only container) gets no GPU devices from
+        its next start, and the user cannot be an AI manager: taking it away also removes that
+        role. Administrators always have GPU access.
+
+        Args:
+            actor: Name recorded in the audit log.
+            user_id: Id of the user to change.
+            on: True to give, False to take away GPU access.
+
+        Raises:
+            ValidationError: When the user no longer exists, or is an administrator and ``on``
+                is False.
+        """
+        user = self._require_user(user_id)
+        if on:
+            self.db.execute("UPDATE users SET gpu_access = true WHERE id = ?", [user_id])
+            self.db.audit(actor, "user.gpu", user["name"])
+            return
+        if user["is_admin"]:
+            raise ValidationError(
+                "Administrators always have GPU access. Remove the administrator rights first."
+            )
+        self.db.execute(
+            "UPDATE users SET gpu_access = false, is_ai_manager = false WHERE id = ?", [user_id]
+        )
+        if user["is_ai_manager"]:
+            self.db.audit(actor, "user.not_ai_manager", user["name"], "no GPU access")
+        self.db.audit(actor, "user.no_gpu", user["name"])
 
     # --- AI: models --------------------------------------------------------------------------
 

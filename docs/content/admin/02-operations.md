@@ -15,7 +15,8 @@ SPDX-License-Identifier: Apache-2.0
 | Reset password | New password (generated and shown once, or entered). Also changes the Windows file sharing password and signs the user out. A running desktop keeps running. |
 | CPU, RAM and disk quota | Limits apply at the next desktop start. Empty = unlimited. The disk quota is soft: a warning at 90%, nothing is blocked. |
 | Software access | Grant or revoke restricted add-ons (MATLAB). Revoking switches it off and stops a desktop that uses it. |
-| Make / remove administrator | Admins manage everything but never get into other users' desktops or files. |
+| Make / remove administrator | Admins manage everything but never get into other users' desktops or files. Admins always have GPU access. |
+| Give / remove GPU access | Without GPU access the user's desktop gets no GPU devices from its next start (it renders in software), and the user cannot be an AI manager: removing GPU access also removes that role. New users have GPU access; untick **GPU access** in **Add user** to make one without. The **Role** column shows *user, no GPU*. |
 | Stop desktop | Stops and removes the container; files are kept. The user sees "stopped by an administrator". |
 | Disable / enable | Disable: signed out, no login, desktop, VS Code and file manager stopped, Windows sharing blocked. Enable restores access (the user starts the desktop again). |
 | Delete | Removes the desktop, VS Code, file manager, software image, Windows share and settings. The home folder is kept unless you tick the box. User numbers are never reused. |

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Admin: users. Create, reset password, disable/enable, delete, stop desktop, limits, admin
-rights and software access (grants of restricted add-ons)."""
+rights, GPU access and software access (grants of restricted add-ons)."""
 
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -50,6 +50,12 @@ ACTIONS_SLOT = """
           <q-item-section>{{ props.row.is_admin ? 'Remove administrator rights'
                                                 : 'Make administrator' }}</q-item-section></q-item>
         <q-item v-if="!props.row.is_admin" clickable
+                @click="$parent.$emit('act', {a: 'gpu', row: props.row})">
+          <q-item-section avatar><q-icon name="memory" /></q-item-section>
+          <q-item-section>{{ props.row.gpu_access ? 'Remove GPU access'
+                                                  : 'Give GPU access' }}</q-item-section>
+        </q-item>
+        <q-item v-if="!props.row.is_admin && props.row.gpu_access" clickable
                 @click="$parent.$emit('act', {a: 'ai', row: props.row})">
           <q-item-section avatar><q-icon name="smart_toy" /></q-item-section>
           <q-item-section>{{ props.row.is_ai_manager ? 'Remove AI manager rights'
@@ -79,14 +85,16 @@ def _role(row: dict) -> str:
     """Return the role shown in the users table.
 
     Args:
-        row: User row with ``is_admin`` and ``is_ai_manager``.
+        row: User row with ``is_admin``, ``is_ai_manager`` and ``gpu_access``.
 
     Returns:
-        ``admin``, ``AI manager`` or ``user``.
+        ``admin``, ``AI manager``, ``user`` or ``user, no GPU``.
     """
     if row["is_admin"]:
         return "admin"
-    return "AI manager" if row["is_ai_manager"] else "user"
+    if row["is_ai_manager"]:
+        return "AI manager"
+    return "user" if row["gpu_access"] else "user, no GPU"
 
 
 def _limits(row: dict) -> str:
@@ -183,6 +191,7 @@ def admin_users(request: Request) -> RedirectResponse | None:
                     "display_name": row["display_name"],
                     "is_admin": row["is_admin"],
                     "is_ai_manager": bool(row["is_ai_manager"]),
+                    "gpu_access": bool(row["gpu_access"]),
                     "disabled": row["disabled"],
                     "role": _role(row),
                     "account": "disabled" if row["disabled"] else "active",
@@ -242,6 +251,18 @@ def admin_users(request: Request) -> RedirectResponse | None:
                 )
                 if await confirm(title, "", "Yes"):
                     await call(svc.set_admin, actor, me, uid, not row["is_admin"])
+            elif action == "gpu":
+                if row["gpu_access"]:
+                    title = f"Remove GPU access from {name}?"
+                    text = (
+                        "Their desktop gets no GPU from its next start. They cannot be an AI "
+                        "manager."
+                    )
+                else:
+                    title = f"Give {name} GPU access?"
+                    text = "Their desktop gets the GPU from its next start."
+                if await confirm(title, text, "Yes"):
+                    await call(svc.set_gpu_access, actor, uid, not row["gpu_access"])
             elif action == "ai":
                 title = (
                     f"Remove AI manager rights from {name}?"
@@ -321,6 +342,9 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
             mem = ui.input("RAM (GB)", value=settings.get("default_mem_gb", "")).classes("w-1/2")
         ui.label("Leave CPU or RAM empty for unlimited.").classes("text-caption text-grey-7")
         is_admin = ui.checkbox("Administrator")
+        gpu = ui.checkbox("GPU access", value=True).bind_visibility_from(
+            is_admin, "value", backward=lambda admin: not admin
+        )
         grants = [ui.checkbox(f"Allow {a.spec.label}") for a in restricted]
         ui.label("A password is generated and shown once.").classes("text-caption text-grey-7")
 
@@ -347,6 +371,8 @@ def create_dialog(auth: PageAuth, refresh: Callable[[], Awaitable[None]]) -> Non
                 user = svc.db.one(
                     "SELECT id FROM users WHERE name = ?", [(name.value or "").strip().lower()]
                 )
+                if user and not gpu.value and not is_admin.value:
+                    svc.set_gpu_access(auth.user.name, user["id"], False)
                 for addon, box in zip(restricted, grants, strict=True):
                     if box.value and user:
                         svc.grant_addon(auth.user.name, user["id"], addon.key)
