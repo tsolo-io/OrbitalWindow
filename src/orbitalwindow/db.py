@@ -241,6 +241,11 @@ MIGRATIONS: list[str] = [
     ALTER TABLE model_downloads ADD COLUMN files VARCHAR DEFAULT '';
     UPDATE model_downloads SET files = '' WHERE files IS NULL;
     """,
+    # 14: GPU access per user (#67); off means no GPU devices in the user's containers
+    """
+    ALTER TABLE users ADD COLUMN gpu_access BOOLEAN DEFAULT true;
+    UPDATE users SET gpu_access = true;
+    """,
 ]
 
 

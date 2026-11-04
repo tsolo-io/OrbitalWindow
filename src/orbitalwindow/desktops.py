@@ -160,7 +160,8 @@ def build_spec(
         user: User row from the database.
         image_ref: Docker image to run.
         settings: Service settings.
-        gpu_vendor: GPU vendor whose devices are passed through.
+        gpu_vendor: GPU vendor whose devices are passed through, unless the user has no GPU
+            access (``gpu_access`` false).
         secret: Password for the desktop; also sent by Traefik as HTTP basic auth.
         addons: Add-ons enabled for this start (mounts and environment).
         groups: Group rows whose folders are mounted under ``/groups``.
@@ -255,6 +256,8 @@ def build_spec(
 
     devices: list[str] = []
     device_requests: list[DeviceRequest] = []
+    if not user.get("gpu_access", True):
+        gpu_vendor = GpuVendor.NONE
     if gpu_vendor is GpuVendor.NVIDIA:
         devices.append("/dev/dri:/dev/dri:rwm")
         device_requests.append(DeviceRequest(count=-1, capabilities=[["gpu"]]))
