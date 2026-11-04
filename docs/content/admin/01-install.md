@@ -117,6 +117,7 @@ The admin account that runs OrbitalWindow needs to be in the `docker` group
 | `OW_VERSION` | Image version: a release tag such as `v1.0.0`, or `main` for the latest build of the main branch. |
 | `OW_ROOT` | Data folder for homes, groups, shared software and state (default `/srv/orbitalwindow`). Back it up. |
 | `OW_HOSTNAME` | The name (or IP) users type: `desk.example.org`. Also used for `\\host\user` and SSH. |
+| `OW_HOSTNAME_ALIASES` | Optional. More names or IP addresses of the same server, separated by spaces or commas, for example its address on a VPN. The default certificate is valid for these too. |
 | `TZ` | Time zone, e.g. `Africa/Johannesburg`. The web pages show times in this zone. |
 | `OW_GPU_VENDOR` | `nvidia`, `amd`, `intel` or `none` (no GPU, for testing only). |
 | `OW_DEFAULT_DESKTOP` | LinuxServer webtop tag built on first start, e.g. `ubuntu-xfce` or `ubuntu-kde`. |
@@ -155,9 +156,9 @@ The first start pulls the images and builds the default desktop (10–20 minutes
 
 Until a domain and DNS provider are set up, the `certs` service makes a private certificate
 authority (CA) for this server, the *OrbitalWindow CA*, and a server certificate for `OW_HOSTNAME`
-signed by it (ADR 0044). Browsers warn the first time; after accepting it once, it stays valid. The
+(and `OW_HOSTNAME_ALIASES`) signed by it (ADR 0044). Browsers warn the first time; after accepting it once, it stays valid. The
 server certificate is renewed on `make start` or `make update` in its last 30 days, and made again
-when `OW_HOSTNAME` changes. The CA stays the same.
+when `OW_HOSTNAME` or `OW_HOSTNAME_ALIASES` changes. The CA stays the same.
 
 To avoid the warning altogether, install the CA as trusted on the users' PCs: export it with
 `make export-cert`, which saves it as `orbitalwindow.crt`. Users can also download it from the

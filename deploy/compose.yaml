@@ -77,6 +77,7 @@ services:
     command: ["/make-cert.sh"]
     environment:
       OW_HOSTNAME: ${OW_HOSTNAME:?set OW_HOSTNAME in deploy/.env}
+      OW_HOSTNAME_ALIASES: ${OW_HOSTNAME_ALIASES:-}
     volumes:
       - ./traefik/make-cert.sh:/make-cert.sh:ro
       - traefik-certs:/certs
