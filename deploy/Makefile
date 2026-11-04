@@ -12,7 +12,7 @@
 #   make install-conda     install the shared Python science environment (python-science add-on)
 #   make install-matlab    install the shared MATLAB (matlab add-on)
 #   make backup DEST=…     back up homes, group folders, state and Samba passwords
-#   make export-cert       save the self-signed certificate as orbitalwindow.crt for users' PCs
+#   make export-cert       save the server's CA certificate as orbitalwindow.crt for users' PCs
 #   make reset-admin-password [NAME=admin]   locked out? new password for an admin (#42)
 #
 # The compose files follow .env: compose.nvidia.yaml when OW_GPU_VENDOR=nvidia, compose.intel.yaml
@@ -74,8 +74,10 @@ backup: .env ## Back up to DEST (required), keeping KEEP days (default 14)
 	@[ -n "$(DEST)" ] || { echo "Usage: make backup DEST=/backup/orbitalwindow [KEEP=14]" >&2; exit 1; }
 	OW_ROOT=$(OW_ROOT) sh scripts/backup.sh "$(DEST)" $(KEEP)
 
-export-cert: ## Save the self-signed certificate as orbitalwindow.crt (install it on users' PCs)
-	docker run --rm -v ow-traefik-certs:/c:ro alpine:3.22 cat /c/default.crt > orbitalwindow.crt
+# Older stacks (before #74) have no ca.crt: their self-signed default.crt is exported instead.
+export-cert: ## Save the server's CA certificate as orbitalwindow.crt (install it on users' PCs)
+	docker run --rm -v ow-traefik-certs:/c:ro alpine:3.22 \
+	  sh -c 'if [ -s /c/ca.crt ]; then cat /c/ca.crt; else cat /c/default.crt; fi' > orbitalwindow.crt
 	@echo "Saved orbitalwindow.crt"
 
 # The service is stopped while the reset runs (the database has one writer) and always started

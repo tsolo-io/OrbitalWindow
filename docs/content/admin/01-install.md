@@ -153,11 +153,27 @@ The first start pulls the images and builds the default desktop (10–20 minutes
 
 ## 4. TLS certificate
 
-Until a domain and DNS provider are set up, Traefik uses a self-signed certificate for
-`OW_HOSTNAME`, created once by the `certs` service and kept in the `ow-traefik-certs` volume. Browsers
-warn the first time; after accepting it once, it stays valid (it changes only if `OW_HOSTNAME`
-changes). To avoid the warning altogether, install it as trusted on the users' PCs: export it with
-`make export-cert`, which saves it as `orbitalwindow.crt`. For a real certificate the name must be in DNS (a public record pointing to the LAN address is
+Until a domain and DNS provider are set up, the `certs` service makes a private certificate
+authority (CA) for this server, the *OrbitalWindow CA*, and a server certificate for `OW_HOSTNAME`
+signed by it (ADR 0044). Browsers warn the first time; after accepting it once, it stays valid. The
+server certificate is renewed on `make start` or `make update` in its last 30 days, and made again
+when `OW_HOSTNAME` changes. The CA stays the same.
+
+To avoid the warning altogether, install the CA as trusted on the users' PCs: export it with
+`make export-cert`, which saves it as `orbitalwindow.crt`. Users can also download it from the
+dashboard. Programs such as Python, MATLAB and the Zed editor need it too (see the user help page
+*AI chat and models*).
+
+!!! note "Servers installed with version 1.0.0 or older"
+    Older versions made one self-signed certificate that was its own CA. Programs that use rustls
+    (for example the Zed editor) refuse it with `CaUsedAsEndEntity`. Run `make update` (or the
+    installer again) to replace it. Then browsers warn once more, and PCs that trusted the old
+    `orbitalwindow.crt` must remove it and install the new one. On Windows: run `certmgr.msc`, open
+    **Trusted Root Certification Authorities → Certificates**, and delete the certificate issued to
+    the server's name or IP address. On Ubuntu: `sudo rm /usr/local/share/ca-certificates/orbitalwindow.crt`,
+    copy the new file there and run `sudo update-ca-certificates --fresh`.
+
+For a real certificate the name must be in DNS (a public record pointing to the LAN address is
 fine) and Traefik must be able to create DNS records:
 
 1. In `.env`: `OW_ACME_DNS_PROVIDER=<lego provider code>` (for example `cloudflare`) and

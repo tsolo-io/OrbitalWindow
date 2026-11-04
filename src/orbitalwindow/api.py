@@ -9,6 +9,7 @@ set the HttpOnly session cookie and passwords never travel over the UI websocket
 """
 
 import re
+import socket
 import ssl
 from enum import IntEnum
 from typing import Annotated
@@ -420,12 +421,37 @@ def auth_ai(request: Request) -> Response:
     )
 
 
+def served_ca(address: tuple[str, int], timeout: float) -> str:
+    """Read the certificate to trust from a server's TLS handshake.
+
+    It is the last certificate of the chain the server sends: the OrbitalWindow CA after #74
+    (the server certificate itself is not a CA, and rustls clients refuse to trust it as one), or
+    the only certificate of an older self-signed setup.
+
+    Args:
+        address: Host and port of the TLS server.
+        timeout: Seconds to wait for the connection.
+
+    Returns:
+        The certificate in PEM format.
+    """
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    with (
+        socket.create_connection(address, timeout=timeout) as sock,
+        context.wrap_socket(sock) as tls,
+    ):
+        chain = tls.get_unverified_chain()
+    return ssl.DER_cert_to_PEM_cert(chain[-1])
+
+
 @router.get("/orbitalwindow.crt", include_in_schema=False)
 def certificate(request: Request) -> Response:
-    """Serve the server's TLS certificate, for programs that should trust it (#61).
+    """Serve the certificate that programs should trust, for this server (#61, #74).
 
-    It is the certificate Traefik presents (public: every browser receives it), read from
-    Traefik's TLS handshake, so it follows a renewed or real certificate.
+    It is the CA at the top of the chain Traefik presents (public: every browser receives it),
+    read from Traefik's TLS handshake, so it follows a renewed or real certificate.
 
     Args:
         request: The incoming request.
@@ -435,7 +461,7 @@ def certificate(request: Request) -> Response:
     """
     traefik = svc(request).settings.traefik_container
     try:
-        pem = ssl.get_server_certificate((traefik, 443), timeout=5)
+        pem = served_ca((traefik, 443), timeout=5)
     except OSError:
         return PlainTextResponse("The certificate is not available right now.", status_code=503)
     return Response(

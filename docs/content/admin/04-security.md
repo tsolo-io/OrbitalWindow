@@ -65,7 +65,7 @@ remain.
 | Desktop root can use more of the server than its limits suggest | CPU/RAM limits apply only if set; GPU memory is shared first-come, first-served. |
 | A compromised sshpiper, Traefik or Dozzle could read container labels and environment | These hold the per-start desktop secrets and the SSH upstream keys. Keep them pinned and updated; they are not exposed beyond the LAN. |
 | Same origin for the UI, desktops and file manager | Mitigated by owner-only routing and FileBrowser's `script-src 'none'` on inline views. A separate host name for files would be stronger. |
-| Self-signed certificate until DNS-01 is configured | Users click through a browser warning once; switch to a real certificate when the DNS provider is known. |
+| Private CA certificate until DNS-01 is configured | Users click through a browser warning once, or install the server's CA (`orbitalwindow.crt`). Its key is only in the `ow-traefik-ca` volume; anyone with that key can make certificates that the users' PCs trust. Switch to a real certificate when the DNS provider is known. |
 | Anyone who knows a user name can lock it out for 5 minutes | Trade-off of the per-name rate limit. |
 | sshpiper does not verify the desktop's host key | The hop is on the user's private network, reachable only by sshpiper and Traefik. |
 
