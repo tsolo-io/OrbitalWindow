@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Admin: desktop images. Add a webtop tag or a terminal-only image (starts a build), enable or
-disable, rebuild, remove."""
+"""Admin: desktop images. Add a webtop tag or a terminal-only image (starts a build), typed or
+picked from a list of available images, enable or disable, rebuild, remove."""
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -68,6 +68,43 @@ def admin_images(request: Request) -> RedirectResponse | None:
                 tag.props('label="LinuxServer image" placeholder="baseimage-fedora:42"')
 
         kind.on_value_change(lambda _: on_kind())
+
+        with ui.expansion("Available images: click one to put it in the box above", value=True):
+            catalog = ui.grid().classes("w-full grid-cols-1 md:grid-cols-2 gap-4")
+            with catalog:
+                ui.spinner()
+
+        def pick(image: dict) -> None:
+            """Put a listed image into the form.
+
+            Args:
+                image: Catalog entry with ``name`` and ``gui``.
+            """
+            kind.set_value(image["gui"])
+            on_kind()
+            tag.set_value(image["name"])
+
+        async def show_catalog() -> None:
+            """Fill the lists of available desktops and terminal-only images."""
+            images = await run.io_bound(svc.image_catalog)
+            catalog.clear()
+            with catalog:
+                for gui, title in ((True, "Desktops"), (False, "Terminal only")):
+                    with ui.column().classes("gap-1"):
+                        ui.label(title).classes("text-subtitle1")
+                        with ui.list().props("dense bordered separator").classes("w-full"):
+                            for image in (i for i in images if i["gui"] is gui):
+                                with ui.item(on_click=lambda i=image: pick(i)):
+                                    with ui.item_section().props("avatar"):
+                                        ui.image(image["icon"]).classes("w-7 h-7").props(
+                                            "fit=contain no-spinner"
+                                        )
+                                    with ui.item_section():
+                                        ui.item_label(image["name"])
+                                        ui.item_label(image["description"]).props("caption")
+                                    if image["added"]:
+                                        with ui.item_section().props("side"):
+                                            ui.badge("added", color="grey")
 
         table = ui.table(columns=COLUMNS, rows=[], row_key="id").classes("w-full")
         table.add_slot(
@@ -141,6 +178,7 @@ def admin_images(request: Request) -> RedirectResponse | None:
             await act(add, tag.value or "", label.value or None, done="Build started.")
             tag.set_value("")
             label.set_value("")
+            await show_catalog()
 
         async def on_enable(event) -> None:
             """Offer or withdraw an image from the table toggle.
@@ -173,6 +211,7 @@ def admin_images(request: Request) -> RedirectResponse | None:
                     ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("no-caps flat")
             if await dialog:
                 await act(svc.remove_image, row["id"], done="Removed.")
+                await show_catalog()
 
         def on_log(event) -> None:
             """Show the latest build log of an image.
@@ -193,4 +232,5 @@ def admin_images(request: Request) -> RedirectResponse | None:
         table.on("log", guarded(auth, on_log))
         ui.timer(5.0, guarded(auth, refresh))
         ui.timer(0.1, guarded(auth, refresh), once=True)
+        ui.timer(0.1, guarded(auth, show_catalog), once=True)
     return None

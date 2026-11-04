@@ -34,7 +34,10 @@ and user names must differ.
 
 - **Desktops**: add a LinuxServer webtop tag to build a new desktop; **Rebuild** picks up base image
   updates (do this regularly for security updates). Users' own images are rebuilt automatically
-  afterwards. A desktop can only be removed when nobody uses it.
+  afterwards. A desktop can only be removed when nobody uses it. Below the box, **Available
+  images** lists the webtop tags (read from LinuxServer once a day; a built-in list when the server
+  has no internet) and some base images for terminal only, with the logo of each system. Click one
+  to put it in the box, then press **Add**. Images already on the server are marked *added*.
 - **Other systems**: desktops and terminal-only images can be built on Ubuntu, Debian, Fedora,
   Alpine or Arch (webtop tags such as `fedora-xfce`, base images such as
   `baseimage-fedora:42`). Users' packages then come from that system. Add-ons that don't support it

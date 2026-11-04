@@ -43,6 +43,7 @@ from .benchmarks import ACTIVE as BENCH_ACTIVE
 from .benchmarks import CONTEXT as BENCH_CONTEXT
 from .benchmarks import SUITES, Benchmarker
 from .builds import TAG_RE, Builder, desktop_image_ref, terminal_image_ref
+from .catalog import Catalog
 from .chat import Chat, ChatKeyError, ChatKeys
 from .codeserver import CodeServers, CodeState, code_path
 from .config import Settings
@@ -131,6 +132,7 @@ class Service:
         )
         self.builder.on_base_ready = self._rebuild_users_of
         self.metrics = ContainerMetrics(settings.cadvisor_url)
+        self.catalog = Catalog()
         self.gpus = GpuMetrics(settings.gpu_stats_url)
         self.node_exporter = NodeExporter(settings.node_exporter_url)
         self.models = ModelLibrary(settings.models_dir)
@@ -2804,6 +2806,26 @@ class Service:
             "(SELECT count(*) FROM pkg_index p WHERE p.image_id = i.id) AS packages "
             "FROM images i ORDER BY i.label"
         )
+
+    def image_catalog(self) -> list[dict[str, Any]]:
+        """Return the images that can be added, for the list on the Desktops page (#64).
+
+        Returns:
+            Dicts with ``name`` (what to type), ``description``, ``gui``, ``icon`` (logo URL) and
+            ``added`` (already on this server).
+        """
+        added = {row["base_tag"] for row in self.db.all("SELECT base_tag FROM images")}
+        return [
+            {
+                "name": image.name,
+                "description": image.description,
+                "gui": image.gui,
+                "icon": image.icon,
+                "added": (image.name if image.gui else _terminal_name(_image_reference(image.name)))
+                in added,
+            }
+            for image in self.catalog.images()
+        ]
 
     def rebuild_image(self, actor: str, image_id: int) -> int:
         """Queue a rebuild of a desktop image.
