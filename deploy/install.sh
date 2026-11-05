@@ -238,6 +238,27 @@ ok "OrbitalWindow $VERSION"
 
 if [[ $update == 1 ]]; then
   ok "Existing installation in $INSTALL_DIR: updating it (settings and data are kept)."
+  # Versions before the database server (#82, ADR 0046) kept everything in a DuckDB file. The
+  # update does not read it: OrbitalWindow starts with an empty database.
+  old_root=$(get_env OW_ROOT)
+  old_root=${old_root:-/srv/orbitalwindow}
+  if [[ -e $old_root/state/orbitalwindow.duckdb ]] && ! docker volume inspect ow-db-data >/dev/null 2>&1; then
+    warn "This update starts OrbitalWindow with an EMPTY database (it moves to PostgreSQL)."
+    warn "  Gone: all OrbitalWindow users and groups, their settings, the audit log and the chats."
+    warn "  Kept: the home and group folders, shared software and models, the certificate, .env."
+    warn "  After the update, log in as admin with CONTROL_ADMIN_PASSWORD from $INSTALL_DIR/.env"
+    warn "  (if it is empty, run 'make reset-admin-password' there)"
+    warn "  and create the users again, in the same order as before, so they get their own"
+    warn "  home folders back (user IDs are given out in order)."
+    warn "  The old database stays in $old_root/state/orbitalwindow.duckdb; it is not deleted."
+    if [[ $ASSUME_YES == 1 ]]; then
+      warn "--yes given: continuing."
+    elif ! { : </dev/tty; } 2>/dev/null; then
+      die "Not updating: this needs a yes." "Run it again in a terminal, or add --yes to continue."
+    elif ! confirm "Start with an empty database?"; then
+      die "Not updated. Nothing was changed."
+    fi
+  fi
 else
   step "Settings"
   default_host=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
