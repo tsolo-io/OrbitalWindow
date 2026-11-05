@@ -15,9 +15,11 @@ jobs:
     container:
       image: gitea.tu.tsolo.net/tsolo/ubuntu:24-ci
     # The tests use a real PostgreSQL server (ADR 0046), the same image as deploy/compose.yaml.
+    # From AWS's mirror of Docker's official images (same digest): the runner pulls it for every
+    # job, and Docker Hub refuses anonymous pulls after a few (429 Too Many Requests).
     services:
       postgres:
-        image: postgres:18.6-alpine3.24
+        image: public.ecr.aws/docker/library/postgres:18.6-alpine3.24
         env:
           POSTGRES_PASSWORD: test
         options: >-
