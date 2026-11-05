@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0045 An LLM gateway (LiteLLM) in front of the models
 
-- Status: accepted (tested with llama.cpp; the vLLM test is still to do)
+- Status: accepted
 - Date: 2026-11-04
 
 ## Context
@@ -60,9 +60,20 @@ A short test on the GPU node, with vLLM and with llama.cpp:
    Otherwise llama.vscode is not supported, and the help names Continue.
 5. Memory and start time of the gateway and the database.
 
-Results (2026-11-04, llama.cpp): 1, 2 and 5 pass (about 575 MiB, 12 s, 9 ms per request); no
-request goes to the internet; limits are not used (Martin: no limits until there is a problem).
-`/infill` is not supported: llama.vscode is not supported, and the help names Continue.
+Results: no request goes to the internet; limits are not used (Martin: no limits until there is
+a problem). `/infill` is not supported: llama.vscode is not supported, and the help names Continue.
+
+| | llama.cpp (2026-11-04, Arc A770) | vLLM (2026-11-05, RTX 5080) |
+|---|---|---|
+| Model | `unsloth/Qwen3.5-9B-GGUF` | `Qwen/Qwen2.5-Coder-3B` |
+| Chat, FIM with the model's tokens, streaming | pass | pass |
+| `/v1/completions` with `suffix` | ignored (plain continuation) | refused by vLLM (400) |
+| Keys: made, blocked, deleted | pass | pass |
+| Time added per request | about 9 ms | about 16 ms |
+| Gateway memory and start | about 575 MiB, 12 s | about 590 MiB, 21 s |
+
+So editors must build the FIM prompt with the model's tokens (Zed and Continue do); a client that
+sends `suffix` does not work with vLLM.
 
 ### As built (#79)
 - Users' keys are values OrbitalWindow makes (`sk-ow-…`) and keeps in its table `llm_keys`, so the
