@@ -5,8 +5,9 @@
 """Container spec snapshot (design: Desktop container spec)."""
 
 import base64
+import re
 
-from orbitalwindow.desktops import GpuVendor, build_spec
+from orbitalwindow.desktops import GpuVendor, build_spec, new_desktop_password
 
 USER = {
     "name": "user1",
@@ -123,3 +124,10 @@ def test_each_start_gets_its_own_path(settings):
     second = build_spec(USER, "img", settings, GpuVendor.NONE, "x").kwargs["environment"]
     assert first["SUBFOLDER"] != second["SUBFOLDER"]
     assert first["SUBFOLDER"].startswith("/desktop/user1/")
+
+
+def test_desktop_password_never_looks_like_an_option():
+    """The webtop init passes the password to ``openssl passwd``; a leading ``-`` broke it (#66)."""
+    passwords = {new_desktop_password() for _ in range(2000)}
+    assert len(passwords) == 2000
+    assert all(re.fullmatch(r"[0-9a-f]{64}", password) for password in passwords)

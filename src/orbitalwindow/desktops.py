@@ -120,6 +120,16 @@ def new_session_id() -> str:
     return secrets.token_hex(4)
 
 
+def new_desktop_password() -> str:
+    """Return a new random password for a desktop's nginx basic auth (64 hex characters).
+
+    Hex, not ``token_urlsafe``: the webtop init runs ``openssl passwd -apr1 "$PASSWORD"``, and a
+    password that starts with ``-`` is read as an option. The password file then has no hash, no
+    password works and the browser asks for one (#66; 1 start in 64 with ``token_urlsafe``).
+    """
+    return secrets.token_hex(32)
+
+
 @dataclass(frozen=True)
 class SshAccess:
     """SSH via the gateway: sshpiper labels and the upstream public key file to mount."""
@@ -452,7 +462,7 @@ class Desktops:
                 image_ref,
                 self._settings,
                 self.gpu_vendor(),
-                secrets.token_urlsafe(32),
+                new_desktop_password(),
                 addons,
                 groups,
                 ssh,
