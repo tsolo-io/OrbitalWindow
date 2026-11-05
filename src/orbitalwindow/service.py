@@ -20,7 +20,7 @@ from typing import Any
 import docker
 import psycopg
 
-from . import disk, userenv
+from . import disk, fim, userenv
 from . import fit as fit_mod
 from . import gguf as gguf_mod
 from . import groups as groups_mod
@@ -46,7 +46,7 @@ from .benchmarks import CONTEXT as BENCH_CONTEXT
 from .benchmarks import SUITES, Benchmarker
 from .builds import TAG_RE, Builder, desktop_image_ref, terminal_image_ref
 from .catalog import Catalog
-from .chat import Chat, ChatKeyError, ChatKeys
+from .chat import Chat
 from .codeserver import CodeServers, CodeState, code_path
 from .config import Settings
 from .db import Database, open_database
@@ -63,6 +63,8 @@ from .disk import HostSpace
 from .disk import Usage as DiskUsage
 from .downloads import Downloader
 from .files import FileManagers, files_container_name
+from .fim import FimSupport
+from .gateway import Gateway, GatewayError, new_key, session_model
 from .hostops import HostOps
 from .hoststats import NodeExporter
 from .metrics import ContainerMetrics, GpuMetrics, GpuStat, Usage
@@ -142,7 +144,9 @@ class Service:
         self.llmfit = LlmFit(client, settings.llmfit_image)
         self.ai = AiSessions(client, self.db, settings)
         self.chat = Chat(client, settings)
-        self.chat_keys = ChatKeys()
+        self.gateway = Gateway(client, settings)
+        # repo -> ((file, mtime), FimSupport): reading a vocabulary takes a moment
+        self._fim_cache: dict[str, tuple[tuple[str, int], FimSupport]] = {}
         self.benchmarks = Benchmarker(
             client,
             self.db,
@@ -186,6 +190,8 @@ class Service:
         self.downloads.start()
         self.benchmarks.start()
         self.backups.start()
+        # The gateway image may need pulling: don't hold up the start.
+        threading.Thread(target=self.sync_gateway, name="ow-gateway", daemon=True).start()
         if not self.db.scalar("SELECT count(*) FROM images"):
             try:
                 self.add_image("system", self.settings.default_desktop)
@@ -595,6 +601,13 @@ class Service:
             self.samba.set_enabled(user["name"], not disabled)
         except (SambaError, docker.errors.DockerException) as exc:
             result.warnings.append(f"Windows file sharing (Samba) was not updated: {exc}")
+        key = self.db.scalar("SELECT key FROM llm_keys WHERE user_id = ?", [user_id])
+        if key:
+            try:
+                self.gateway.set_blocked(key, disabled)
+            except GatewayError as exc:
+                # The reconcile loop blocks or unblocks it when the gateway is back.
+                result.warnings.append(f"The API key was not updated yet: {exc}")
         self.db.audit(actor, "user.disable" if disabled else "user.enable", user["name"])
         return result
 
@@ -641,6 +654,7 @@ class Service:
                 "group_members",
                 "ssh_keys",
                 "user_env",
+                "llm_keys",
             ):
                 self.db.execute(f"DELETE FROM {table} WHERE user_id = ?", [user_id])
             self.db.execute("DELETE FROM users WHERE id = ?", [user_id])
@@ -648,6 +662,11 @@ class Service:
             self.samba.remove_user(name, self.db)
         except (SambaError, docker.errors.DockerException) as exc:
             result.warnings.append(f"Windows file sharing (Samba) was not updated: {exc}")
+        try:
+            self.gateway.delete_key(name)
+        except GatewayError as exc:
+            # The reconcile loop deletes it when the gateway is back.
+            result.warnings.append(f"The API key was not deleted yet: {exc}")
         home = self.settings.users_dir / name
         if delete_home:
             try:
@@ -1113,6 +1132,57 @@ class Service:
             raise ValidationError(f"{repo} is not downloaded.")
         return model
 
+    def fim_support(self, repo: str) -> FimSupport:
+        """Return a downloaded model's code completion (FIM) support (#79).
+
+        An admin's choice wins; otherwise it is read from the model's files (cached per file).
+
+        Args:
+            repo: Model id.
+
+        Returns:
+            The support; ``none`` for a model that isn't downloaded.
+        """
+        manual = self.db.get_setting(f"fim.{repo}")
+        found = next((m for m in self.models.models() if m.repo == repo), None)
+        if found is None:
+            return FimSupport(manual or "none", manual=bool(manual))
+        file = found.gguf
+        source = found.path / file.name if file else found.path / "tokenizer_config.json"
+        try:
+            stamp = source.stat().st_mtime_ns
+        except OSError:
+            stamp = 0
+        cached = self._fim_cache.get(repo)
+        if cached is None or cached[0] != (str(source), stamp):
+            vocabulary = fim.gguf_vocabulary(source) if file else fim.hf_vocabulary(found.path)
+            cached = ((str(source), stamp), fim.detect(repo, vocabulary))
+            self._fim_cache[repo] = cached
+        detected = cached[1]
+        if manual and manual != detected.state:
+            return FimSupport(manual, detected.family, manual=True)
+        return detected
+
+    def set_fim_support(self, actor: str, repo: str, state: str) -> None:
+        """Set a model's code completion support by hand, or go back to what its files say.
+
+        Args:
+            actor: Name recorded in the audit log.
+            repo: Model id.
+            state: ``coder``, ``tokens``, ``none``, or ``auto`` (found in the files).
+
+        Raises:
+            ValidationError: For an unknown state.
+        """
+        repo = models_mod.validate_repo(repo)
+        if state == "auto":
+            self.db.execute("DELETE FROM settings WHERE key = ?", [f"fim.{repo}"])
+        elif state in fim.STATES:
+            self.db.set_setting(f"fim.{repo}", state)
+        else:
+            raise ValidationError("Choose coder, tokens, none or automatic.")
+        self.db.audit(actor, "ai.fim", repo, state)
+
     def _ai_gpus(self) -> list[GpuStat]:
         """Return the GPUs an AI session can use.
 
@@ -1264,49 +1334,42 @@ class Service:
         """
         return f"https://{self.public_hostname()}:{self.settings.chat_port}/"
 
-    def chat_api_url(self) -> str:
-        """Return the address programs use with a personal chat API key.
+    def api_url(self) -> str:
+        """Return the address programs use with their API key (the LLM gateway, ADR 0045).
 
         Returns:
-            ``https://<host>:<chat port>/api``.
+            ``https://<host>:<chat port>/v1``.
         """
-        return f"https://{self.public_hostname()}:{self.settings.chat_port}/api"
+        return f"https://{self.public_hostname()}:{self.settings.chat_port}/v1"
 
-    def chat_access(self, user_id: int) -> dict[str, Any]:
-        """Return what a user needs to call the model from their own code (#61).
+    def api_access(self, user_id: int) -> dict[str, Any]:
+        """Return what a user needs to call the model from their own code (#61, #79).
 
         Args:
             user_id: Id of the user.
 
         Returns:
-            ``url``, ``model`` and ``context`` of the running session (empty without one), and
-            ``key``: the user's chat API key, or None when they have none yet or the chat is not
-            running (``error`` then says why).
+            ``url``, ``model`` and ``context`` of the running session (empty without one),
+            ``fim`` (the model's code completion support, see ``fim_support``; None without a
+            session), and ``key``: the user's API key, or None when they have none yet.
 
         Raises:
             ValidationError: When the user no longer exists.
         """
-        user = self._require_user(user_id)
+        self._require_user(user_id)
         state = self.ai.state()
         running = state.status == "running"
-        access: dict[str, Any] = {
-            "url": self.chat_api_url(),
+        return {
+            "url": self.api_url(),
             "model": state.repo if running else "",
             "context": state.context if running else None,
-            "key": None,
-            "error": "",
+            "fim": self.fim_support(state.repo) if running else None,
+            "key": self.db.scalar("SELECT key FROM llm_keys WHERE user_id = ?", [user_id]),
+            "error": "" if self.gateway.ready() else "The API is starting. Try again soon.",
         }
-        if not self.chat_ready():
-            access["error"] = "The chat is not running, so there is no key to show now."
-            return access
-        try:
-            access["key"] = self.chat_keys.get(user["name"], user["display_name"], user["is_admin"])
-        except ChatKeyError as exc:
-            access["error"] = str(exc)
-        return access
 
-    def create_chat_key(self, actor: str, user_id: int, renew: bool = False) -> str:
-        """Create a user's chat API key, or replace it.
+    def create_api_key(self, actor: str, user_id: int, renew: bool = False) -> str:
+        """Create a user's API key, or replace it.
 
         Args:
             actor: Name recorded in the audit log.
@@ -1317,18 +1380,48 @@ class Service:
             The key.
 
         Raises:
-            ValidationError: When the user no longer exists, the chat is not running or refuses.
+            ValidationError: When the user no longer exists, already has a key (without
+                ``renew``), or the gateway can't be reached.
         """
         user = self._require_user(user_id)
-        if not self.chat_ready():
-            raise ValidationError("The chat is not running. Try again when a model is running.")
-        args = (user["name"], user["display_name"], user["is_admin"])
+        old = self.db.scalar("SELECT key FROM llm_keys WHERE user_id = ?", [user_id])
+        if old and not renew:
+            return old
+        key = new_key()
         try:
-            key = self.chat_keys.renew(*args) if renew else self.chat_keys.get(*args, create=True)
-        except ChatKeyError as exc:
-            raise ValidationError(str(exc)) from exc
-        self.db.audit(actor, "chat.key.renew" if renew else "chat.key.create", user["name"])
-        return key or ""
+            self.gateway.add_key(user["name"], key, bool(user["disabled"]))
+        except GatewayError as exc:
+            raise ValidationError(f"{exc} Try again in a minute.") from exc
+        self.db.execute(
+            "INSERT INTO llm_keys (user_id, key) VALUES (?, ?) ON CONFLICT (user_id) "
+            "DO UPDATE SET key = excluded.key, created_at = localtimestamp",
+            [user_id, key],
+        )
+        self.db.audit(actor, "api.key.renew" if old else "api.key.create", user["name"])
+        return key
+
+    def sync_gateway(self) -> None:
+        """Run the LLM gateway, and give it the session's model and the users' keys.
+
+        Problems are logged, not raised: this runs from the reconcile loop.
+        """
+        try:
+            self.gateway.ensure()
+            if not self.gateway.ready():
+                return  # just started: the next round gives it the model and keys
+            state = self.ai.state()
+            wanted = (
+                [session_model(state.repo, self.ai_api_key())] if state.status == "running" else []
+            )
+            self.gateway.sync_models(wanted)
+            self.gateway.sync_keys(
+                self.db.all(
+                    "SELECT u.name, u.disabled, k.key FROM llm_keys k "
+                    "JOIN users u ON u.id = k.user_id ORDER BY u.name"
+                )
+            )
+        except (docker.errors.DockerException, psycopg.Error, GatewayError) as exc:
+            log.warning("LLM gateway: %s", exc)
 
     def chat_ready(self) -> bool:
         """Tell whether the chat can be opened (Open WebUI is up and the model is running).

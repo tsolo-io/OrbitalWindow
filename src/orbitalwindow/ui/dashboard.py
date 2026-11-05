@@ -11,6 +11,7 @@ from nicegui import run, ui
 from ..codeserver import CodeState
 from ..desktops import DesktopError, DesktopState, desktop_path
 from ..files import files_path
+from ..fim import FimSupport
 from ..metrics import fmt_bytes
 from ..users import ValidationError
 from .common import PageAuth, authenticate, form_input, frame, guarded, help_icon, service
@@ -377,8 +378,9 @@ def ai_card(auth: PageAuth) -> None:
             "w-full"
         ) as code_box:
             ui.label(
-                "Python, MATLAB and coding tools such as OpenCode use the model through the OpenAI "
-                "API, with these settings. The key is yours: keep it private, like a password."
+                "Python, MATLAB, coding tools such as OpenCode and editors such as Zed use the "
+                "model through the OpenAI API, with these settings. The key is yours: keep it "
+                "private, like a password."
             ).classes("text-caption text-grey-7")
             api_url = ui.label().classes("font-mono text-body2")
             api_model = ui.label().classes("font-mono text-body2")
@@ -394,8 +396,12 @@ def ai_card(auth: PageAuth) -> None:
                 create_btn = ui.button("Create my key", icon="key").props("no-caps")
                 renew_btn = ui.button("New key", icon="autorenew").props("no-caps flat")
             key_note = ui.label().classes("text-caption")
+            ui.label("Code completion").classes("text-subtitle2 mt-2")
+            fim_note = ui.label().classes("text-caption")
             with ui.row().classes("gap-4"):
-                ui.link("Examples: Python, MATLAB, OpenCode", "/help/ai").classes("text-sm")
+                ui.link("Examples: Python, MATLAB, OpenCode, Zed, VS Code", "/help/ai").classes(
+                    "text-sm"
+                )
                 ui.link("Server certificate (orbitalwindow.crt)", "/orbitalwindow.crt").classes(
                     "text-sm"
                 )
@@ -403,7 +409,7 @@ def ai_card(auth: PageAuth) -> None:
 
     async def show_access() -> None:
         """Show the address, the model and the user's key (read when the section opens)."""
-        access = await run.io_bound(svc.chat_access, auth.user.id)
+        access = await run.io_bound(svc.api_access, auth.user.id)
         if access is None:  # None: the page closed or the app is stopping
             return
         api_url.set_text(f"Address (base URL): {access['url']}")
@@ -419,6 +425,7 @@ def ai_card(auth: PageAuth) -> None:
             access["error"] or ("" if key else "You have no key yet. Create one to start.")
         )
         key_note.classes(replace=f"text-caption {'text-negative' if access['error'] else ''}")
+        fim_note.set_text(fim_text(access["fim"], access["url"]))
 
     async def on_create(renew: bool) -> None:
         """Create the user's key, or replace it after a confirmation.
@@ -438,7 +445,7 @@ def ai_card(auth: PageAuth) -> None:
             if not await dialog:
                 return
         try:
-            await run.io_bound(svc.create_chat_key, auth.user.name, auth.user.id, renew)
+            await run.io_bound(svc.create_api_key, auth.user.name, auth.user.id, renew)
         except ValidationError as exc:
             ui.notify(str(exc), type="negative", multi_line=True)
             return
@@ -479,6 +486,32 @@ def ai_card(auth: PageAuth) -> None:
 
     ui.timer(0.1, guarded(auth, refresh), once=True)
     ui.timer(10.0, guarded(auth, refresh))
+
+
+def fim_text(support: FimSupport | None, url: str) -> str:
+    """Tell a user whether editors can complete code with the running model (#79).
+
+    Args:
+        support: The model's FIM support, or None without a running model.
+        url: The API's base URL.
+
+    Returns:
+        One or two sentences.
+    """
+    if support is None:
+        return "Code completion works while a model runs."
+    where = f"Editors such as Zed and Continue (VS Code) use {url}/completions with your key."
+    if support.state == "coder":
+        return f"This model can complete code while you type. {where}"
+    if support.state == "tokens":
+        return (
+            f"This model can complete code, but it is not made for code, so the suggestions may "
+            f"be poor. {where} Ask the person who manages the AI for a coder model."
+        )
+    return (
+        "This model can't complete code while you type (it has no fill-in-the-middle tokens). "
+        "Chat works. Ask the person who manages the AI for a coder model."
+    )
 
 
 def files_card(auth: PageAuth) -> None:

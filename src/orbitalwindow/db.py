@@ -198,6 +198,15 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (user_id, name)
     );
     """,
+    # 2: users' keys for the LLM gateway (#79, ADR 0045). OrbitalWindow makes the value and keeps
+    # it, so the dashboard can show it again; the gateway checks it.
+    """
+    CREATE TABLE llm_keys (
+        user_id INTEGER PRIMARY KEY,
+        key VARCHAR NOT NULL UNIQUE,
+        created_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+    );
+    """,
 ]
 
 

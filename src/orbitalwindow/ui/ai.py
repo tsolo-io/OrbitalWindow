@@ -20,10 +20,19 @@ MODEL_COLUMNS = [
     {"name": "size", "label": "Size", "field": "size", "align": "right"},
     {"name": "modified", "label": "Downloaded", "field": "modified", "align": "left"},
     {"name": "fit", "label": "GPU fit", "field": "fit", "align": "left"},
+    {"name": "fim", "label": "Code completion", "field": "fim", "align": "left"},
     {"name": "bench", "label": "Benchmark", "field": "bench", "align": "left"},
     {"name": "path", "label": "Folder", "field": "path", "align": "left"},
     {"name": "actions", "label": "", "field": "actions", "align": "right"},
 ]
+# Code completion (FIM) states (#79): label, colour, tooltip.
+FIM_LABELS = {
+    "coder": ("Coder", "positive", "A coder model with fill-in-the-middle tokens: editors such as "
+              "Zed and Continue can complete code with it."),
+    "tokens": ("Possible", "orange", "It has fill-in-the-middle tokens, but it is not a coder "
+               "model: code completion works, the suggestions may be poor."),
+    "none": ("No", "grey", "No fill-in-the-middle tokens: editors can't complete code with it."),
+}  # fmt: skip
 SUGGESTION_COLUMNS = [
     {"name": "repo", "label": "Model", "field": "repo", "align": "left"},
     {"name": "params", "label": "Parameters", "field": "params", "align": "right"},
@@ -246,6 +255,26 @@ def ai_page(request: Request) -> RedirectResponse | None:
             """,
         )
         models.add_slot(
+            "body-cell-fim",
+            """
+            <q-td :props="props">
+              <q-badge :color="props.row.fim_color" :label="props.row.fim_label">
+                <q-tooltip>{{ props.row.fim_text }}</q-tooltip>
+              </q-badge>
+              <q-btn-dropdown flat dense no-caps size="sm"
+                              :label="props.row.fim_manual ? 'set by hand' : ''">
+                <q-list dense>
+                  <q-item v-for="o in ['auto', 'coder', 'tokens', 'none']" :key="o" clickable
+                          v-close-popup
+                          @click="$parent.$emit('fim', {repo: props.row.repo, state: o})">
+                    <q-item-section>{{ {auto: 'Automatic (from the files)', coder: 'Coder',
+                      tokens: 'Possible', none: 'No'}[o] }}</q-item-section></q-item>
+                </q-list>
+              </q-btn-dropdown>
+            </q-td>
+            """,
+        )
+        models.add_slot(
             "body-cell-fit",
             f"""
             <q-td :props="props">
@@ -306,6 +335,7 @@ def ai_page(request: Request) -> RedirectResponse | None:
                 return
             library, space, rows = result
             fits = await run.io_bound(lambda: [svc.fit_for_local(model) for model in library])
+            fims = await run.io_bound(lambda: [svc.fim_support(model.repo) for model in library])
             latest = await run.io_bound(svc.latest_benchmarks) or {}
             benches = await run.io_bound(svc.list_benchmarks, 50) or []
             show_benchmarks([row for row in benches if row["status"] in BENCH_PHASES])
@@ -323,13 +353,17 @@ def ai_page(request: Request) -> RedirectResponse | None:
                     "fit": f"{FIT_LABELS[verdict.level]} · {gb(estimate.total)}",
                     "fit_level": verdict.level,
                     "fit_text": verdict.text,
+                    "fim_label": FIM_LABELS[support.state][0],
+                    "fim_color": FIM_LABELS[support.state][1],
+                    "fim_text": FIM_LABELS[support.state][2],
+                    "fim_manual": support.manual,
                     "headlines": [
                         {"id": row["id"], "text": f"{row['suite_label']} {row['plus_score']:.1%}"}
                         for row in latest.get(model.repo, [])
                     ],
                     "path": str(model.path),
                 }
-                for model, (estimate, verdict) in zip(library, fits, strict=True)
+                for model, (estimate, verdict), support in zip(library, fits, fims, strict=True)
             ]
             models.update()
             downloads.rows = [
@@ -591,6 +625,16 @@ def ai_page(request: Request) -> RedirectResponse | None:
         download_btn.on_click(guarded(auth, on_download))
         downloads.on("cancel", guarded(auth, on_cancel))
         downloads.on("resume", guarded(auth, on_resume))
+
+        async def on_fim(event) -> None:
+            """Set a model's code completion support by hand, or back to automatic.
+
+            Args:
+                event: The table event with the model and the state.
+            """
+            await act(svc.set_fim_support, event.args["repo"], event.args["state"])
+
+        models.on("fim", guarded(auth, on_fim))
         models.on("delete", guarded(auth, on_delete))
         models.on("bench", guarded(auth, on_bench))
         token_save.on_click(guarded(auth, on_token_save))

@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     code_server_image: str = "lscr.io/linuxserver/code-server:4.140.0-ls368"
     # Open WebUI image for the AI chat, served on its own port (it can't run under a path).
     openwebui_image: str = "ghcr.io/open-webui/open-webui:v0.11.4"
+    # The LLM gateway (ADR 0045), pinned by digest: LiteLLM had a compromised release in 2026.
+    litellm_image: str = (
+        "ghcr.io/berriai/litellm-database:v1.106.6"
+        "@sha256:7ef0e78fe00ad5ea7ea45666cc1d1f02cb7076aee69091543bf397de52db33ce"
+    )
     chat_port: int = 8443
     chat_entrypoint: str = "ai"
 

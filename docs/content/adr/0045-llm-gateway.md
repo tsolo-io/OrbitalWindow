@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0045 An LLM gateway (LiteLLM) in front of the models
 
-- Status: proposed
+- Status: accepted (tested with llama.cpp; the vLLM test is still to do)
 - Date: 2026-11-04
 
 ## Context
@@ -49,7 +49,7 @@ easy way to get a personal key with the chat, but it has limits:
 - **Database.** LiteLLM keeps virtual keys, budgets and usage in PostgreSQL: its own database
   `litellm` and role on the shared server `ow-db` (ADR 0046), in the system backups.
 
-### To check before this ADR is accepted
+### Checks (results on #79)
 A short test on the GPU node, with vLLM and with llama.cpp:
 1. `/v1/completions` with a FIM prompt goes through unchanged (Zed and Continue).
 2. Virtual keys: make, block and delete from OrbitalWindow; a blocked key gets 401.
@@ -59,6 +59,20 @@ A short test on the GPU node, with vLLM and with llama.cpp:
    the key with the gateway (`/key/info`), and Traefik sends `/v1/infill` to the llama.cpp session.
    Otherwise llama.vscode is not supported, and the help names Continue.
 5. Memory and start time of the gateway and the database.
+
+Results (2026-11-04, llama.cpp): 1, 2 and 5 pass (about 575 MiB, 12 s, 9 ms per request); no
+request goes to the internet; limits are not used (Martin: no limits until there is a problem).
+`/infill` is not supported: llama.vscode is not supported, and the help names Continue.
+
+### As built (#79)
+- Users' keys are values OrbitalWindow makes (`sk-ow-…`) and keeps in its table `llm_keys`, so the
+  dashboard can show them again; the gateway checks them. The reconcile loop makes the gateway
+  match: a missing key is added, the blocked state follows the account, keys of deleted users go.
+- The master key and the salt key (it encrypts the model entries) are in `state/` and in the
+  system backups (ADR 0046).
+- Traefik routes only `/v1/models`, `/v1/chat/completions`, `/v1/completions` and
+  `/v1/embeddings` to it; its admin API and pages stay inside.
+- The dashboard shows the gateway key only. The chat's own `sk-` keys still work at `:8443/api`.
 
 ## Alternatives
 The search was on 2026-11-04. Most comparisons are written by the vendors, so the details must be
