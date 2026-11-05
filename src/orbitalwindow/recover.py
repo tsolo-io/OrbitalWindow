@@ -5,9 +5,10 @@
 """Lock-out recovery: ``orbitalwindow-reset-admin [user]`` (#42).
 
 Run by ``make reset-admin-password`` in a one-off container of the service image while the
-service is stopped, so the two can't change the user at the same time. It gives the user a new password, enables the account
-and makes it an administrator, then prints the password once. Samba is updated through the socket
-proxy; a Samba problem is printed as a warning and does not stop the reset.
+service is stopped, so the two can't change the user at the same time. It gives the user a new
+password, enables the account and makes it an administrator, then prints the password once. Samba
+is updated through the socket proxy; a Samba problem is printed as a warning and does not stop the
+reset.
 """
 
 import logging
