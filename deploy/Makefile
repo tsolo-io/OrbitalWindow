@@ -75,7 +75,7 @@ logs: .env ## Follow the OrbitalWindow service log
 status: .env ## Show the stack's containers
 	$(COMPOSE) ps
 
-install-conda: .env ## Install the shared conda (SCIENCE_PACKAGES=…, FORCE=1 to reinstall)
+install-conda: .env ## Install or update the shared conda (pinned; FORCE=1 rebuilds, SCIENCE_PACKAGES=… overrides)
 	OW_ROOT=$(OW_ROOT) sh scripts/install-conda.sh
 
 install-matlab: .env ## Install the shared MATLAB (RELEASE=R2026b, PRODUCTS="MATLAB …")

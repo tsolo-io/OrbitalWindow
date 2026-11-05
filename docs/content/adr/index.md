@@ -60,3 +60,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0044](0044-private-ca-for-the-default-certificate.md) | A private CA signs the default certificate | accepted |
 | [0045](0045-llm-gateway.md) | An LLM gateway (LiteLLM) in front of the models | proposed |
 | [0046](0046-postgresql-and-system-backups.md) | PostgreSQL for every program, and daily system backups | accepted |
+| [0047](0047-shared-conda-pinned-and-swapped.md) | The shared conda: pinned per release, installed by the installer, swapped in | accepted |
