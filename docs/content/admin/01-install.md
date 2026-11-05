@@ -86,6 +86,23 @@ Options, for example to install a particular version or without questions:
 All `make` commands below run in `/opt/orbitalwindow` (`make help` lists them). Then continue with
 [First login](#3-first-login).
 
+### Updating
+
+Run the installer again (`sudo bash install.sh`): it keeps `.env` and the data folder, replaces the
+deploy files and pulls the new images.
+
+!!! warning "Updating from a version without PostgreSQL (1.0.x)"
+    Older versions kept users, groups, settings, the audit log and the chats in a DuckDB file. The
+    update moves to a PostgreSQL server (ADR 0046) and does **not** read that file: OrbitalWindow
+    starts with an empty database. The installer says so and asks first (`--yes` skips the
+    question). Kept: the home and group folders, shared software and models, the certificate and
+    `.env`; the old file stays in `state/orbitalwindow.duckdb`.
+
+    After the update, log in as `admin` with `CONTROL_ADMIN_PASSWORD` from `.env` (or run
+    `make reset-admin-password`) and create the users again **in the same order as before**:
+    user IDs are given out in order, and each user gets their own home folder back only with the
+    same ID.
+
 ### Changing the GPU later
 
 If the server was installed without a GPU and the driver works now (check again with
