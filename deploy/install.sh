@@ -22,6 +22,7 @@
 #   --data DIR       data folder: homes, groups, state (OW_ROOT; default /srv/orbitalwindow)
 #   --hostname NAME  name or IP users type (OW_HOSTNAME; default this server's IP address)
 #   --gpu VENDOR     nvidia, amd, intel or none (OW_GPU_VENDOR; default: detected)
+#   --no-conda       don't install or update the shared Python (conda) for the python-science add-on
 #   --yes            don't ask questions; use the defaults and the options given
 set -euo pipefail
 
@@ -34,6 +35,7 @@ DATA_DIR=${OW_ROOT:-/srv/orbitalwindow}
 HOST_NAME=${OW_HOSTNAME:-}
 GPU=${OW_GPU_VENDOR:-}
 ASSUME_YES=0
+NO_CONDA=${OW_NO_CONDA:-0}
 
 if [[ -t 1 ]]; then
   BOLD=$'\e[1m' RED=$'\e[31m' GREEN=$'\e[32m' YELLOW=$'\e[33m' RESET=$'\e[0m'
@@ -94,7 +96,8 @@ while [[ $# -gt 0 ]]; do
     --hostname) HOST_NAME=${2:?--hostname needs a value}; shift 2 ;;
     --gpu) GPU=${2:?--gpu needs a value}; shift 2 ;;
     --yes | -y) ASSUME_YES=1; shift ;;
-    --help | -h) sed -n '6,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-conda) NO_CONDA=1; shift ;;
+    --help | -h) sed -n '6,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option: $1" "Run 'bash install.sh --help' to see the options." ;;
   esac
 done
@@ -355,6 +358,20 @@ printf '\n'
 if ! curl -fsS -m 3 -o /dev/null http://127.0.0.1:9100/metrics 2>/dev/null; then
   warn "Prometheus node-exporter is not running, so the Server status page stays empty."
   warn "  Install it: sudo apt install prometheus-node-exporter"
+fi
+
+# The shared Python of the python-science add-on (#68): pinned, rebuilt only when the release
+# changed it, swapped in without stopping desktops. A failure keeps the old one.
+if [[ $NO_CONDA == 1 ]]; then
+  ok "Shared Python (conda): skipped (--no-conda)"
+else
+  step "Shared Python (conda) for the Python science add-on"
+  if make -C "$INSTALL_DIR" --no-print-directory install-conda; then
+    ok "Shared Python (conda) is current"
+  else
+    warn "The shared Python (conda) could not be built; the old one (if any) is kept."
+    warn "  Try again later: cd $INSTALL_DIR && make install-conda"
+  fi
 fi
 
 step "Done"

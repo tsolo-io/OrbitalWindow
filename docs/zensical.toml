@@ -88,6 +88,7 @@ nav = [
     { "0044 Private CA for the certificate" = "adr/0044-private-ca-for-the-default-certificate.md" },
     { "0045 LLM gateway" = "adr/0045-llm-gateway.md" },
     { "0046 PostgreSQL and backups" = "adr/0046-postgresql-and-system-backups.md" },
+    { "0047 Shared conda" = "adr/0047-shared-conda-pinned-and-swapped.md" },
   ] },
 ]
 

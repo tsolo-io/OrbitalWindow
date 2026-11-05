@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# The shared "science" environment of the python-science add-on (#68, ADR 0047). Change the list
+# here, then run deploy/scripts/conda-lock.sh: it writes science.lock, which pins every package
+# (with its URL and checksum). Servers install exactly the lock, and rebuild only when it changes.
+name: science
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - jupyterlab
+  - spyder
+  - nb_conda_kernels
+  - ipykernel

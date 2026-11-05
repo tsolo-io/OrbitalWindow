@@ -204,17 +204,31 @@ fine) and Traefik must be able to create DNS records:
 
 ## 5. Shared software
 
-MATLAB and the Python science environment are installed once into `OW_ROOT/shared` and mounted
-read-only into the desktops of users who switch them on:
+MATLAB and the Python science environment are installed into `OW_ROOT/shared` and mounted
+read-only into the desktops of users who switch them on. Both install from a throwaway container,
+so they need only Docker.
+
+**Python science (conda)** is installed by the installer, and kept up to date by it (`--no-conda`
+skips it). Each release pins every package (Python, NumPy, SciPy, pandas, Matplotlib,
+scikit-learn, JupyterLab, Spyder and their dependencies; ADR 0047), so every server has the same
+versions. An update builds the new version only when the release changed it (about 3 minutes and
+3.6 GB), next to the old one, and then swaps it in: running desktops keep the old version until
+they are started again, and the old version is deleted when no desktop uses it any more. If the
+build fails, the old version stays. By hand:
 
 ```bash
-make install-conda        # ~3 GB; SCIENCE_PACKAGES="python=3.13 numpy …" to change the packages
-make install-matlab       # ~8 GB; no licence needed to install
-make install-matlab RELEASE=R2026b PRODUCTS="MATLAB Parallel_Computing_Toolbox Deep_Learning_Toolbox"
+make install-conda              # install or update (nothing to do when it is current)
+make install-conda FORCE=1      # build again anyway
+make install-conda SCIENCE_PACKAGES="python=3.13 numpy …"   # your own list (not pinned)
 ```
 
-Both install into `OW_ROOT/shared` from a throwaway container, so they need only Docker. Run each
-once; `make install-conda FORCE=1` reinstalls conda (for MATLAB, remove `shared/matlab` first).
+**MATLAB** is installed once by hand (no licence needed to install); remove `shared/matlab` to
+install again:
+
+```bash
+make install-matlab       # ~8 GB
+make install-matlab RELEASE=R2026b PRODUCTS="MATLAB Parallel_Computing_Toolbox Deep_Learning_Toolbox"
+```
 
 MATLAB is a *restricted* add-on: grant it per user (**Users → Actions → Software access**). Each user
 activates their own licence in MATLAB the first time.

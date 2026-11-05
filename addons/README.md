@@ -68,7 +68,7 @@ gui: false                  # true: only useful with a desktop; not offered with
 | Key | What | Systems | Needs on the server |
 |---|---|---|---|
 | `matlab` (restricted) | MATLAB runtime libraries, launcher, `/opt/matlab` (desktop only) | Ubuntu, Debian | `make install-matlab` (deploy folder) |
-| `python-science` | conda in every shell, JupyterLab and Spyder launchers, `/opt/conda` | all but Alpine | `make install-conda` (deploy folder) |
+| `python-science` | conda in every shell, JupyterLab and Spyder launchers, `/opt/conda` | all but Alpine | the installer (`make install-conda`; ADR 0047) |
 | `vscode` | Visual Studio Code from Microsoft's repository (desktop only) | Ubuntu, Debian | – |
 | `devtools` | compilers (gcc, gfortran), cmake, pkg-config, git-gui, gitk, git-lfs | all | – |
 | `rstudio` | R from Ubuntu, RStudio Desktop from Posit (desktop only) | Ubuntu, Debian | – |
