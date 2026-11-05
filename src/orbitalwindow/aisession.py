@@ -333,6 +333,46 @@ def llamacpp_spec(
     }
 
 
+def ensure_network(client: docker.DockerClient) -> Any:
+    """Return the session network ``ow-ai``, creating it if needed (internal: no internet).
+
+    The LLM gateway runs on it all the time, so it exists also without a session.
+
+    Args:
+        client: Docker client.
+
+    Returns:
+        The Docker network.
+    """
+    for net in client.networks.list(names=[NETWORK]):
+        if net.name == NETWORK:
+            return net
+    return client.networks.create(
+        NETWORK, driver="bridge", internal=True, labels={"ow.managed": "true"}
+    )
+
+
+def join_network(network: Any, containers: tuple[str, ...]) -> None:
+    """Connect containers to a network, skipping those already on it or not here.
+
+    Args:
+        network: Docker network.
+        containers: Container names.
+    """
+    network.reload()
+    present = {member.name for member in network.containers}
+    for name in containers:
+        if name in present:
+            continue
+        try:
+            network.connect(name)
+        except docker.errors.NotFound:
+            log.info("%s is not a container here; not joining %s", name, network.name)
+        except docker.errors.APIError as exc:
+            if "already exists" not in str(exc):
+                raise
+
+
 @dataclass(frozen=True)
 class SessionState:
     status: str  # stopped | starting | running | failed
@@ -571,12 +611,7 @@ class AiSessions:
         Returns:
             The Docker network.
         """
-        for net in self._client.networks.list(names=[NETWORK]):
-            if net.name == NETWORK:
-                return net
-        return self._client.networks.create(
-            NETWORK, driver="bridge", internal=True, labels={"ow.managed": "true"}
-        )
+        return ensure_network(self._client)
 
     def _connect(self, network: Any, container: str) -> None:
         """Connect a container to a network, if not already connected.
@@ -585,14 +620,7 @@ class AiSessions:
             network: Docker network.
             container: Container name.
         """
-        network.reload()
-        if any(member.name == container for member in network.containers):
-            return
-        try:
-            network.connect(container)
-        except docker.errors.APIError as exc:
-            if "already exists" not in str(exc):
-                raise
+        join_network(network, (container,))
 
     def _ensure_image(self, image: str) -> None:
         """Pull the vLLM image unless it is already there (it is large: tens of GB).

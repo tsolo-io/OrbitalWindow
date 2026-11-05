@@ -172,6 +172,10 @@ services:
       OW_VLLM_IMAGE: ${OW_VLLM_IMAGE:-vllm/vllm-openai:v0.30.0}
       OW_VLLM_INTEL_IMAGE: ${OW_VLLM_INTEL_IMAGE:-vllm/vllm-openai-xpu:v0.30.0}
       OW_OPENWEBUI_IMAGE: ${OW_OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.11.4}
+      # The LLM gateway (LiteLLM, ADR 0045); keep the digest when you change the version.
+      OW_LITELLM_IMAGE: ${OW_LITELLM_IMAGE:-ghcr.io/berriai/litellm-database:v1.106.6@sha256:7ef0e78fe00ad5ea7ea45666cc1d1f02cb7076aee69091543bf397de52db33ce}
+      # LiteLLM's admin pages, for an SSH tunnel only (docs/content/admin/05-ai.md).
+      OW_LLM_ADMIN_UI: ${OW_LLM_ADMIN_UI:-false}
       OW_AI_ENGINE: ${OW_AI_ENGINE:-vllm}
       OW_LLAMACPP_BUILD: ${OW_LLAMACPP_BUILD:-b11382}
       OW_CODE_SERVER_IMAGE: ${OW_CODE_SERVER_IMAGE:-lscr.io/linuxserver/code-server:4.140.0-ls368}

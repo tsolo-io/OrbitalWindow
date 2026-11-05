@@ -48,7 +48,7 @@ def help_page(request: Request, slug: str = "") -> RedirectResponse | None:
     state = svc.ai.state()
     running = state.status == "running"
     values |= {
-        "chat_api": svc.chat_api_url(),
+        "api_url": svc.api_url(),
         "model": state.repo if running else "<the model name on the dashboard>",
         "context": str(state.context) if running and state.context else "32768",
     }

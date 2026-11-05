@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0045 An LLM gateway (LiteLLM) in front of the models
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-04
 
 ## Context
@@ -49,7 +49,7 @@ easy way to get a personal key with the chat, but it has limits:
 - **Database.** LiteLLM keeps virtual keys, budgets and usage in PostgreSQL: its own database
   `litellm` and role on the shared server `ow-db` (ADR 0046), in the system backups.
 
-### To check before this ADR is accepted
+### Checks (results on #79)
 A short test on the GPU node, with vLLM and with llama.cpp:
 1. `/v1/completions` with a FIM prompt goes through unchanged (Zed and Continue).
 2. Virtual keys: make, block and delete from OrbitalWindow; a blocked key gets 401.
@@ -59,6 +59,31 @@ A short test on the GPU node, with vLLM and with llama.cpp:
    the key with the gateway (`/key/info`), and Traefik sends `/v1/infill` to the llama.cpp session.
    Otherwise llama.vscode is not supported, and the help names Continue.
 5. Memory and start time of the gateway and the database.
+
+Results: no request goes to the internet; limits are not used (Martin: no limits until there is
+a problem). `/infill` is not supported: llama.vscode is not supported, and the help names Continue.
+
+| | llama.cpp (2026-11-04, Arc A770) | vLLM (2026-11-05, RTX 5080) |
+|---|---|---|
+| Model | `unsloth/Qwen3.5-9B-GGUF` | `Qwen/Qwen2.5-Coder-3B` |
+| Chat, FIM with the model's tokens, streaming | pass | pass |
+| `/v1/completions` with `suffix` | ignored (plain continuation) | refused by vLLM (400) |
+| Keys: made, blocked, deleted | pass | pass |
+| Time added per request | about 9 ms | about 16 ms |
+| Gateway memory and start | about 575 MiB, 12 s | about 590 MiB, 21 s |
+
+So editors must build the FIM prompt with the model's tokens (Zed and Continue do); a client that
+sends `suffix` does not work with vLLM.
+
+### As built (#79)
+- Users' keys are values OrbitalWindow makes (`sk-ow-…`) and keeps in its table `llm_keys`, so the
+  dashboard can show them again; the gateway checks them. The reconcile loop makes the gateway
+  match: a missing key is added, the blocked state follows the account, keys of deleted users go.
+- The master key and the salt key (it encrypts the model entries) are in `state/` and in the
+  system backups (ADR 0046).
+- Traefik routes only `/v1/models`, `/v1/chat/completions`, `/v1/completions` and
+  `/v1/embeddings` to it; its admin API and pages stay inside.
+- The dashboard shows the gateway key only. The chat's own `sk-` keys still work at `:8443/api`.
 
 ## Alternatives
 The search was on 2026-11-04. Most comparisons are written by the vendors, so the details must be

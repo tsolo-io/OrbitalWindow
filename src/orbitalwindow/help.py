@@ -18,7 +18,7 @@ PLACEHOLDERS = (
     "samba_path",
     "ssh_cmd",
     "groups",
-    "chat_api",
+    "api_url",
     "model",
     "context",
 )
