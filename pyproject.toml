@@ -17,7 +17,7 @@ requires-python = ">=3.14,<3.15"
 dependencies = [
   "fastapi>=0.143",
   "nicegui>=3.18",
-  "duckdb>=1.5",
+  "psycopg[binary]>=3.3.6",
   "docker>=7.2",
   "argon2-cffi>=25.1",
   "itsdangerous>=2.2",

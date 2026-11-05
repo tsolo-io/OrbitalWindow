@@ -23,12 +23,13 @@ from urllib.parse import quote
 import docker
 import httpx2
 
-from . import aisession
+from . import aisession, pg
 from .config import Settings
 
 log = logging.getLogger(__name__)
 
 CONTAINER = "ow-openwebui"
+DB_NAME = "openwebui"  # its database and role on the PostgreSQL server
 PORT = 8080
 ROUTER = "ow-chat"
 API_ROUTER = "ow-chat-api"
@@ -166,9 +167,14 @@ class ChatKeys:
 
 
 def chat_spec(
-    settings: Settings, api_key: str, secret_key: str, hostname: str, tools: bool = True
+    settings: Settings,
+    api_key: str,
+    secret_key: str,
+    hostname: str,
+    tools: bool = True,
+    database_url: str = "",
 ) -> dict[str, Any]:
-    """Build the ``containers.run`` arguments for Open WebUI.
+    """Build the ``containers.create`` arguments for Open WebUI.
 
     Args:
         settings: Application settings (image, data folder, Traefik entrypoint, port).
@@ -177,9 +183,11 @@ def chat_spec(
         hostname: Host name users reach OrbitalWindow on.
         tools: Whether vLLM can call tools for the model; if not, Open WebUI describes tools in
             the prompt instead of sending them (vLLM refuses those requests).
+        database_url: Open WebUI's own database on the PostgreSQL server (ADR 0046); empty for
+            its SQLite file in the data folder.
 
     Returns:
-        Keyword arguments for ``client.containers.run`` (including ``image``).
+        Keyword arguments for ``client.containers.create`` (including ``image``).
     """
     entry = settings.chat_entrypoint
     labels = {
@@ -235,11 +243,13 @@ def chat_spec(
     }
     if not tools:
         environment["DEFAULT_MODEL_PARAMS"] = '{"function_calling": "legacy"}'
+    if database_url:
+        # Users, chats and keys; the data folder keeps uploads and the vector index.
+        environment["DATABASE_URL"] = database_url
     kwargs: dict[str, Any] = {
         "image": settings.openwebui_image,
         "name": CONTAINER,
         "hostname": CONTAINER,
-        "detach": True,
         "environment": environment,
         "volumes": {str(settings.chat_data_dir): {"bind": DATA_MOUNT, "mode": "rw"}},
         "network": aisession.NETWORK,
@@ -324,7 +334,9 @@ class Chat:
                 log.info("stopping the AI chat")
                 container.remove(force=True)
             return
-        spec = chat_spec(self._settings, api_key, self.secret_key(), hostname, tools)
+        pg.ensure_database(self._settings, DB_NAME, DB_NAME)
+        database_url = pg.program_url(self._settings, DB_NAME)
+        spec = chat_spec(self._settings, api_key, self.secret_key(), hostname, tools, database_url)
         if container is not None:
             if container.labels.get(LABEL_SPEC) == spec["labels"][LABEL_SPEC]:
                 if container.status != "running":
@@ -340,7 +352,10 @@ class Chat:
             log.info("pulling %s", image)
             self._client.images.pull(image)
         log.info("starting the AI chat")
-        self._client.containers.run(image, **spec)
+        # Created first, so it is on the database network before it starts.
+        container = self._client.containers.create(image, **spec)
+        self._client.networks.get(pg.NETWORK).connect(container)
+        container.start()
         self._connect_members()
 
     def _connect_members(self) -> None:

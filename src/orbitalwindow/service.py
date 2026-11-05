@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import docker
+import psycopg
 
 from . import disk, userenv
 from . import fit as fit_mod
@@ -39,6 +40,7 @@ from .aisession import (
 )
 from .auth import LoginRateLimiter, Sessions, generate_password, load_or_create_secret
 from .auth import authenticate as auth_authenticate
+from .backups import Backups
 from .benchmarks import ACTIVE as BENCH_ACTIVE
 from .benchmarks import CONTEXT as BENCH_CONTEXT
 from .benchmarks import SUITES, Benchmarker
@@ -47,7 +49,7 @@ from .catalog import Catalog
 from .chat import Chat, ChatKeyError, ChatKeys
 from .codeserver import CodeServers, CodeState, code_path
 from .config import Settings
-from .db import Database
+from .db import Database, open_database
 from .desktops import (
     DesktopError,
     Desktops,
@@ -108,7 +110,7 @@ class Service:
         Args:
             settings: Application settings.
             client: Docker client used for every container and image operation.
-            db: Database to use; opened from ``settings.db_path`` when None.
+            db: Database to use; OrbitalWindow's database on the server when None.
             prepare_layout: Create the host folder layout under the root before anything else.
         """
         self.settings = settings
@@ -116,7 +118,7 @@ class Service:
         self.hostops = HostOps(client, str(settings.root))
         if prepare_layout:
             self.hostops.prepare_layout(os.getuid())
-        self.db = db or Database(settings.db_path)
+        self.db = db or open_database(settings)
         self.sessions = Sessions(
             self.db, load_or_create_secret(settings.secret_path), settings.session_hours * 3600
         )
@@ -151,6 +153,7 @@ class Service:
             api_key=self.ai_api_key,
         )
         self.downloads = Downloader(client, self.db, self.models, os.getuid(), self.hf_token)
+        self.backups = Backups(client, settings, self.db)
         self._reconcile_stop = threading.Event()
 
     # --- startup -----------------------------------------------------------------------------
@@ -182,6 +185,7 @@ class Service:
         self.builder.start()
         self.downloads.start()
         self.benchmarks.start()
+        self.backups.start()
         if not self.db.scalar("SELECT count(*) FROM images"):
             try:
                 self.add_image("system", self.settings.default_desktop)
@@ -225,6 +229,7 @@ class Service:
         self.builder.stop()
         self.downloads.stop()
         self.benchmarks.stop()
+        self.backups.stop()
 
     def _reconcile_loop(self) -> None:
         """Run ``reconcile`` every ``reconcile_seconds`` until ``stop`` is called.
@@ -1232,7 +1237,7 @@ class Service:
             self.chat.ensure(
                 wanted, self.ai_api_key(), self.public_hostname(), self._model_tools(state.repo)
             )
-        except docker.errors.DockerException as exc:
+        except (docker.errors.DockerException, psycopg.Error) as exc:
             log.warning("AI chat: %s", exc)
 
     def _model_tools(self, repo: str) -> bool:
@@ -1403,7 +1408,8 @@ class Service:
             Benchmark rows with ``suite_label`` and ``seconds`` (run time) added.
         """
         rows = self.db.all(
-            "SELECT *, epoch(coalesce(finished_at, now())) - epoch(started_at) AS seconds "
+            "SELECT *, extract(epoch FROM coalesce(finished_at, localtimestamp) - started_at) "
+            "AS seconds "
             f"FROM benchmarks ORDER BY status IN {BENCH_ACTIVE!r} DESC, id DESC LIMIT ?",
             [limit],
         )
@@ -1419,7 +1425,8 @@ class Service:
             The row (with ``suite_label`` and ``seconds``), or None.
         """
         row = self.db.one(
-            "SELECT *, epoch(coalesce(finished_at, now())) - epoch(started_at) AS seconds "
+            "SELECT *, extract(epoch FROM coalesce(finished_at, localtimestamp) - started_at) "
+            "AS seconds "
             "FROM benchmarks WHERE id = ?",
             [bench_id],
         )
@@ -1617,8 +1624,9 @@ class Service:
                     "DELETE FROM user_env WHERE user_id = ? AND name = ?", [user_id, old_name]
                 )
             self.db.execute(
-                "INSERT OR REPLACE INTO user_env (user_id, name, value, updated_at) "
-                "VALUES (?, ?, ?, current_timestamp)",
+                "INSERT INTO user_env (user_id, name, value, updated_at) "
+                "VALUES (?, ?, ?, localtimestamp) ON CONFLICT (user_id, name) "
+                "DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                 [user_id, name, value],
             )
         renamed = f" (was {old_name})" if old_name not in (None, name) else ""
@@ -2109,7 +2117,7 @@ class Service:
         like = f"%{search.strip()}%"
         return self.db.all(
             "SELECT * FROM audit WHERE ? = '%%' OR actor ILIKE ? OR action ILIKE ? "
-            "OR target ILIKE ? OR detail ILIKE ? ORDER BY ts DESC LIMIT ?",
+            "OR target ILIKE ? OR detail ILIKE ? ORDER BY ts DESC, id DESC LIMIT ?",
             [like, like, like, like, like, limit],
         )
 

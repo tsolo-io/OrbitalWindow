@@ -107,9 +107,7 @@ def test_service_shows_and_creates_keys(service, users, webui, monkeypatch):
     key = service.create_chat_key("user1", user1)
     assert service.chat_access(user1)["key"] == key
     assert service.create_chat_key("user1", user1, renew=True) != key
-    actions = service.db.all(
-        "SELECT action FROM audit WHERE action LIKE 'chat.key.%' ORDER BY rowid"
-    )
+    actions = service.db.all("SELECT action FROM audit WHERE action LIKE 'chat.key.%' ORDER BY id")
     assert [row["action"] for row in actions] == ["chat.key.create", "chat.key.renew"]
 
 

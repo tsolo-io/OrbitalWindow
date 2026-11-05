@@ -84,6 +84,27 @@ services:
       - traefik-ca:/ca
     networks: [gateway]
 
+  # PostgreSQL for OrbitalWindow, Open WebUI and the LLM gateway, one database each (ADR 0046).
+  # Only on its own internal network; OrbitalWindow connects the programs that use it.
+  db:
+    image: ${OW_DB_IMAGE:-postgres:18.6-alpine3.24}
+    container_name: ow-db
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_PASSWORD: ${OW_DB_PASSWORD:?run make update (or make start) to add OW_DB_PASSWORD to deploy/.env}
+    volumes:
+      - db-data:/var/lib/postgresql
+    networks: [db]
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+
   # Read-only Docker API for Traefik: list/inspect containers and events only.
   socket-proxy-ro:
     image: tecnativa/docker-socket-proxy:v0.5.0
@@ -144,6 +165,8 @@ services:
       OW_DEFAULT_DESKTOP: ${OW_DEFAULT_DESKTOP:-ubuntu-xfce}
       TZ: ${TZ:-Etc/UTC}
       CONTROL_ADMIN_PASSWORD: ${CONTROL_ADMIN_PASSWORD:-}
+      OW_DB_PASSWORD: ${OW_DB_PASSWORD:?run make update (or make start) to add OW_DB_PASSWORD to deploy/.env}
+      OW_DB_IMAGE: ${OW_DB_IMAGE:-postgres:18.6-alpine3.24}
       DOCKER_HOST: tcp://socket-proxy-rw:2375
       OW_LLMFIT_IMAGE: ${OW_LLMFIT_IMAGE:-ghcr.io/alexsjones/llmfit:1.1.15}
       OW_VLLM_IMAGE: ${OW_VLLM_IMAGE:-vllm/vllm-openai:v0.30.0}
@@ -157,10 +180,16 @@ services:
       - ${OW_ROOT:-/srv/orbitalwindow}:${OW_ROOT:-/srv/orbitalwindow}
       # The desktop image context, add-ons and help pages are baked into the image. To use your
       # own add-ons, mount a folder over /opt/orbitalwindow/addons (read-only).
-    networks: [core, proxy-rw]
+    networks: [core, proxy-rw, db]
     # The server status page reads Prometheus node-exporter on the host (port 9100).
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [socket-proxy-rw, samba]
+    depends_on:
+      socket-proxy-rw:
+        condition: service_started
+      samba:
+        condition: service_started
+      db:
+        condition: service_healthy
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -316,6 +345,9 @@ networks:
     name: ow-samba
   gateway:
     name: ow-gateway
+  db:
+    name: ow-db
+    internal: true
 
 volumes:
   samba-lib:
@@ -326,3 +358,5 @@ volumes:
     name: ow-traefik-certs
   traefik-ca:
     name: ow-traefik-ca
+  db-data:
+    name: ow-db-data

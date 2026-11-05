@@ -10,7 +10,7 @@ Manage GPU-accelerated research/science desktops on Docker. Each user gets their
 (LinuxServer webtop) in the browser. OrbitalWindow is the single login where they start, stop and open it,
 pick software, and reach their files. Admins manage users, desktop images, add-ons and groups.
 
-Built with Python, FastAPI + NiceGUI and DuckDB.
+Built with Python, FastAPI + NiceGUI and PostgreSQL.
 
 - Design: [docs/content/design.md](docs/content/design.md)
 - Proof-of-concept learnings: [docs/content/poc-learnings.md](docs/content/poc-learnings.md)

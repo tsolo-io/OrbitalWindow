@@ -15,7 +15,7 @@ from orbitalwindow.users import ValidationError
 def user1(service, users):
     """Fill the package index for base image 1 and return user1."""
     service.db.execute(
-        "INSERT INTO pkg_index SELECT 1, unnest(['octave', 'gimp', 'octave-doc', 'r-base'])"
+        "INSERT INTO pkg_index SELECT 1, unnest(ARRAY['octave', 'gimp', 'octave-doc', 'r-base'])"
     )
     return users["user1"]
 

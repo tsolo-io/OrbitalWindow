@@ -252,7 +252,7 @@ def test_latest_benchmarks_and_list(downloaded):
         service.db.execute(
             "INSERT INTO benchmarks (repo, suite, status, total, started_by, plus_score, "
             "started_at, finished_at) VALUES ('a/one', 'humaneval', 'done', 164, 'boss', ?, "
-            "now(), now() + to_minutes(?))",
+            "now(), now() + make_interval(mins => ?))",
             [score, minute],
         )
     latest = service.latest_benchmarks()

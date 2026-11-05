@@ -311,7 +311,9 @@ class Benchmarker:
         """
         return float(
             self._db.scalar(
-                "SELECT epoch(now()) - epoch(started_at) FROM benchmarks WHERE id = ?", [row["id"]]
+                "SELECT extract(epoch FROM localtimestamp - started_at) FROM benchmarks "
+                "WHERE id = ?",
+                [row["id"]],
             )
             or 0
         )

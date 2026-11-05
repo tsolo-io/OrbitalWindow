@@ -103,38 +103,58 @@ next start.
 
 ## Backup and restore
 
-`make backup` saves homes, group folders, the state folder (database, keys) and the Samba
-password database into a dated folder, and removes backups older than N days. Shared software is not
-included (reinstall it with `make install-conda` / `install-matlab`). The OrbitalWindow service is stopped for a few seconds while
-the database is copied; desktops keep running.
+### System backups (Backups page)
+
+OrbitalWindow makes a **system backup** every day: open **Backups** in the admin menu.
+
+- **What is in it:** the databases (users, groups, settings, the audit log, the chats and chat
+  keys), the server's certificate authority (so the users' PCs keep trusting the server), the Samba
+  passwords, the SSH keys and the file manager settings. Users' home folders and group folders are
+  **not** in it (see *User data* below).
+- **When:** every day at 03:00 server time, by default. Set the time and how many backups to keep
+  (default 5; after each backup the oldest ones are deleted). **Back up now** makes one at once.
+- **Where:** `$OW_ROOT/backups/ow-backup-<date>-<time>.tar` on the server. **Copy them to another
+  place yourself**: use **Download** on the Backups page, `make backup` (below), or copy them as
+  root (the folder belongs to the service). A backup holds the certificate authority's key and the
+  Samba password hashes, so keep the copies safe.
+- **Switched off or failed:** you can switch the daily backup off, but then (and after a failed
+  backup) every admin page shows a warning.
+
+Restore a system backup on this server, or on a new server where OrbitalWindow was installed and
+started once (`make start`):
+
+```bash
+make restore FILE=/srv/orbitalwindow/backups/ow-backup-20261105-030000.tar
+```
+
+It checks the backup's checksums, stops OrbitalWindow, the chat, Samba and the SSH gateway for a
+moment, replaces the databases, the certificate authority and the keys, and starts the stack again.
+Running desktops keep running. Then rebuild the desktops (**Desktops → Rebuild**); users' software
+images are rebuilt automatically.
+
+### User data
+
+`make backup` copies the users' homes, the group folders and the system backups to another disk or
+share, into a dated folder, and removes copies older than N days. Shared software is not included
+(reinstall it with `make install-conda` / `install-matlab`). Nothing is stopped.
 
 ```bash
 make backup DEST=/backup/orbitalwindow KEEP=14
 ```
 
-Daily at 03:00, as an admin in the `docker` group (`crontab -e`):
+Daily at 04:00 (after the system backup), as an admin in the `docker` group (`crontab -e`):
 
 ```
-0 3 * * * make -C /opt/orbitalwindow backup DEST=/backup/orbitalwindow KEEP=14 >> /var/log/ow-backup.log 2>&1
+0 4 * * * make -C /opt/orbitalwindow backup DEST=/backup/orbitalwindow KEEP=14 >> /var/log/ow-backup.log 2>&1
 ```
 
-Copy the backup folder off the server as well. Each backup has a `SHA256SUMS` file
-(`sha256sum -c SHA256SUMS`).
-
-**Restore** (on the same or a new server with OrbitalWindow installed):
+Each copy has a `SHA256SUMS` file (`sha256sum -c SHA256SUMS`). To restore the user data:
 
 ```bash
-make stop
 B=/backup/orbitalwindow/ow-backup-<date>
 sudo tar -C /srv/orbitalwindow -xzf $B/users.tar.gz
 sudo tar -C /srv/orbitalwindow -xzf $B/groups.tar.gz
-sudo tar -C /srv/orbitalwindow -xzf $B/state.tar.gz
-docker volume create ow-samba-lib
-docker run --rm -v ow-samba-lib:/dst -v $B:/b:ro alpine:3.22 tar -C /dst -xzf /b/samba.tar.gz
-make start
 ```
-
-Then rebuild the desktops (**Desktops → Rebuild**); users' software images are rebuilt automatically.
 
 ## Locked out
 

@@ -6,6 +6,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +29,23 @@ class Settings(BaseSettings):
         None, validation_alias=AliasChoices("CONTROL_ADMIN_PASSWORD", "OW_ADMIN_PASSWORD")
     )
     admin_name: str = "admin"
+
+    # PostgreSQL server (ADR 0046). The superuser's password is OW_DB_PASSWORD (deploy/.env).
+    db_host: str = "ow-db"
+    db_port: int = 5432
+    db_user: str = "postgres"
+    db_password: SecretStr | None = None
+    db_name: str = "orbitalwindow"
+    # The server's image; backups run pg_dump from it, so the versions always match.
+    db_image: str = "postgres:18.6-alpine3.24"
+    # Docker volumes a system backup copies (deploy/compose.yaml).
+    ca_volume: str = "ow-traefik-ca"
+    samba_volume: str = "ow-samba-lib"
+    sshpiper_volume: str = "ow-sshpiper-keys"
+    # A full URL instead (tests, development); only for OrbitalWindow's own database.
+    database_url_override: SecretStr | None = Field(
+        None, validation_alias=AliasChoices("OW_DATABASE_URL")
+    )
 
     docker_host: str = Field(
         "tcp://socket-proxy-rw:2375", validation_alias=AliasChoices("OW_DOCKER_HOST", "DOCKER_HOST")
@@ -93,14 +111,22 @@ class Settings(BaseSettings):
         """
         return self.root / "state"
 
-    @property
-    def db_path(self) -> Path:
-        """Return the path of the DuckDB database.
+    def database_url(self, name: str | None = None) -> str:
+        """Return the superuser's URL for a database on the PostgreSQL server.
+
+        Args:
+            name: Database name; OrbitalWindow's own (``db_name``) when None.
 
         Returns:
-            ``<state_dir>/orbitalwindow.duckdb``.
+            ``postgresql://…``; ``OW_DATABASE_URL`` when set (then ``name`` is ignored).
         """
-        return self.state_dir / "orbitalwindow.duckdb"
+        if self.database_url_override:
+            return self.database_url_override.get_secret_value()
+        password = self.db_password.get_secret_value() if self.db_password else ""
+        return (
+            f"postgresql://{quote(self.db_user, safe='')}:{quote(password, safe='')}"
+            f"@{self.db_host}:{self.db_port}/{name or self.db_name}"
+        )
 
     @property
     def secret_path(self) -> Path:

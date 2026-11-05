@@ -164,7 +164,7 @@ def test_service_start_stop_and_disable(service, users, monkeypatch):
     assert calls == ["user1", "stop user1", "stop user1"]
     with pytest.raises(ValidationError, match="disabled"):
         service.start_code("user1", user1)
-    actions = service.db.all("SELECT action FROM audit WHERE action LIKE 'code.%' ORDER BY rowid")
+    actions = service.db.all("SELECT action FROM audit WHERE action LIKE 'code.%' ORDER BY id")
     assert [row["action"] for row in actions] == ["code.start", "code.stop"]
 
 

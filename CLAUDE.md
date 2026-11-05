@@ -42,8 +42,9 @@ and MATLAB in a desktop (needs a licence). Martin's testers will log new tickets
   - `make format` / `make lint` (or `hatch run lint:fmt` / `hatch run lint:check`): ruff.
   - `make start` / `update` / `stop` / `logs` / `status`: the compose stack, run through `deploy/Makefile` (needs `deploy/.env`).
   - `hatch run docs:build` / `hatch run docs:serve`: zensical, run as `zensical build -f docs/zensical.toml`.
-- **Database:** DuckDB, single writer (the service process). Docker access through the Docker SDK (`docker` package)
-  via a socket proxy. Never mount the raw socket into anything except the proxies.
+- **Database:** PostgreSQL (`ow-db`, one database per program; ADR 0046) through `db.py` (psycopg 3,
+  one connection and lock, `?` placeholders). Tests need a server: `OW_TEST_DATABASE_URL`, or Docker
+  for a throwaway one. Docker access through the Docker SDK (`docker` package) via a socket proxy. Never mount the raw socket into anything except the proxies.
 - **Images:** the service image is built from the root `Dockerfile` (desktop image context, add-ons and help
   pages baked in); Samba from `deploy/samba/`. Gitea is the main repository; it mirrors to
   github.com/tsolo-io/OrbitalWindow, where `.github/workflows/publish.yaml` publishes both to

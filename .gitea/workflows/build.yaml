@@ -14,6 +14,16 @@ jobs:
     runs-on: "native"
     container:
       image: gitea.tu.tsolo.net/tsolo/ubuntu:24-ci
+    # The tests use a real PostgreSQL server (ADR 0046), the same image as deploy/compose.yaml.
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
+    env:
+      OW_TEST_DATABASE_URL: postgresql://postgres:test@postgres:5432/postgres
     steps:
       - name: Check out repository code
         uses: https://gitea.com/actions/checkout@v4
