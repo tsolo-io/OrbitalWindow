@@ -101,10 +101,10 @@ def gateway_spec(
         "DATABASE_URL": database_url,
         # Models come from OrbitalWindow at runtime (/model/new), kept in the database.
         "STORE_MODEL_IN_DB": "True",
-        # Offline: the bundled price list, no telemetry, no admin pages.
+        # Offline: the bundled price list, no telemetry; admin pages only when asked for.
         "LITELLM_LOCAL_MODEL_COST_MAP": "True",
         "LITELLM_TELEMETRY": "False",
-        "DISABLE_ADMIN_UI": "True",
+        "DISABLE_ADMIN_UI": "False" if settings.llm_admin_ui else "True",
         "NO_DOCS": "True",
         "TZ": settings.tz,
     }

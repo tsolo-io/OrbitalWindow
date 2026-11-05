@@ -96,6 +96,10 @@ def test_only_the_openai_endpoints_are_routed(tmp_path):
     assert env["LITELLM_LOCAL_MODEL_COST_MAP"] == "True" and env["LITELLM_TELEMETRY"] == "False"
     assert env["STORE_MODEL_IN_DB"] == "True" and env["DATABASE_URL"] == "postgresql://x"
     assert "@sha256:" in spec["image"]  # pinned by digest
+    assert env["DISABLE_ADMIN_UI"] == "True"
+    with_ui = gateway_spec(Settings(root=tmp_path, llm_admin_ui=True), "sk-master", "sk-salt", "x")
+    assert with_ui["environment"]["DISABLE_ADMIN_UI"] == "False"
+    assert with_ui["labels"]["traefik.http.routers.ow-llm.rule"] == rule
     other = gateway_spec(Settings(root=tmp_path), "sk-other", "sk-salt", "postgresql://x")
     assert other["labels"]["ow.spec"] != labels["ow.spec"]
 

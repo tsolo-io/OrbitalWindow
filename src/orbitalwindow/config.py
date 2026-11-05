@@ -94,6 +94,9 @@ class Settings(BaseSettings):
         "ghcr.io/berriai/litellm-database:v1.106.6"
         "@sha256:7ef0e78fe00ad5ea7ea45666cc1d1f02cb7076aee69091543bf397de52db33ce"
     )
+    # LiteLLM's own admin pages (usage, keys, models). Never routed by Traefik: reach them with an
+    # SSH tunnel to the gateway on ow-ai; log in as admin with state/llm_gateway_master_key.
+    llm_admin_ui: bool = False
     chat_port: int = 8443
     chat_entrypoint: str = "ai"
 
