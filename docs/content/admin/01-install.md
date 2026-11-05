@@ -118,6 +118,7 @@ The admin account that runs OrbitalWindow needs to be in the `docker` group
 | `OW_ROOT` | Data folder for homes, groups, shared software and state (default `/srv/orbitalwindow`). Back it up. |
 | `OW_HOSTNAME` | The name (or IP) users type: `desk.example.org`. Also used for `\\host\user` and SSH. |
 | `OW_HOSTNAME_ALIASES` | Optional. More names or IP addresses of the same server, separated by spaces or commas, for example its address on a VPN. The default certificate is valid for these too. |
+| `OW_DB_PASSWORD` | Password of the database server's superuser. `make init` makes it (and `make start` adds it to an older `.env`). Keep it: the database needs it. |
 | `TZ` | Time zone, e.g. `Africa/Johannesburg`. The web pages show times in this zone. |
 | `OW_GPU_VENDOR` | `nvidia`, `amd`, `intel` or `none` (no GPU, for testing only). |
 | `OW_DEFAULT_DESKTOP` | LinuxServer webtop tag built on first start, e.g. `ubuntu-xfce` or `ubuntu-kde`. |
@@ -203,4 +204,4 @@ activates their own licence in MATLAB the first time.
 
 ## 6. Backups
 
-Schedule `make backup` (see [Operations](02-operations.md#backup-and-restore)).
+Check the daily system backup on the **Backups** page, and schedule `make backup` for the user data (see [Operations](02-operations.md#backup-and-restore)).

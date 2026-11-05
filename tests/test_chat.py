@@ -90,8 +90,12 @@ class FakeClient:
             name="ow-ai", containers=[], connected=[], reload=lambda: None
         )
         self.network.connect = self.network.connected.append
-        self.containers = SimpleNamespace(get=self._get, run=self._run)
-        self.networks = SimpleNamespace(list=lambda names=None: [self.network])
+        self.events = []  # order of creating, connecting to the database network and starting
+        self.db_network = SimpleNamespace(connect=lambda c: self.events.append("db"))
+        self.containers = SimpleNamespace(get=self._get, create=self._create)
+        self.networks = SimpleNamespace(
+            list=lambda names=None: [self.network], get=lambda name: self.db_network
+        )
         self.images = SimpleNamespace(get=self._image, pull=self.pulls.append)
 
     def _get(self, name):
@@ -104,17 +108,30 @@ class FakeClient:
         """Pretend the image is missing."""
         raise docker.errors.ImageNotFound("missing")
 
-    def _run(self, image, **kwargs):
-        """Record the run."""
+    def _create(self, image, **kwargs):
+        """Record the container; it is started later."""
         self.runs.append((image, kwargs))
-        self.current = FakeContainer(kwargs["labels"])
+        self.events.append("create")
+        self.current = FakeContainer(kwargs["labels"], status="created")
+        start = self.current.start
+
+        def started():
+            """Record the start, then start the fake."""
+            self.events.append("start")
+            start()
+
+        self.current.start = started
         return self.current
 
 
 @pytest.fixture
-def chat(tmp_path):
-    """A Chat with a fake Docker client and its data in tmp_path."""
-    return Chat(FakeClient(), Settings(root=tmp_path, hostname="desk.test"))
+def chat(tmp_path, monkeypatch):
+    """A Chat with a fake Docker client and its data in tmp_path; no database server."""
+    made = []
+    monkeypatch.setattr("orbitalwindow.chat.pg.ensure_database", lambda *args: made.append(args))
+    chat = Chat(FakeClient(), Settings(root=tmp_path, hostname="desk.test"))
+    chat.made_databases = made
+    return chat
 
 
 def test_chat_follows_the_session(chat, tmp_path):
@@ -135,6 +152,16 @@ def test_chat_follows_the_session(chat, tmp_path):
     chat.ensure(False, "k2", "desk.test")
     assert client.current.removed and not chat.ready()
     assert client.runs[0][1]["name"] == CONTAINER
+
+
+def test_chat_uses_its_own_database_role(chat, tmp_path):
+    """Open WebUI gets its own database role and joins the database network before it starts."""
+    chat.ensure(True, "k1", "desk.test")
+    assert [args[1:] for args in chat.made_databases] == [("openwebui", "openwebui")]
+    password = (tmp_path / "state" / "db_openwebui_password").read_text().strip()
+    url = chat._client.runs[0][1]["environment"]["DATABASE_URL"]
+    assert url == f"postgresql://openwebui:{password}@ow-db:5432/openwebui"
+    assert chat._client.events == ["create", "db", "start"]
 
 
 def test_stopped_chat_container_is_started_again(chat):

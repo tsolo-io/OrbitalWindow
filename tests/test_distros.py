@@ -83,7 +83,8 @@ def fedora_image(service) -> int:
         "'ready', now(), 'sha256:f', false, 'dnf') RETURNING id"
     )
     service.db.execute(
-        "INSERT INTO pkg_index SELECT ?, unnest(['ImageMagick', 'imagemagick-libs', 'octave'])",
+        "INSERT INTO pkg_index "
+        "SELECT ?, unnest(ARRAY['ImageMagick', 'imagemagick-libs', 'octave'])",
         [image_id],
     )
     return image_id

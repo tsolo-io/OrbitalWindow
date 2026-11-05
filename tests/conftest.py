@@ -2,9 +2,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import itertools
+import os
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -204,10 +208,98 @@ def settings(tmp_path) -> Settings:
     )
 
 
+TEST_DB_IMAGE = "postgres:18.6-alpine3.24"  # as deploy/compose.yaml
+_test_db_numbers = itertools.count(1)
+
+
+def _start_test_server():
+    """Start a throwaway PostgreSQL container for the tests (data on tmpfs, no fsync).
+
+    Returns:
+        The container and the superuser's URL of its ``postgres`` database.
+    """
+    import docker
+
+    client = docker.from_env()
+    container = client.containers.run(
+        TEST_DB_IMAGE,
+        ["-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"],
+        detach=True,
+        auto_remove=True,
+        environment={"POSTGRES_PASSWORD": "test"},
+        tmpfs={"/var/lib/postgresql": ""},
+        ports={"5432/tcp": ("127.0.0.1", None)},
+        labels={"ow.test": "true"},
+    )
+    container.reload()
+    port = container.attrs["NetworkSettings"]["Ports"]["5432/tcp"][0]["HostPort"]
+    url = f"postgresql://postgres:test@127.0.0.1:{port}/postgres"
+    deadline = time.monotonic() + 60
+    while True:
+        try:
+            psycopg.connect(url, connect_timeout=2).close()
+            # The entrypoint restarts the server once after initdb; wait for the final one.
+            if (
+                "database system is ready to accept connections"
+                in container.logs().decode().split("PostgreSQL init process complete")[-1]
+            ):
+                return container, url
+        except psycopg.OperationalError:
+            pass
+        if time.monotonic() > deadline:
+            container.stop()
+            raise RuntimeError("the test PostgreSQL server did not start")
+        time.sleep(0.3)
+
+
+@pytest.fixture(scope="session")
+def pg_server():
+    """Return the superuser URL of a test server's ``postgres`` database, with a template.
+
+    ``OW_TEST_DATABASE_URL`` (CI) names a server to use; otherwise a container is started.
+    The template database ``ow_template`` holds the migrated schema, so each test's database is a
+    quick copy of it.
+    """
+    container = None
+    url = os.environ.get("OW_TEST_DATABASE_URL")
+    if not url:
+        container, url = _start_test_server()
+    with psycopg.connect(url, autocommit=True) as con:
+        con.execute("DROP DATABASE IF EXISTS ow_template WITH (FORCE)")
+        con.execute("CREATE DATABASE ow_template")
+    Database(url.rsplit("/", 1)[0] + "/ow_template").close()
+    yield url
+    if container is not None:
+        container.stop(timeout=2)
+
+
 @pytest.fixture
-def service(settings) -> Service:
-    """Return a Service with an in-memory database, fakes and one ready base image."""
-    svc = Service(settings, MagicMock(), db=Database(":memory:"), prepare_layout=False)
+def db_url(pg_server):
+    """Return the URL of a new, migrated, empty database for one test."""
+    name = f"ow_test_{os.getpid()}_{next(_test_db_numbers)}"
+    with psycopg.connect(pg_server, autocommit=True) as con:
+        con.execute(f"CREATE DATABASE {name} TEMPLATE ow_template")
+    yield pg_server.rsplit("/", 1)[0] + "/" + name
+    with psycopg.connect(pg_server, autocommit=True) as con:
+        con.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
+
+
+@pytest.fixture
+def database(db_url) -> Database:
+    """Return a connected, migrated, empty database for one test."""
+    db = Database(db_url)
+    yield db
+    db.close()
+
+
+@pytest.fixture
+def service(settings, database, monkeypatch) -> Service:
+    """Return a Service with an empty database, fakes and one ready base image.
+
+    The other programs' databases (Open WebUI's) are not made: there is no ``ow-db`` here.
+    """
+    monkeypatch.setattr("orbitalwindow.chat.pg.ensure_database", lambda *args: None)
+    svc = Service(settings, MagicMock(), db=database, prepare_layout=False)
     svc.samba = FakeSamba()  # type: ignore[assignment]
     svc.hostops = FakeHostOps()  # type: ignore[assignment]
     svc.files = FakeFiles()  # type: ignore[assignment]

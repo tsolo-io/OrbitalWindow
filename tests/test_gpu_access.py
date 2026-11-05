@@ -58,7 +58,7 @@ def test_remove_gpu_access_removes_ai_manager(service, users):
     service.set_gpu_access("boss", uid, False)
     row = service.db.one("SELECT gpu_access, is_ai_manager FROM users WHERE id = ?", [uid])
     assert row == {"gpu_access": False, "is_ai_manager": False}
-    actions = service.db.all("SELECT action FROM audit WHERE target = 'user1' ORDER BY rowid")
+    actions = service.db.all("SELECT action FROM audit WHERE target = 'user1' ORDER BY id")
     assert [a["action"] for a in actions][-3:] == [
         "user.ai_manager",
         "user.not_ai_manager",

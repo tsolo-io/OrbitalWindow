@@ -46,8 +46,8 @@ easy way to get a personal key with the chat, but it has limits:
   release, with a note on the dashboard, and are then turned off (`ENABLE_API_KEYS=false`).
 - **Offline and pinned.** The image is pinned by digest. The gateway uses its local model price list
   (`LITELLM_LOCAL_MODEL_COST_MAP=True`) and sends no telemetry.
-- **Database.** LiteLLM keeps virtual keys, budgets and usage in PostgreSQL. A `ow-llm-db`
-  container runs PostgreSQL with its data in `state/llm-gateway`, which is part of the state backup.
+- **Database.** LiteLLM keeps virtual keys, budgets and usage in PostgreSQL: its own database
+  `litellm` and role on the shared server `ow-db` (ADR 0046), in the system backups.
 
 ### To check before this ADR is accepted
 A short test on the GPU node, with vLLM and with llama.cpp:
@@ -82,8 +82,8 @@ checked again in the test.
   optimisation, or a hosted product). Not checked further.
 
 ## Consequences
-- **Two more containers** (`ow-llm-gateway`, `ow-llm-db`) while an AI session runs. They need
-  updates and a backup.
+- **One more container** (`ow-llm-gateway`), on the `ow-ai` and `ow-db` networks. It needs
+  updates.
 - **Supply-chain risk.** On 2026-03-24, two LiteLLM releases on PyPI (1.82.7 and 1.82.8) had a
   credential-stealing payload for about 40 minutes. The image is therefore pinned by digest,
   updated on purpose only, and has no internet access. It knows the models' keys, but no user

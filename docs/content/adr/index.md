@@ -22,7 +22,7 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0006](0006-same-path-data-root.md) | `$OW_ROOT` is mounted at the same path in the service | accepted |
 | [0007](0007-configuration.md) | Process config from the environment (pydantic-settings), runtime settings in the DB | accepted |
 | [0008](0008-auth-forms-are-plain-posts.md) | Login and password forms are plain HTTP POSTs, not NiceGUI events | accepted |
-| [0009](0009-duckdb-single-writer.md) | DuckDB with one writer process and one lock; UTC timestamps | accepted |
+| [0009](0009-duckdb-single-writer.md) | DuckDB with one writer process and one lock; UTC timestamps | superseded by 0046 |
 | [0010](0010-samba-sync.md) | Samba in a container, kept in sync by exec helpers; no stored plaintext passwords | accepted |
 | [0011](0011-gpu-vendor-and-unlimited-limits.md) | GPU vendor setting (`nvidia`/`amd`/`none`; `intel` in 0035) and "unlimited" CPU/RAM | accepted |
 | [0012](0012-software-addons-and-per-user-images.md) | Optional software as add-on folders, installed by per-user image builds | accepted |
@@ -59,3 +59,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0043](0043-distribution-github-and-installer.md) | Distribution: public images on GitHub, and an install script | accepted |
 | [0044](0044-private-ca-for-the-default-certificate.md) | A private CA signs the default certificate | accepted |
 | [0045](0045-llm-gateway.md) | An LLM gateway (LiteLLM) in front of the models | proposed |
+| [0046](0046-postgresql-and-system-backups.md) | PostgreSQL for every program, and daily system backups | accepted |

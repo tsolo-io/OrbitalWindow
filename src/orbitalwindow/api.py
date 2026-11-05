@@ -392,6 +392,31 @@ def benchmark_file(request: Request, bench_id: int, name: str) -> Response:
     )
 
 
+@router.get("/admin/backups/{name}")
+def backup_file(request: Request, name: str) -> Response:
+    """Download a system backup (admins only). The download is audited.
+
+    Args:
+        request: The request.
+        name: The backup's file name.
+
+    Returns:
+        The file, a redirect to the login page without a session, 403 or 404.
+    """
+    user = current_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/admin/backups", status_code=303)
+    if not user.is_admin:
+        return PlainTextResponse("Forbidden", status_code=403)
+    service = svc(request)
+    try:
+        path = service.backups.path(name)
+    except FileNotFoundError:
+        return PlainTextResponse("Not found", status_code=404)
+    service.db.audit(user.name, "backup.download", "", name)
+    return FileResponse(path, media_type="application/x-tar", filename=name)
+
+
 @router.get("/auth/ai")
 def auth_ai(request: Request) -> Response:
     """Traefik forwardAuth for the chat (Open WebUI): every logged-in user.

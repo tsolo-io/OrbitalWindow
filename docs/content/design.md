@@ -18,7 +18,7 @@ Research students (Windows PCs, not comfortable with a terminal) need GPU-accele
 - Samba stays in sync whenever users or passwords change.
 - cAdvisor is added for container metrics.
 
-Stack: Python, FastAPI + NiceGUI, DuckDB. It needs Docker access. Typical deployment: one server (Ubuntu 24.04, NVIDIA GPU(s), some AMD or Intel), 2–3 users, LAN only.
+Stack: Python, FastAPI + NiceGUI, PostgreSQL. It needs Docker access. Typical deployment: one server (Ubuntu 24.04, NVIDIA GPU(s), some AMD or Intel), 2–3 users, LAN only.
 
 Further services:
 - a per-user web file manager
@@ -32,7 +32,7 @@ Further services:
 ### Decisions made with the user
 | Topic | Decision |
 |---|---|
-| Container lifecycle | Docker SDK; DuckDB is the source of truth. **Start** creates a fresh container. **Stop** removes the container; the home folder stays. No per-user compose files. |
+| Container lifecycle | Docker SDK; the database is the source of truth. **Start** creates a fresh container. **Stop** removes the container; the home folder stays. No per-user compose files. |
 | Packages | Any Ubuntu package, checked against the apt package index of the chosen image |
 | Package install | When the list or desktop choice changes, build a **per-user image** `ow-user-<name>` (chosen image + apt install). Starting is then fast. |
 | Image list | Admin enters a LinuxServer webtop base tag (e.g. `ubuntu-kde`). The service builds our customised image from `deploy/image/Dockerfile`. |
@@ -52,7 +52,7 @@ Further services:
 ## Architecture
 ```
                  https://desk.<domain>  (Let's Encrypt via DNS-01)
-Browser ──443──► Traefik ─┬─ /                  ─► orbitalwindow (FastAPI + NiceGUI) ── DuckDB file
+Browser ──443──► Traefik ─┬─ /                  ─► orbitalwindow (FastAPI + NiceGUI) ── PostgreSQL (ow-db)
                           ├─ /desktop/<user>/   ─► forwardAuth(user) ─► ow-<user>:3000
                           ├─ /files/<user>/     ─► forwardAuth(user) ─► ow-files-<user> (FileBrowser Quantum)
                           ├─ /code/<user>/      ─► forwardAuth(user) ─► ow-code-<user> (code-server, on demand)
@@ -92,7 +92,7 @@ Per user: network ow-net-<user> joined by ow-<user>, ow-files-<user>, and (attac
 - Persist `/var/lib/samba` in a volume so passwords survive a Samba restart. That means no plaintext passwords need storing anywhere.
 - Triggered by: adding a user (sync + passwd), changing or resetting a password (passwd), removing a user (`smbpasswd -x` + sync).
 
-### Data model (DuckDB `$OW_ROOT/state/orbitalwindow.duckdb`, single writer = the service process)
+### Data model (PostgreSQL database `orbitalwindow` on `ow-db`, ADR 0046)
 - `users(id, name, display_name, pw_hash argon2, is_admin, disabled, session_ver, uid_gid, mac, image_id, cpus, mem_gb, created_at)`
 - `images(id, label, base_tag, image_ref, status[building|ready|failed], built_at, enabled)`
 - `pkg_index(image_id, name)`: package names from `apt-cache pkgnames` in each built image, used for autocomplete and validation
@@ -347,15 +347,15 @@ deploy/
   image/                  desktop base image: Dockerfile + root/ (custom-cont-init.d/50-ow-setup)
   samba/                  Samba image: Dockerfile, smb.conf, entrypoint, ow-sync, ow-passwd
   Makefile                start/stop/update, install-conda/-matlab, backup (what a server runs)
-  scripts/                install-conda.sh, install-matlab.sh (shared software), backup.sh
+  scripts/                install-conda.sh, install-matlab.sh (shared software), backup.sh, restore.sh
 addons/                   add-on definitions (README.md documents the format)
   matlab/ python-science/ vscode/ devtools/ rstudio/ ssh/
 docs/                     zensical.toml + content/ (design.md, poc-learnings.md, admin guide, user/ help pages)
 ```
 - **Names:** containers `ow-<user>` (desktop) and `ow-files-<user>`, network `ow-net-<user>`, images `ow-desktop:<tag>` and `ow-user-<name>:latest`, labels `ow.managed=true` and `ow.user=<user>`, cookie `ow_session`.
-- **Host data root `$OW_ROOT`** (default `/srv/orbitalwindow`): `users/<name>/` (homes), `groups/<name>/`, `shared/{matlab,conda,data,scratch}/`, `state/` (DuckDB, secret, ssh keys, samba). Back up `users/`, `groups/` and `state/`.
+- **Host data root `$OW_ROOT`** (default `/srv/orbitalwindow`): `users/<name>/` (homes), `groups/<name>/`, `shared/{matlab,conda,data,scratch}/`, `state/` (secret, ssh keys, samba), `backups/` (daily system backups, ADR 0046). The databases are on `ow-db`. Copy `users/`, `groups/` and `backups/` off the server.
 - **Versions to start from** (check for newer ones):
-  - Python: fastapi 0.143, nicegui 3.18, duckdb 1.5, docker 7.2, argon2-cffi 25.1, itsdangerous 2.2, httpx 0.28, nvidia-ml-py, pyyaml.
+  - Python: fastapi 0.143, nicegui 3.18, psycopg 3.3, docker 7.2, argon2-cffi 25.1, itsdangerous 2.2, httpx 0.28, nvidia-ml-py, pyyaml.
   - Containers: traefik v3.7.14, tecnativa/docker-socket-proxy v0.5.0, cAdvisor v0.60.x, alpine:3.22 (samba 4.21), base image `lscr.io/linuxserver/webtop:ubuntu-{xfce,kde}`.
 
 ## Implementation phases
@@ -394,4 +394,4 @@ docs/                     zensical.toml + content/ (design.md, poc-learnings.md,
 - **Group membership in the desktop:** check that s6 (the webtop init system) keeps the supplementary groups the init hook adds to `abc`. If not, set the groups with `group_add` on the container.
 - **RStudio on Ubuntu 26.04:** check that Posit's `.deb` installs.
 - **Auto-stop of idle desktops:** out of scope. It can be added later in the reconcile loop.
-- **DuckDB** is single-writer. Fine for one process; moving to another database only touches `db.py`.
+- **PostgreSQL** (`ow-db`) holds one database per program (ADR 0046); the system backups dump them daily.

@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # 0009 DuckDB with one writer process and one lock; UTC timestamps
 
-- Status: accepted
+- Status: superseded by [0046](0046-postgresql-and-system-backups.md)
 - Date: 2026-10-09
 
 ## Context

@@ -183,6 +183,7 @@ def frame(auth: PageAuth, title: str) -> None:
                     ("Add-ons", "/admin/addons"),
                     ("Groups", "/admin/groups"),
                     ("Settings", "/admin/settings"),
+                    ("Backups", "/admin/backups"),
                     ("System", "/admin/system"),
                 ):
                     ui.link(text, url).classes("text-white no-underline")
@@ -194,6 +195,13 @@ def frame(auth: PageAuth, title: str) -> None:
             ui.link("Help", "/help").classes("text-white no-underline mr-2")
             ui.label(auth.user.display_name).classes("text-white")
             post_button("Log out", "/auth/logout", icon="logout")
+    if auth.user.is_admin:
+        warning = service().backups.warning()
+        if warning:
+            with ui.row().classes("w-full items-center gap-2 px-4 py-2 bg-orange-1 text-orange-10"):
+                ui.icon("warning")
+                ui.label(warning)
+                ui.link("Backups", "/admin/backups")
 
 
 def guarded(auth: PageAuth, fn: Callable[..., Any]) -> Callable[..., Any]:

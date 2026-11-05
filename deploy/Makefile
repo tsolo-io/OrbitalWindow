@@ -11,7 +11,8 @@
 #   make logs / status     follow the service log / show the containers
 #   make install-conda     install the shared Python science environment (python-science add-on)
 #   make install-matlab    install the shared MATLAB (matlab add-on)
-#   make backup DEST=…     back up homes, group folders, state and Samba passwords
+#   make backup DEST=…     copy homes, group folders and the newest system backups to DEST
+#   make restore FILE=…    restore a system backup (databases, CA, Samba passwords, SSH keys)
 #   make export-cert       save the server's CA certificate as orbitalwindow.crt for users' PCs
 #   make reset-admin-password [NAME=admin]   locked out? new password for an admin (#42)
 #
@@ -31,7 +32,7 @@ COMPOSE_FILES := -f compose.yaml $(if $(DEV),-f compose.dev.yaml) \
 COMPOSE ?= docker compose $(COMPOSE_FILES) --env-file .env
 SERVICE ?= orbitalwindow
 KEEP ?= 14
-.PHONY: help init start update stop restart logs status install-conda install-matlab backup \
+.PHONY: help init db-password start update stop restart logs status install-conda install-matlab backup restore \
   export-cert reset-admin-password
 
 help: ## List the targets
@@ -41,15 +42,25 @@ help: ## List the targets
 init: ## Create .env from .env.example with a generated first admin password
 	@if [ -e .env ]; then echo ".env already exists; edit it instead." >&2; exit 1; fi
 	@umask 077 && password=$$(head -c 18 /dev/urandom | base64 | tr '+/' '-_') && \
-	  sed "s/^CONTROL_ADMIN_PASSWORD=.*/CONTROL_ADMIN_PASSWORD=$$password/" .env.example > .env && \
+	  db_password=$$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n') && \
+	  sed -e "s/^CONTROL_ADMIN_PASSWORD=.*/CONTROL_ADMIN_PASSWORD=$$password/" \
+	    -e "s/^OW_DB_PASSWORD=.*/OW_DB_PASSWORD=$$db_password/" .env.example > .env && \
 	  echo "Created .env (mode 600). First admin: user admin, password $$password" && \
 	  echo "Now set OW_HOSTNAME, OW_ROOT and OW_GPU_VENDOR in .env, then run: make start"
 
-start: .env ## Start the stack
+# Stacks from before the database server (#82) have no OW_DB_PASSWORD yet: add a random one.
+db-password: .env
+	@if ! grep -q '^OW_DB_PASSWORD=.' .env; then \
+	  sed -i '/^OW_DB_PASSWORD=/d' .env && \
+	  printf '%s\n' "# Password of the database server's superuser (made by make; keep it)." \
+	    "OW_DB_PASSWORD=$$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" >> .env && \
+	  echo "Added OW_DB_PASSWORD to .env"; fi
+
+start: .env db-password ## Start the stack
 	$(COMPOSE) up -d $(if $(DEV),--build)
 	@echo "OrbitalWindow: https://$(call ENV_VALUE,OW_HOSTNAME)/"
 
-update: .env ## Pull newer images for OW_VERSION and recreate what changed
+update: .env db-password ## Pull newer images for OW_VERSION and recreate what changed
 	$(if $(DEV),,$(COMPOSE) pull)
 	$(COMPOSE) up -d $(if $(DEV),--build)
 
@@ -70,9 +81,15 @@ install-conda: .env ## Install the shared conda (SCIENCE_PACKAGES=…, FORCE=1 t
 install-matlab: .env ## Install the shared MATLAB (RELEASE=R2026b, PRODUCTS="MATLAB …")
 	OW_ROOT=$(OW_ROOT) sh scripts/install-matlab.sh $(PRODUCTS)
 
-backup: .env ## Back up to DEST (required), keeping KEEP days (default 14)
+backup: .env ## Copy user data and system backups to DEST (required), keeping KEEP days (14)
 	@[ -n "$(DEST)" ] || { echo "Usage: make backup DEST=/backup/orbitalwindow [KEEP=14]" >&2; exit 1; }
 	OW_ROOT=$(OW_ROOT) sh scripts/backup.sh "$(DEST)" $(KEEP)
+
+restore: .env ## Restore a system backup FILE (replaces the databases, CA and keys), then start
+	@[ -n "$(FILE)" ] || { echo "Usage: make restore FILE=$(OW_ROOT)/backups/ow-backup-….tar" >&2; exit 1; }
+	@OW_ROOT=$(OW_ROOT) OW_DB_IMAGE=$(or $(call ENV_VALUE,OW_DB_IMAGE),postgres:18.6-alpine3.24) \
+	  sh scripts/restore.sh "$(FILE)"
+	$(COMPOSE) up -d $(if $(DEV),--build)
 
 # Older stacks (before #74) have no ca.crt: their self-signed default.crt is exported instead.
 export-cert: ## Save the server's CA certificate as orbitalwindow.crt (install it on users' PCs)
@@ -80,7 +97,7 @@ export-cert: ## Save the server's CA certificate as orbitalwindow.crt (install i
 	  sh -c 'if [ -s /c/ca.crt ]; then cat /c/ca.crt; else cat /c/default.crt; fi' > orbitalwindow.crt
 	@echo "Saved orbitalwindow.crt"
 
-# The service is stopped while the reset runs (the database has one writer) and always started
+# The service is stopped while the reset runs (so both can't change the user) and always started
 # again. NAME, not USER: the shell already sets USER to your own login name.
 reset-admin-password: .env ## Locked out: new password for NAME (default admin), enabled and admin
 	@echo "Stopping OrbitalWindow for a moment (desktops keep running)..."
