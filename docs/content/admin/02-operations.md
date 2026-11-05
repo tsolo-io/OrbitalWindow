@@ -114,8 +114,9 @@ OrbitalWindow makes a **system backup** every day: open **Backups** in the admin
 - **When:** every day at 03:00 server time, by default. Set the time and how many backups to keep
   (default 5; after each backup the oldest ones are deleted). **Back up now** makes one at once.
 - **Where:** `$OW_ROOT/backups/ow-backup-<date>-<time>.tar` on the server. **Copy them to another
-  place yourself**: use **Download** on the Backups page, or `scp` from the server. A backup holds
-  the certificate authority's key and the Samba password hashes, so keep the copies safe.
+  place yourself**: use **Download** on the Backups page, `make backup` (below), or copy them as
+  root (the folder belongs to the service). A backup holds the certificate authority's key and the
+  Samba password hashes, so keep the copies safe.
 - **Switched off or failed:** you can switch the daily backup off, but then (and after a failed
   backup) every admin page shows a warning.
 

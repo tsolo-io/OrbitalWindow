@@ -25,8 +25,13 @@ export PGPASSWORD
 DB_NETWORK=ow-db
 STOP="orbitalwindow ow-openwebui ow-samba ow-sshpiper"
 
-[ -f "$FILE" ] || { echo "No such file: $FILE" >&2; exit 1; }
-FILE_ABS=$(cd "$(dirname "$FILE")" && pwd)/$(basename "$FILE")
+# $OW_ROOT/backups belongs to the service (mode 700): look at the file through Docker, as root.
+case $FILE in
+    /*) FILE_ABS=$FILE ;;
+    *) FILE_ABS=$PWD/$FILE ;;
+esac
+docker run --rm --network none -v "$(dirname "$FILE_ABS"):/d:ro" alpine:3.22 \
+    test -f "/d/$(basename "$FILE_ABS")" || { echo "No such file: $FILE_ABS" >&2; exit 1; }
 docker inspect -f '{{.State.Running}}' ow-db 2>/dev/null | grep -q true \
     || { echo "The database server (ow-db) is not running. Run make start first." >&2; exit 1; }
 
