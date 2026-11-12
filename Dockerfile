@@ -11,14 +11,14 @@
 #   /opt/orbitalwindow/addons  add-on definitions (addons/)
 #   /opt/orbitalwindow/help    user guide pages (docs/content/user)
 # The development compose file mounts the checkout's folders over these to try changes live.
-FROM python:3.14-slim AS build
+FROM python:3.15-slim AS build
 WORKDIR /src
 COPY pyproject.toml README.md ./
 COPY LICENSES ./LICENSES
 COPY src ./src
 RUN pip install --no-cache-dir --prefix=/install .
 
-FROM python:3.14-slim
+FROM python:3.15-slim
 COPY --from=build /install /usr/local
 COPY deploy/image /opt/orbitalwindow/image
 COPY addons /opt/orbitalwindow/addons
