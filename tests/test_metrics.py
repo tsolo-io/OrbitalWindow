@@ -253,3 +253,17 @@ def test_gpu_metrics_follow_the_vendor_setting(tmp_path):
     vendor[0] = "nvidia"
     gpus._at = 0.0  # skip the cache
     assert gpus.stats() == []  # NVML: no driver on test machines
+
+
+def test_amd_sleeping_gpu_counts_as_idle(tmp_path):
+    """A discrete GPU in runtime power saving is idle, not missing; it has no temperature."""
+    amd = fake_sysfs(tmp_path)
+    device = tmp_path / "drm" / "card1" / "device"
+    # amdgpu answers "Device or resource busy" while the GPU sleeps; a missing file reads the same.
+    (device / "gpu_busy_percent").unlink()
+    (device / "hwmon" / "hwmon3" / "temp1_input").unlink()
+    (device / "power").mkdir()
+    (device / "power" / "runtime_status").write_text("suspended\n")
+    assert amd.stats() == [
+        GpuStat(0, "AMD Radeon RX 7900 XTX", 0, 2 * 1024**3, 24 * 1024**3, None, 100)
+    ]

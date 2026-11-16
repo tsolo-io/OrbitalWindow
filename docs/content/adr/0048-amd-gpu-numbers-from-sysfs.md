@@ -26,6 +26,10 @@ the host's devices, so the service can read them as its non-root user.
 - `AmdGpus` in `metrics.py` reads those files for every DRM card with vendor `0x1002`.
   `GpuMetrics` uses it while the **GPU** setting is `amd` (the setting can change while the
   service runs). No exporter, no capability, no compose file.
+- **A sleeping GPU** (runtime power management, the normal state of an idle discrete GPU)
+  counts as idle with no temperature: amdgpu then refuses to read its load and temperature
+  ("Device or resource busy") rather than wake it, while its memory still reads. OrbitalWindow
+  does not wake it.
 - **Temperature** is the `edge` sensor, the one other tools show; the slowdown limit is its
   `crit` value, where amdgpu throttles.
 - **Built-in graphics** (APUs) are left out when there is a discrete GPU: they share system memory

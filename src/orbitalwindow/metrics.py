@@ -209,6 +209,10 @@ class AmdGpus:
     def _stat(self, device: Path, index: int) -> GpuStat | None:
         """Read one card's numbers.
 
+        An idle discrete GPU sleeps (runtime power management). amdgpu then refuses to read its
+        load and temperature ("Device or resource busy") rather than wake it; its memory still
+        reads. A sleeping GPU counts as idle, without a temperature.
+
         Args:
             device: The card's ``device`` folder.
             index: The number to give the GPU.
@@ -217,6 +221,8 @@ class AmdGpus:
             The numbers, or None if the driver does not give the card's load and memory.
         """
         busy = _read_int(device / "gpu_busy_percent")
+        if busy is None and _read(device / "power" / "runtime_status") == "suspended":
+            busy = 0
         used = _read_int(device / "mem_info_vram_used")
         total = _read_int(device / "mem_info_vram_total")
         if busy is None or used is None or total is None:
