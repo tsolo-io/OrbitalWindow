@@ -137,7 +137,9 @@ class Service:
         self.builder.on_base_ready = self._rebuild_users_of
         self.metrics = ContainerMetrics(settings.cadvisor_url)
         self.catalog = Catalog()
-        self.gpus = GpuMetrics(settings.gpu_stats_url)
+        self.gpus = GpuMetrics(
+            settings.gpu_stats_url, vendor=lambda: self.desktops.gpu_vendor().value
+        )
         self.node_exporter = NodeExporter(settings.node_exporter_url)
         self.models = ModelLibrary(settings.models_dir)
         self.hub = HubClient()
@@ -889,7 +891,7 @@ class Service:
         """Return the GPU a model would run on: the one with the most memory.
 
         Returns:
-            Its name, total and free memory, or None without GPU numbers (AMD or no GPU).
+            Its name, total and free memory, or None without GPU numbers.
         """
         stats = self.gpus.stats()
         if not stats:

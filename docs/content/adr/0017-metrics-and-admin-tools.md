@@ -31,7 +31,8 @@ with `/var/run` mounted, which would expose the Docker socket, against
   cgroups by container ID, not name; the System page in OrbitalWindow shows names.
 - GPU totals come from NVML in the service. On NVIDIA hosts `make start` adds
   `deploy/compose.nvidia.yaml`, which gives the service only the `utility` capability. Without a
-  driver (AMD, no GPU) the GPU numbers are hidden.
+  driver (AMD, no GPU) the GPU numbers are hidden. (Since ADR 0036 Intel and ADR 0048 AMD hosts
+  have their own source.)
 
 ## Consequences
 - No privileged container and no Docker or containerd socket outside the proxies.

@@ -61,3 +61,4 @@ Status is one of *proposed*, *accepted*, *superseded by NNNN*.
 | [0045](0045-llm-gateway.md) | An LLM gateway (LiteLLM) in front of the models | proposed |
 | [0046](0046-postgresql-and-system-backups.md) | PostgreSQL for every program, and daily system backups | accepted |
 | [0047](0047-shared-conda-pinned-and-swapped.md) | The shared conda: pinned per release, installed by the installer, swapped in | accepted |
+| [0048](0048-amd-gpu-numbers-from-sysfs.md) | AMD GPU numbers: read from the amdgpu driver's sysfs files | accepted |

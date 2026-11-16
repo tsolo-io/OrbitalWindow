@@ -195,4 +195,4 @@ that user name, for the rest of the 5 minutes. The block is kept in memory: the 
 | "Your software is being installed" | A build is running; see the user's build log or the Desktops page. |
 | Windows says the password is wrong | Reset the password; Windows may cache the old one (*Credential Manager*). |
 | SSH: "Connection closed" | The user's desktop is not running, or the SSH add-on is off. After 5 failed logins the gateway blocks that address for 60 minutes. |
-| GPU numbers missing | AMD or no GPU (there are none), or the vendor's compose file is not active: `compose.nvidia.yaml` (NVML) or `compose.intel.yaml` (`ow-gpu-stats`; see its log). |
+| GPU numbers missing | No GPU, or **Settings → GPU** is not the host's vendor. NVIDIA and Intel: the vendor's compose file is not active: `compose.nvidia.yaml` (NVML) or `compose.intel.yaml` (`ow-gpu-stats`; see its log). AMD: `cat /sys/class/drm/card*/device/gpu_busy_percent` on the host must give numbers (amdgpu driver). |

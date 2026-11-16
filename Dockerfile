@@ -23,6 +23,9 @@ COPY --from=build /install /usr/local
 COPY deploy/image /opt/orbitalwindow/image
 COPY addons /opt/orbitalwindow/addons
 COPY docs/content/user /opt/orbitalwindow/help
+# libdrm's amdgpu.ids names AMD GPUs in the GPU numbers (ADR 0048).
+RUN apt-get update && apt-get install -y --no-install-recommends libdrm-common \
+    && rm -rf /var/lib/apt/lists/*
 # Runs as an unprivileged user. Root-only file work (home folders) is done by short-lived
 # helper containers; see orbitalwindow/hostops.py.
 RUN useradd --system --uid 10001 --no-create-home --home-dir /nonexistent orbitalwindow
