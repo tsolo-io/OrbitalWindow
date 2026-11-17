@@ -4,7 +4,7 @@
 
 import httpx2
 
-from orbitalwindow.metrics import ContainerMetrics, GpuMetrics, GpuStat, fmt_bytes
+from orbitalwindow.metrics import AmdGpus, ContainerMetrics, GpuMetrics, GpuStat, fmt_bytes
 
 A, B, C = "a" * 64, "b" * 64, "c" * 64
 SUMMARY = {
@@ -128,3 +128,142 @@ def test_gpu_metrics_from_the_intel_exporter():
     assert gpus == [GpuStat(0, "Intel Arc A770", 37, 1024**3, 16 * 1024**3, 49, None)]
     assert GpuMetrics(url, transport(503, {})).stats() == []
     assert GpuMetrics(url, transport(200, [{"index": 0}])).stats() == []
+
+
+def fake_card(root, card, pci, files, hwmon):
+    """Add an amdgpu card to a fake sysfs.
+
+    Args:
+        root: The fake sysfs root.
+        card: The DRM card name, e.g. ``card1``.
+        pci: The card's PCI address.
+        files: Device files by name.
+        hwmon: hwmon files by name.
+    """
+    device = root / "devices" / pci
+    (device / "hwmon" / "hwmon3").mkdir(parents=True)
+    for name, value in files.items():
+        (device / name).write_text(f"{value}\n")
+    for name, value in hwmon.items():
+        (device / "hwmon" / "hwmon3" / name).write_text(f"{value}\n")
+    (root / "drm" / card).mkdir(parents=True)
+    (root / "drm" / card / "device").symlink_to(device)
+    (root / "drm" / f"{card}-DP-1").mkdir()  # a connector, not a card
+
+
+def fake_sysfs(tmp_path):
+    """Build the sysfs of the AMD production server: an RX 7900 XTX and Ryzen graphics.
+
+    Args:
+        tmp_path: pytest's temporary folder.
+
+    Returns:
+        An AmdGpus reader on the fake sysfs.
+    """
+    fake_card(
+        tmp_path,
+        "card1",
+        "0000:03:00.0",
+        {
+            "vendor": "0x1002",
+            "device": "0x744c",
+            "revision": "0xc8",
+            "gpu_busy_percent": 12,
+            "mem_info_vram_used": 2 * 1024**3,
+            "mem_info_vram_total": 24 * 1024**3,
+            "mem_info_vram_vendor": "samsung",
+        },
+        {
+            "temp1_label": "edge",
+            "temp1_input": 31000,
+            "temp1_crit": 100000,
+            "temp2_label": "junction",
+            "temp2_input": 38000,
+            "temp2_crit": 110000,
+        },
+    )
+    fake_card(
+        tmp_path,
+        "card2",
+        "0000:0f:00.0",
+        {
+            "vendor": "0x1002",
+            "device": "0x13c0",
+            "revision": "0xc1",
+            "gpu_busy_percent": 3,
+            "mem_info_vram_used": 24 * 1024**2,
+            "mem_info_vram_total": 2 * 1024**3,
+        },
+        {"temp1_label": "edge", "temp1_input": 48000},
+    )
+    kfd = tmp_path / "kfd"
+    for node, props in enumerate(
+        [
+            "cpu_cores_count 32\nsimd_count 0\nlocation_id 0\ndomain 0\n",
+            "simd_count 192\nlocation_id 768\ndomain 0\n",  # 03:00.0
+            "simd_count 4\nlocation_id 3840\ndomain 0\n",  # 0f:00.0
+        ]
+    ):
+        (kfd / str(node)).mkdir(parents=True)
+        (kfd / str(node) / "properties").write_text(props)
+    ids = tmp_path / "amdgpu.ids"
+    ids.write_text(
+        "# comment\n1.0.0\n744C,\tC8,\tAMD Radeon RX 7900 XTX\n744C,\tCC,\tAMD Radeon RX 7900 XT\n"
+    )
+    return AmdGpus(tmp_path / "drm", kfd, ids)
+
+
+def test_amd_gpu_numbers_from_sysfs(tmp_path):
+    """AMD numbers come from sysfs; the built-in graphics is left out next to a discrete GPU."""
+    assert fake_sysfs(tmp_path).stats() == [
+        GpuStat(0, "AMD Radeon RX 7900 XTX", 12, 2 * 1024**3, 24 * 1024**3, 31, 100)
+    ]
+
+
+def test_amd_index_follows_the_kfd_topology(tmp_path):
+    """The index is the HIP device number, the GPU's place among the KFD GPU nodes."""
+    amd = fake_sysfs(tmp_path)
+    kfd = tmp_path / "kfd"
+    # ROCm lists the built-in graphics first: the RX 7900 XTX is HIP device 1.
+    (kfd / "1" / "properties").write_text("simd_count 4\nlocation_id 3840\ndomain 0\n")
+    (kfd / "2" / "properties").write_text("simd_count 192\nlocation_id 768\ndomain 0\n")
+    assert [gpu.index for gpu in amd.stats()] == [1]
+
+
+def test_amd_built_in_graphics_alone_is_shown(tmp_path):
+    """A host with only built-in graphics shows it, with a fallback name."""
+    amd = fake_sysfs(tmp_path)
+    (tmp_path / "drm" / "card1" / "device" / "gpu_busy_percent").unlink()  # no numbers
+    assert amd.stats() == [GpuStat(1, "AMD GPU 0x13c0", 3, 24 * 1024**2, 2 * 1024**3, 48, None)]
+
+
+def test_amd_without_kfd_or_names(tmp_path):
+    """Without the KFD topology the PCI order numbers the GPUs; unknown IDs get a fallback name."""
+    fake_sysfs(tmp_path)
+    amd = AmdGpus(tmp_path / "drm", tmp_path / "missing", tmp_path / "missing.ids")
+    assert [(gpu.index, gpu.name) for gpu in amd.stats()] == [(0, "AMD GPU 0x744c")]
+    assert AmdGpus(tmp_path / "missing").stats() == []
+
+
+def test_gpu_metrics_follow_the_vendor_setting(tmp_path):
+    """GpuMetrics reads the amdgpu driver only while the GPU vendor setting is AMD."""
+    vendor = ["amd"]
+    gpus = GpuMetrics(vendor=lambda: vendor[0], amd=fake_sysfs(tmp_path))
+    assert [gpu.name for gpu in gpus.stats()] == ["AMD Radeon RX 7900 XTX"]
+    vendor[0] = "nvidia"
+    gpus._at = 0.0  # skip the cache
+    assert gpus.stats() == []  # NVML: no driver on test machines
+
+
+def test_amd_sleeping_gpu_counts_as_idle(tmp_path):
+    """A discrete GPU in runtime power saving is idle, not missing; it has no temperature."""
+    amd = fake_sysfs(tmp_path)
+    device = tmp_path / "drm" / "card1" / "device"
+    # amdgpu answers "Device or resource busy" while the GPU sleeps; a missing file reads the same.
+    (device / "gpu_busy_percent").unlink()
+    (device / "hwmon" / "hwmon3" / "temp1_input").unlink()
+    (device / "power").mkdir()
+    (device / "power" / "runtime_status").write_text("suspended\n")
+    assert amd.stats() == [
+        GpuStat(0, "AMD Radeon RX 7900 XTX", 0, 2 * 1024**3, 24 * 1024**3, None, 100)
+    ]
