@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Tsolo.io
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Configuration file for `prek`, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-added-large-files" },
+  { id = "check-yaml" },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+  { id = "python-lint", name = "Lint Python", language = "system", entry = "make format", types = ["python"], verbose = false },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+  { id = "spelling", name = "Spellcheck system", language = "system", entry = "make spelling", verbose = false },
+]
