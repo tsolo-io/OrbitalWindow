@@ -90,6 +90,7 @@ nav = [
     { "0046 PostgreSQL and backups" = "adr/0046-postgresql-and-system-backups.md" },
     { "0047 Shared conda" = "adr/0047-shared-conda-pinned-and-swapped.md" },
     { "0048 AMD GPU numbers" = "adr/0048-amd-gpu-numbers-from-sysfs.md" },
+    { "0049 AI usage from the gateway" = "adr/0049-ai-usage-from-the-gateway.md" },
   ] },
 ]
 

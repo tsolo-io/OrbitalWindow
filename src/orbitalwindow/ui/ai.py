@@ -150,6 +150,9 @@ def ai_page(request: Request) -> RedirectResponse | None:
     frame(auth, "AI")
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
         refresh_session = session_card(auth, svc)
+        with ui.row().classes("items-center gap-2"):
+            ui.icon("insights").classes("text-grey-8")
+            ui.link("AI usage: requests and tokens per user, model and day", "/ai/usage")
         ui.label("AI models").classes("text-h5")
         ui.label(
             "Models are downloaded from Hugging Face into a shared folder on the server. "

@@ -108,18 +108,19 @@ def test_disabling_blocks_and_deleting_removes_the_key(service, users, keys):
 
 
 def test_sync_gateway_gives_it_the_session_model_and_the_keys(service, users, monkeypatch):
-    """The reconcile step runs the gateway, gives it the running model and every user's key."""
+    """The reconcile step runs the gateway, sets it up, gives it the model and every user's key."""
     calls = []
     gateway = service.gateway
     monkeypatch.setattr(gateway, "ensure", lambda: calls.append("ensure"))
     monkeypatch.setattr(gateway, "ready", lambda: True)
+    monkeypatch.setattr(gateway, "apply_settings", lambda: calls.append("settings"))
     monkeypatch.setattr(gateway, "sync_models", lambda wanted: calls.append(wanted))
     monkeypatch.setattr(gateway, "sync_keys", lambda rows: calls.append(rows))
     monkeypatch.setattr(gateway, "add_key", lambda *args: None)
     service.create_api_key("user1", users["user1"]["id"])
     service.sync_gateway()
-    assert calls[0] == "ensure" and calls[1] == []  # no session: no model
-    assert [(row["name"], row["disabled"]) for row in calls[2]] == [("user1", False)]
+    assert calls[:3] == ["ensure", "settings", []]  # no session: no model
+    assert [(row["name"], row["disabled"]) for row in calls[3]] == [("user1", False)]
 
 
 def test_certificate_download(client, monkeypatch):
