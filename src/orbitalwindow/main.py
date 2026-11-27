@@ -115,6 +115,7 @@ def mount_ui(app: FastAPI, settings: Settings) -> None:
         admin_system,
         admin_users,
         ai,
+        ai_usage,
         benchmarks,
         dashboard,
         environment,

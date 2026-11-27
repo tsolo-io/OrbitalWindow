@@ -5,6 +5,7 @@
 """The LLM gateway (#79, ADR 0045)."""
 
 import json
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import docker
@@ -22,6 +23,7 @@ class FakeLiteLLM:
     def __init__(self):
         """Start without keys or models."""
         self.keys, self.models, self.calls = {}, {}, []
+        self.general_settings, self.days, self.logs, self.queries = {}, [], [], []
 
     def __call__(self, request):
         """Answer one request.
@@ -71,6 +73,19 @@ class FakeLiteLLM:
         if path == "/model/delete":
             del self.models[body["id"]]
             return httpx2.Response(200, json={})
+        if path == "/config/field/update":
+            assert body["config_type"] == "general_settings"
+            self.general_settings[body["field_name"]] = body["field_value"]
+            return httpx2.Response(200, json={})
+        if path == "/user/daily/activity":
+            self.queries.append(dict(request.url.params))
+            page, size = int(request.url.params["page"]), int(request.url.params["page_size"])
+            rows = self.days[(page - 1) * size : page * size]
+            more = len(self.days) > page * size
+            return httpx2.Response(200, json={"results": rows, "metadata": {"has_more": more}})
+        if path == "/spend/logs/v2":
+            self.queries.append(dict(request.url.params))
+            return httpx2.Response(200, json={"data": self.logs, "total": len(self.logs)})
         return httpx2.Response(404)
 
 
@@ -247,3 +262,34 @@ def test_ensure_starts_the_gateway_on_both_networks(tmp_path, monkeypatch):
     client.events.clear()
     gateway.ensure()
     assert "create" not in client.events
+
+
+def test_log_retention_is_set_once_per_start(litellm):
+    """The gateway keeps per-request logs for 90 days; the setting is sent once per start."""
+    fake, gateway = litellm
+    gateway.apply_settings()
+    gateway.apply_settings()
+    assert fake.general_settings == {"maximum_spend_logs_retention_period": "90d"}
+    assert fake.calls.count("/config/field/update") == 1
+
+
+def test_daily_activity_is_read_page_by_page(litellm):
+    """All pages of the per-day totals are read, for the asked days."""
+    fake, gateway = litellm
+    fake.days = [{"date": f"2026-11-{day:02d}", "metrics": {}} for day in range(1, 31)]
+    gateway_days = gateway.daily_activity(date(2026, 11, 1), date(2026, 11, 30))
+    assert len(gateway_days) == 30
+    assert fake.queries[0]["start_date"] == "2026-11-01"
+    assert fake.queries[0]["end_date"] == "2026-11-30"
+
+
+def test_failed_requests_ask_for_failures_in_the_range(litellm):
+    """Failed requests come from the request log, filtered by status and time."""
+    fake, gateway = litellm
+    fake.logs = [{"user": "tayla", "startTime": "2026-11-27T07:00:00"}]
+    rows = gateway.failed_requests(datetime(2026, 11, 20, 8), datetime(2026, 11, 27, 8, 30))
+    assert rows == fake.logs
+    query = fake.queries[0]
+    assert query["status_filter"] == "failure"
+    assert query["start_date"] == "2026-11-20 08:00:00"
+    assert query["end_date"] == "2026-11-27 08:30:00"

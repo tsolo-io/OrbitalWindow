@@ -15,12 +15,13 @@ import re
 import secrets
 import threading
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import docker
 import psycopg
 
-from . import disk, fim, userenv
+from . import disk, fim, usage, userenv
 from . import fit as fit_mod
 from . import gguf as gguf_mod
 from . import groups as groups_mod
@@ -1411,6 +1412,7 @@ class Service:
             self.gateway.ensure()
             if not self.gateway.ready():
                 return  # just started: the next round gives it the model and keys
+            self.gateway.apply_settings()
             state = self.ai.state()
             wanted = (
                 [session_model(state.repo, self.ai_api_key())] if state.status == "running" else []
@@ -1424,6 +1426,27 @@ class Service:
             )
         except (docker.errors.DockerException, psycopg.Error, GatewayError) as exc:
             log.warning("LLM gateway: %s", exc)
+
+    def ai_usage(self, period_days: int) -> tuple[usage.Report | None, list[dict[str, Any]], str]:
+        """Return the AI usage report from the LLM gateway (#86).
+
+        Args:
+            period_days: Days in the period for the per-user, per-model and per-endpoint tables.
+
+        Returns:
+            The report, the failed requests of the period (newest first), and an error text
+            ("" when the gateway answered; the report is None then only on an error).
+        """
+        today = datetime.now(UTC).date()
+        start = today - timedelta(days=usage.HISTORY_DAYS - 1)
+        try:
+            days = self.gateway.daily_activity(start, today)
+            since = datetime.now(UTC) - timedelta(days=period_days)
+            failed = self.gateway.failed_requests(since, datetime.now(UTC))
+        except GatewayError as exc:
+            log.warning("AI usage: %s", exc)
+            return None, [], "The LLM gateway did not answer. Try again soon."
+        return usage.build_report(days, today, period_days), usage.failed_rows(failed), ""
 
     def chat_ready(self) -> bool:
         """Tell whether the chat can be opened (Open WebUI is up and the model is running).

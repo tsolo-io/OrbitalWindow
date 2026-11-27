@@ -18,7 +18,9 @@ the session stops; clients keep the same URL and key whatever model runs.
 import hashlib
 import logging
 import secrets
+from datetime import date, datetime
 from typing import Any
+from urllib.parse import urlencode
 
 import docker
 import httpx2
@@ -40,6 +42,8 @@ API_RULE = (
     "Path(`/v1/models`) || PathPrefix(`/v1/models/`) || Path(`/v1/chat/completions`) "
     "|| Path(`/v1/completions`) || Path(`/v1/embeddings`)"
 )
+# The gateway deletes per-request logs older than this (#86); the per-day totals stay.
+LOG_RETENTION = "90d"
 
 
 class GatewayError(Exception):
@@ -174,6 +178,7 @@ class Gateway:
         self._client = client
         self._settings = settings
         self._http = httpx2.Client(base_url=f"http://{CONTAINER}:{PORT}", timeout=15)
+        self._settings_applied = False
 
     def _secret(self, name: str) -> str:
         """Return a secret of the gateway kept in ``state/``, making it the first time.
@@ -238,6 +243,7 @@ class Gateway:
                 aisession.join_network(network, self._members())
                 return
             container.remove(force=True)
+        self._settings_applied = False
         image = spec.pop("image")
         try:
             self._client.images.get(image)
@@ -404,3 +410,73 @@ class Gateway:
         if stale:
             log.info("LLM gateway: deleting keys of removed users: %s", ", ".join(stale))
             self._call("POST", "/key/delete", {"key_aliases": stale})
+
+    def apply_settings(self) -> None:
+        """Give the gateway the settings that have no environment variable, once per start.
+
+        LiteLLM keeps them in its database. The per-request logs are deleted after
+        ``LOG_RETENTION``; the per-day totals are in another table and stay.
+
+        Raises:
+            GatewayError: When the gateway can't be reached or refuses.
+        """
+        if self._settings_applied:
+            return
+        self._call(
+            "POST",
+            "/config/field/update",
+            {
+                "field_name": "maximum_spend_logs_retention_period",
+                "field_value": LOG_RETENTION,
+                "config_type": "general_settings",
+            },
+        )
+        self._settings_applied = True
+
+    def daily_activity(self, start: date, end: date) -> list[dict[str, Any]]:
+        """Return the gateway's per-day usage totals, with breakdowns by model, endpoint and key.
+
+        Args:
+            start: First day (UTC, as the gateway counts days).
+            end: Last day, included.
+
+        Returns:
+            One row per day with use: ``date``, ``metrics`` and ``breakdown`` (LiteLLM's
+            ``/user/daily/activity``).
+
+        Raises:
+            GatewayError: When the gateway can't be reached or refuses.
+        """
+        days: list[dict[str, Any]] = []
+        for page in range(1, 100):
+            query = urlencode(
+                {"start_date": start.isoformat(), "end_date": end.isoformat(),
+                 "page": page, "page_size": 1000}
+            )  # fmt: skip
+            answer = self._call("GET", f"/user/daily/activity?{query}") or {}
+            days += answer.get("results", [])
+            if not answer.get("metadata", {}).get("has_more"):
+                break
+        return days
+
+    def failed_requests(self, start: datetime, end: datetime, limit: int = 200) -> list[dict]:
+        """Return the newest failed requests in a time range.
+
+        Args:
+            start: Start of the range (UTC).
+            end: End of the range (UTC).
+            limit: Most rows to return.
+
+        Returns:
+            Request log rows (``user``, ``model``, ``call_type``, ``startTime``, ``metadata``).
+
+        Raises:
+            GatewayError: When the gateway can't be reached or refuses.
+        """
+        query = urlencode(
+            {"start_date": start.strftime("%Y-%m-%d %H:%M:%S"),
+             "end_date": end.strftime("%Y-%m-%d %H:%M:%S"),
+             "status_filter": "failure", "page": 1, "page_size": limit}
+        )  # fmt: skip
+        answer = self._call("GET", f"/spend/logs/v2?{query}") or {}
+        return list(answer.get("data", []))
