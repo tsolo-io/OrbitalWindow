@@ -9,11 +9,12 @@ build-backend = "hatchling.build"
 [project]
 name = "orbitalwindow"
 dynamic = ["version"]
-description = "Manage GPU-accelerated research/science desktop environments on Docker"
+description = "Manage GPU-accelerated research/science environments on Docker by providing virtual desktops and running inverence workloads."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSES/*"]
 requires-python = ">=3.14,<3.15"
+keywords = ['Science', 'Desktop', 'AI']
 dependencies = [
   "fastapi>=0.143",
   "nicegui>=3.18",
