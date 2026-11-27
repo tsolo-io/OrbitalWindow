@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Restore a system backup (ow-backup-<time>.tar, made by OrbitalWindow; ADR 0046) on this server:
 # the databases, the CA, Samba's passwords, the SSH gateway's keys and state/. It replaces what is
 # there now. Homes and group folders are not in a system backup (see make backup).

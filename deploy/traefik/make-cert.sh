@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Create Traefik's default certificate for OW_HOSTNAME and its TLS configuration, tls.yaml
 # (ADR 0044). A private CA, made once (10 years) and kept in /ca, signs a server certificate
 # (CA:FALSE, 825 days). Traefik serves the server certificate followed by the CA. Users' PCs trust

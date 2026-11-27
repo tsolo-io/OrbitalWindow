@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Install the shared MATLAB used by the matlab add-on into $OW_ROOT/shared/matlab, with
 # MathWorks Package Manager (mpm). No licence is needed to install: each user activates their
 # own licence in their desktop the first time they start MATLAB. Runs in a throwaway container.

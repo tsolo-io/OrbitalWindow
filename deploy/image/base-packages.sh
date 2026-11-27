@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Installs OrbitalWindow's base tools into a desktop or terminal-only image, on any distribution
 # ow-pkg supports (ADR 0034). Run during the image build:
 #   base-packages.sh desktop|terminal [nvidia|amd|intel|none]
