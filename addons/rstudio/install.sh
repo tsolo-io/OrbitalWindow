@@ -1,8 +1,9 @@
 #!/bin/sh
+
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Install the current RStudio Desktop .deb from Posit. Posit's downloads.json lists an installer
 # per Ubuntu codename; use ours, else the newest Ubuntu build listed.
 set -eu

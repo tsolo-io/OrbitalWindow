@@ -1,8 +1,9 @@
 #!/bin/sh
+
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Copy the user data and the system backups to another place (DEST, for example a disk or a
 # network share): homes (users/), group folders (groups/), and the system backups that
 # OrbitalWindow makes every day in $OW_ROOT/backups (databases, CA, Samba passwords, SSH keys;

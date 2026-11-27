@@ -1,8 +1,9 @@
 #!/bin/sh
+
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # sshd for the OrbitalWindow SSH gateway (sshpiper). Key login only, as abc, on port 2222.
 # The only accepted key is the per-user upstream key OrbitalWindow mounts at start at
 # /etc/ow/upstream.pub (read-only); users' own keys are checked by the gateway.

@@ -1,8 +1,9 @@
 #!/bin/sh
+
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Install or update the shared Miniforge used by the python-science add-on in $OW_ROOT/shared/conda
 # (#68, ADR 0047). It installs exactly deploy/conda/science.lock with the pinned Miniforge
 # (conda/miniforge.env), and does nothing when that build is already installed. install.sh runs it

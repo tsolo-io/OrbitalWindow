@@ -9,11 +9,12 @@ build-backend = "hatchling.build"
 [project]
 name = "orbitalwindow"
 dynamic = ["version"]
-description = "Manage GPU-accelerated research/science desktop environments on Docker"
+description = "Manage GPU-accelerated research/science environments on Docker by providing virtual desktops and running inverence workloads."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSES/*"]
 requires-python = ">=3.14,<3.15"
+keywords = ['Science', 'Desktop', 'AI']
 dependencies = [
   "fastapi>=0.143",
   "nicegui>=3.18",
@@ -28,6 +29,9 @@ dependencies = [
   "pyyaml",
   "uvicorn[standard]>=0.54",
   "cryptography>=50.0",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
 ]
 
 [project.scripts]
@@ -72,3 +76,18 @@ asyncio_mode = "auto"
 
 [tool.typos.default]
 extend-ignore-re = ["(?s)(#|//)\\s*spellchecker:off.*?\\n\\s*(#|//)\\s*spellchecker:on"]
+
+[tool.portfolio]
+title = "Orbitalwindow"
+summary = """
+OrbitalWindow makes it possible for users to easily run multiple desktop environments on a server
+the users needs no special software to access thier desktops.
+All access is via a web browser.
+OrbitalWindow helps with software install and launch of long running commands typical of research environments.
+For servers with a GPU, the GPU is shared amoung the users with the permission to access it.
+Thus creating an environment where researchers can fully untilise a GPU.
+OrbitalWindow also make it easy run LLM's for AI chat, coding, or research.
+The user interface allow the discovery, launch, and benchmark of models.
+"""
+differentiators = []
+roadmap = []

@@ -1,13 +1,15 @@
 #!/bin/sh
+
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # For maintainers: resolve deploy/conda/science.yml with the pinned Miniforge and write
 # deploy/conda/science.lock, the exact package list servers install (#68, ADR 0047). Commit both.
 # Runs in a throwaway container; needs Docker and internet.
 #
 # Usage: sh deploy/scripts/conda-lock.sh
+# REUSE-IgnoreStart
 set -eu
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)

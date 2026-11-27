@@ -1,8 +1,9 @@
 #!/bin/sh
+
 # SPDX-FileCopyrightText: 2026 Tsolo.io
 #
 # SPDX-License-Identifier: Apache-2.0
-#
+
 # Make conda available in every shell when /opt/conda is mounted (it is read-only and shared).
 set -eu
 # Debian, Ubuntu and Arch read /etc/bash.bashrc; Fedora reads /etc/bashrc.
